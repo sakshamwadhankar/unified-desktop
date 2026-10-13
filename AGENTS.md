@@ -82,7 +82,8 @@ logged (BUGS.md ids), and anything still unknown. Update STATE.md as your last a
 
 ## 7. Git
 
-**Do not commit or push.** The manager does all git work after reviewing your report.
+**Do not commit or push.** Git and GitHub belong to the manager, who decides what is committed
+and when, after reviewing your report.
 
 ## 8. Practical facts
 
