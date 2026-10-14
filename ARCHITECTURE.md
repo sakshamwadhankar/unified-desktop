@@ -29,7 +29,7 @@
 | H2 | **Link** | USB through Android Open Accessory (AOA), which needs no developer mode; USB tethering as fallback. Wi-Fi on the same network, with discovery. One framed protocol with separate channels: control, input, video, audio, clipboard, files. Pairing with a 6-digit code. | **[bet]** Phase 4 |
 | H3 | **Compositor + encoder** | Draws the desktop frame with OpenGL ES from every window's surface, straight into the hardware encoder's input surface (no CPU copies). H.264 by default, HEVC optional. | Phase 5 |
 | H4 | **Desktop shell** | Our own UI: taskbar, start menu, window frames (move, resize, close), notifications, Files, Settings. | Phase 6 |
-| H5 | **Android apps (hidden)** | An app-virtualization engine runs apps installed on the phone inside our process. Each Android window gets its **own virtual display**, owned by us, so Android allows it; that display's surface feeds the compositor. Input goes to our own windows. | **[bet]** Phase 1 |
+| H5 | **Android apps (hidden)** | An app-virtualization engine runs apps installed on the phone inside our process. Each Android window gets its **own virtual display**, owned by us; that display's surface feeds the compositor. Input goes to our own windows. Launching the guest activity onto that display is refused by Android (Phase 1, path A: NO-GO); showing the in-process guest's window there without an activity launch is being tested (path B). | **[bet]** Phase 1 |
 | H6 | **Windows apps** | Wine on Box64 (FEXCore optional). An X11 server inside our app; each Windows/X11 top-level window becomes its own surface for the compositor (rootless). DXVK/VKD3D on a Vulkan driver for 3D, later. | **[bet]** Phase 2 |
 | H7 | **Linux apps (x86-64)** | Box64 runs x86-64 Linux programs and their x86-64 libraries, through the same X11 server. | **[bet]** Phase 2 |
 | H8 | **Full-speed tools** | Native ARM64 programs **shipped inside the APK** as `lib*.so` (allowed to run): Node.js + code-server (VS Code), Python, Git, a shell. Their UI shows in built-in browser windows (Android WebView). | **[bet]** Phase 3 |
@@ -70,8 +70,9 @@ PC mouse / keyboard
   scripts only through an interpreter we ship.
 - **C2 No developer mode, no root, no ADB** for the user.
 - **C3 No VM.**
-- **C4 No system-only permissions.** Android 10+ lets an app launch only its own activities on
-  a virtual display it created, hence app virtualization (H5).
+- **C4 No system-only permissions.** A Play app cannot launch activities (not even its own)
+  onto a virtual display it created (LESSONS.md), so hidden Android apps must run inside our
+  process and have their windows shown by us (H5).
 - **C5 No Accessibility-service input.**
 - **C6 Licenses recorded first** (THIRD_PARTY.md).
 - **C7 The phone stays usable.** The desktop has a CPU/RAM budget and yields to what the user

@@ -32,3 +32,8 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Evidence images and videos stay out of git; describe them in text instead
+evidence/**/*.png
+evidence/**/*.jpg
+evidence/**/*.mp4

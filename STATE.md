@@ -6,12 +6,13 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 1 of 13 (hidden Android app). **CONCLUDED on the real phone: NO-GO for the
-  Phase 1 architecture.** See `docs/PHASE1_RESULT.md`. Virtualization works; the Android 16
-  display-hosting rule blocks the bet.
-- **Last updated:** 2026-10-14. Run on OnePlus CPH2619 (adb `2c0f6edc`), Android 16/SDK 36.
-- **Next action:** the OWNER/manager decides the pivot (DECISIONS.md): MediaProjection-based
-  design, a custom in-process rendering attempt, or stop. Do NOT start Phase 2 until decided.
+- **Phase:** 1 of 13 (hidden Android app). **Path A (guest activity launched onto our own
+  virtual display) is NO-GO**, confirmed on the phone and in Android's source (see "The
+  blocker"). Virtualization itself works. **Path B (show the in-process guest's window on
+  our display without launching an activity there) is not tested yet.**
+- **Last updated:** 2026-10-15, manager review of the Phase 1 run (commit 19528b3).
+- **Next action:** owner approves Phase 1 round 2 (path B, time-boxed). If path B also
+  fails, the owner decides the pivot (DECISIONS.md). Do NOT start Phase 2 until then.
 
 ## Done (verified on the phone, 2026-10-14)
 
@@ -31,11 +32,15 @@ corrects it after review.
 
 ## The blocker (why NO-GO)
 
-A Play-installed app cannot host an activity on a VirtualDisplay it creates on Android 16:
-`canHostTasks=false`, `launchDisplayId` is refused with SecurityException **even for our own
-same-UID activity**, and no app-available display flag helps (PUBLIC needs MediaProjection/
-CAPTURE_VIDEO_OUTPUT). Trusted-display / INTERNAL_SYSTEM_WINDOW are signature-only. Full
-evidence and gate table in `docs/PHASE1_RESULT.md`.
+A Play-installed app cannot launch ANY activity (not even its own) onto a virtual display
+it creates. Android's check (`ActivityTaskSupervisor.isCallerAllowedToLaunchOnDisplay`,
+AOSP main, read by the manager 2026-10-15): an app-made display is untrusted, so the
+activity needs `allowEmbedded="true"` AND the caller needs `ACTIVITY_EMBEDDING`
+(signature|privileged) or an activity of its uid already on that display (impossible for
+the first one). Trusted displays need a system permission; PUBLIC displays need a
+MediaProjection grant. Phone evidence: the SecurityException in
+`evidence/phase1/selftest_launchDisplayId_denial.txt`. Details and the manager's
+corrections in `docs/PHASE1_RESULT.md`.
 
 ## Open
 

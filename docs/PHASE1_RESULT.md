@@ -96,3 +96,31 @@ Honest adjacent options, for the manager/owner to weigh (each has a real cost):
 
 Recommendation for the manager: record this as a NO-GO for the current Phase 1 design and
 decide (DECISIONS.md) whether to pivot the architecture (MediaProjection-based) or stop.
+
+## Manager review (2026-10-15)
+
+**Accepted:** launching an activity onto our own virtual display is impossible for a Play
+app (path A). **Corrected:** the reason, and how far the NO-GO reaches.
+
+1. **The real rule** (AOSP main, `ActivityTaskSupervisor.isCallerAllowedToLaunchOnDisplay`,
+   lines ~1250-1265): an app-made display is untrusted, so a launch needs the activity's
+   `allowEmbedded="true"` AND either `ACTIVITY_EMBEDDING` (signature|privileged) or an
+   activity of the caller's uid already on that display (`DisplayContent.isUidPresent`
+   counts activities only, so the first launch can never pass). Neither `SelfTestActivity`
+   nor BlackBox's `ProxyActivity` declared `allowEmbedded`, but adding it would not be
+   enough. So the conclusion stands for path A.
+2. **Statements above not supported by the evidence:** `virtual_display_canHostTasks.txt`
+   shows `canHostTasks true` for the built-in display only; no line shows our display with
+   `canHostTasks=false`. "Trusted display is required" is also not the full rule (point 1).
+3. **Unresolved contradiction:** `guest_activity_placement.txt` lists `ProxyActivity$P0` as
+   `ResumedActivity` / focus under `Display #13` (our display) while the PNG shows the guest
+   on the real screen. Round 2 must explain this with a clean `dumpsys activity activities`
+   capture from one single run.
+4. **Not yet tested (path B):** the guest runs in OUR process, so its views are ours. Its
+   window may be shown on our display without launching an activity there, for example
+   with a `Presentation` (a public API window an app may show on its own private display)
+   or `SurfaceControlViewHost`. This is the "custom in-process rendering" option above;
+   round 2 tests it, time-boxed, before any pivot.
+5. **Rule broken:** the committed PNG (`guest_on_REAL_screen_welcome_to_tasks.png`, 132 KB)
+   goes against "never commit images". It stays (removing it from history would need a
+   force-push); future evidence images are kept out of git and described in text.

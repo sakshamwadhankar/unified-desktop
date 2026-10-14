@@ -15,8 +15,12 @@ these facts.** Re-verify anything critical: Android changes.
 - **Exec rule (W^X):** with targetSdk >= 29, files in app storage cannot be executed. Only
   `lib*.so` files shipped in the APK (`nativeLibraryDir`) can. Generating machine code into
   anonymous memory and running it (a JIT) works at targetSdk 36: proven.
-- **Virtual displays:** since Android 10 an app may launch only **its own** activities on a
-  virtual display it created. Other apps need the system-only `INTERNAL_SYSTEM_WINDOW`.
+- **Virtual displays:** a Play app can NOT launch any activity, not even its own, onto a
+  virtual display it created (proven on the phone, Android 16, 2026-10-14). App-made
+  displays are untrusted; a launch there needs `allowEmbedded` plus the
+  signature|privileged `ACTIVITY_EMBEDDING`, or an activity of the same uid already on the
+  display (AOSP `ActivityTaskSupervisor.isCallerAllowedToLaunchOnDisplay`). An app may
+  still show plain windows (e.g. a `Presentation`) on its own private display.
 - **Google's own VM (AVF / Linux Terminal)** is not available to third-party apps.
 - **Phantom process killer:** about 32 child processes system-wide (Android 12+). It can only
   be relaxed in developer options, which we may never require.
