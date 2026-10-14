@@ -1,0 +1,20 @@
+Display #0 (activities from top to bottom):
+    topResumedActivity=ActivityRecord{45714134 u0 dev.unifieddesktop.app/top.niunaijun.blackbox.proxy.ProxyActivity$P0 t23634}
+    * Hist  #0: ActivityRecord{45714134 u0 dev.unifieddesktop.app/top.niunaijun.blackbox.proxy.ProxyActivity$P0 t23634}
+      Intent { flg=0x18080000 xflg=0x4 cmp=dev.unifieddesktop.app/top.niunaijun.blackbox.proxy.ProxyActivity$P0 (has extras) mCallingUid=10189 }
+      mActivityComponent=dev.unifieddesktop.app/top.niunaijun.blackbox.proxy.ProxyActivity$P0
+      windows=[Window{82e3aa5 u0 com.google.android.apps.tasks/com.google.android.apps.tasks.ui.TaskListsActivity}]
+    mLastPausedActivity: ActivityRecord{4248826 u0 dev.unifieddesktop.app/.HarnessActivity t23633}
+    * Hist  #0: ActivityRecord{4248826 u0 dev.unifieddesktop.app/.HarnessActivity t23633}
+      Intent { flg=0x10000000 xflg=0x5 cmp=dev.unifieddesktop.app/.HarnessActivity (has extras) mCallingUid=2000 }
+      mActivityComponent=dev.unifieddesktop.app/.HarnessActivity
+      windows=[Window{4afb44c u0 dev.unifieddesktop.app/dev.unifieddesktop.app.HarnessActivity}]
+    Resumed: ActivityRecord{45714134 u0 dev.unifieddesktop.app/top.niunaijun.blackbox.proxy.ProxyActivity$P0 t23634}
+Display #13 (activities from top to bottom):
+  ResumedActivity: ActivityRecord{45714134 u0 dev.unifieddesktop.app/top.niunaijun.blackbox.proxy.ProxyActivity$P0 t23634}
+  deepestLastOrientationSource=ActivityRecord{45714134 u0 dev.unifieddesktop.app/top.niunaijun.blackbox.proxy.ProxyActivity$P0 t23634}
+  mCurrentFocus=Window{82e3aa5 u0 com.google.android.apps.tasks/com.google.android.apps.tasks.ui.TaskListsActivity}
+  mFocusedApp=ActivityRecord{45714134 u0 dev.unifieddesktop.app/top.niunaijun.blackbox.proxy.ProxyActivity$P0 t23634}
+  mObscuringWindow=Window{82e3aa5 u0 com.google.android.apps.tasks/com.google.android.apps.tasks.ui.TaskListsActivity}
+  mLastWakeLockObscuringWindow=Window{21ce1c8 u0 com.google.android.apps.tasks/com.google.android.apps.tasks.ui.TaskListsActivity EXITING}
+        * ActivityRecord{45714134 u0 dev.unifieddesktop.app/top.niunaijun.blackbox.proxy.ProxyActivity$P0 t23634}

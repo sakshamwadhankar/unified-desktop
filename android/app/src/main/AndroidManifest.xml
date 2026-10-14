@@ -1,7 +1,13 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
- <application android:name="android.app.Application" android:label="Unified Desktop Phase 1" android:theme="@style/AppTheme">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+ <application
+     android:name="dev.unifieddesktop.app.EngineApplication"
+     android:label="Unified Desktop Phase 1"
+     android:theme="@style/AppTheme"
+     tools:replace="android:label">
   <activity android:name=".HarnessActivity" android:screenOrientation="landscape" android:exported="true">
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
   </activity>
+  <activity android:name=".SelfTestActivity" android:exported="false"/>
  </application>
 </manifest>

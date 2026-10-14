@@ -1,0 +1,2 @@
+10-14 22:09:13.723 14651 14651 I Phase1  : Created display id=15 flags=8
+10-14 22:09:13.782 14651 14651 I Phase1  : ERROR self-test launch: java.lang.SecurityException: Permission Denial: starting Intent { flg=0x10000000 xflg=0x4 cmp=dev.unifieddesktop.app/.SelfTestActivity mCallingUid=10189 } from ProcessRecord{3081dc5 14651:dev.unifieddesktop.app/u0a189} (pid=14651, uid=10189) with launchDisplayId=15

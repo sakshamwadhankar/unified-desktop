@@ -8,13 +8,14 @@ AGPL needs a DECISIONS.md entry first, because it affects how the app may be shi
 | Component | Version / commit | License | Used for | Source URL |
 |---|---|---|---|---|
 | Blacks-BlackBox (including bundled BlackReflection/compiler) | `40282a7bf4500948cfd598fc67e6e63114b26dd9` | Apache License, Version 2.0 (root LICENSE read); bundled attribution audit still required before shipping | Phase 1 source integration candidate | https://github.com/Black00Z/Blacks-BlackBox |
-| Dobby | `5dfc8546954ce3b3198132ab13fddb89ee92cdd7` | Apache License, Version 2.0 (LICENSE read) | Build native hooks from source; do not use fork's prebuilt `.a` files | https://github.com/jmpews/Dobby |
+| Dobby | `a588a0df35b11f7b18ffb2070d64cd94131cc937` (2023-04-25; NOT master — master is mid-refactor and does not compile) | Apache License, Version 2.0 (LICENSE read) | Build native hooks from source; do not use fork's prebuilt `.a` files | https://github.com/jmpews/Dobby |
 | xDL | fork-bundled source at Blacks-BlackBox commit above | MIT License (upstream LICENSE read); fork has stripped headers, restore notice before distribution | Native symbol lookup | https://github.com/hexhacking/xDL |
 | FreeReflection | 3.2.2; upstream LICENSE checked at `550e36e464539fe59fcc6e49c8f54bfbf376dbfe` | MIT (actual LICENSE text read) | Engine hidden-API access | https://github.com/tiann/FreeReflection |
 | Android SDK / build tools / emulator | platform 36; build-tools 36.0.0; exact emulator version recorded if installed | Android SDK License Agreement; platform source Apache-2.0 | Build and emulator-only validation; tools not shipped | https://developer.android.com/studio/terms |
-| Android Gradle Plugin | 9.4.1 | Apache-2.0 | Android build | https://android.googlesource.com/platform/tools/base/ |
+| Android Gradle Plugin | 9.4.1 (has built-in Kotlin; no separate kotlin-android plugin) | Apache-2.0 | Android build | https://android.googlesource.com/platform/tools/base/ |
 | Gradle | 9.8.1 | Apache-2.0 | Build tool (download checksum verified) | https://github.com/gradle/gradle |
-| Kotlin | 2.4.21 (or AGP built-in version, report resolved value) | Apache-2.0 | App language/compiler and stdlib | https://github.com/JetBrains/kotlin |
+| Kotlin | AGP 9.4.1 built-in compiler (2.2.x); no explicit kotlin-stdlib pin — the round-1 pin to 2.4.21 broke the build (metadata too new for the bundled compiler) | Apache-2.0 | App language/compiler and stdlib | https://github.com/JetBrains/kotlin |
+| Android NDK | 26.1.10909125 (NDK 29 rejected Dobby's arm64 assembly) | Android SDK License Agreement | Native hook compile | https://developer.android.com/ndk |
 | AndroidX (appcompat, annotation and transitive AndroidX libraries) | engine declared appcompat 1.2.0; resolved versions to be reported | Apache-2.0 | Engine Android compatibility helpers | https://android.googlesource.com/platform/frameworks/support/ |
 | Material Components Android | 1.3.0 (engine declaration) | Apache-2.0 | Engine dependency | https://github.com/material-components/material-components-android |
 | toml4j | 0.7.2 | MIT | Engine configuration parsing | https://github.com/mwanji/toml4j |

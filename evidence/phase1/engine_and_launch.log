@@ -1,0 +1,40 @@
+10-14 22:06:24.378 11928 11928 D BlackBoxCore: Services initialized successfully
+10-14 22:06:24.380 11928 11928 D BlackBoxCore: BlackBox initialization completed in 2053ms
+10-14 22:06:24.482 11999 11999 D BlackBoxCore: BActivityThread hooks initialized successfully
+10-14 22:06:24.482 11999 11999 D BlackBoxCore: Proper initialization order ensured
+10-14 22:06:24.482 11999 11999 D BlackBoxCore: BlackBox initialization completed in 130ms
+10-14 22:06:26.010 11928 11928 I Phase1  : Created display id=13 flags=8
+10-14 22:06:26.011 11928 11928 I Phase1  : Guest com.google.android.apps.tasks: importing...
+10-14 22:06:26.359 11928 11928 I Phase1  : Guest com.google.android.apps.tasks imported; launching on display 13
+10-14 22:06:26.700 12285 12285 D BlackBoxCore: Simple crash fix installed at class loading time
+10-14 22:06:26.701 12285 12285 D BlackBoxCore: Stack trace filter installed at class loading time
+10-14 22:06:26.703 12285 12285 D BlackBoxCore: Social media app crash prevention initialized at class loading time
+10-14 22:06:26.705 12285 12285 D BlackBoxCore: DEX crash prevention initialized at class loading time
+10-14 22:06:26.708 12285 12285 D BlackBoxCore: Native crash prevention initialized at class loading time
+10-14 22:06:26.712 12285 12285 D BlackBoxCore: Comprehensive crash monitoring initialized at class loading time
+10-14 22:06:26.715 12285 12285 I BlackBoxCore: Process detected: name=dev.unifieddesktop.app:p0, hostPkg=dev.unifieddesktop.app, type=BAppClient
+10-14 22:06:26.782 12285 12285 W BlackBoxCore: Could not access ResourcesManager overlay field: No field mDisableOverlayLoading in class Landroid/app/ResourcesManager; (declaration of 'android.app.ResourcesManager' appears in /system/framework/framework.jar)
+10-14 22:06:26.782 12285 12285 W BlackBoxCore: Could not access WindowManager leak field: No field mIgnoreWindowLeaks in class Landroid/view/WindowManager; (declaration of 'android.view.WindowManager' appears in /system/framework/framework.jar!classes4.dex)
+10-14 22:06:26.782 12285 12285 D BlackBoxCore: System hooks installed successfully
+10-14 22:06:26.800 12285 12285 D BlackBoxCore: VPN network mode disabled, using normal network
+10-14 22:06:27.167 12285 12285 D BlackBoxCore: getService: activity_manager, android.os.BinderProxy@31d5b34
+10-14 22:06:27.169 12285 12285 D BlackBoxCore: getService: package_manager, android.os.BinderProxy@381dd5d
+10-14 22:06:27.175 12285 12285 D BlackBoxCore: getService: storage_manager, android.os.BinderProxy@2abc6d2
+10-14 22:06:27.176 12285 12285 D BlackBoxCore: getService: user_manager, android.os.BinderProxy@223d3a3
+10-14 22:06:27.177 12285 12285 D BlackBoxCore: getService: job_manager, android.os.BinderProxy@6cef6a0
+10-14 22:06:27.179 12285 12285 D BlackBoxCore: getService: account_manager, android.os.BinderProxy@503f259
+10-14 22:06:27.180 12285 12285 D BlackBoxCore: getService: location_manager, android.os.BinderProxy@5b7e1e
+10-14 22:06:27.181 12285 12285 D BlackBoxCore: getService: notification_manager, android.os.BinderProxy@9606ff
+10-14 22:06:27.181 12285 12285 D BlackBoxCore: Services initialized successfully
+10-14 22:06:27.184 12285 12285 D BlackBoxCore: System hooks installed successfully
+10-14 22:06:27.184 12285 12285 D BlackBoxCore: Ensuring proper initialization order...
+10-14 22:06:27.184 12285 12285 D BlackBoxCore: NativeCore initialized successfully
+10-14 22:06:27.185 12285 12285 D BlackBoxCore: ServiceManager initialized successfully
+10-14 22:06:27.186 12285 12285 D BlackBoxCore: BActivityThread hooks initialized successfully
+10-14 22:06:27.186 12285 12285 D BlackBoxCore: Proper initialization order ensured
+10-14 22:06:27.221 11928 11928 I Phase1  : Guest com.google.android.apps.tasks launch requested on display 13
+10-14 22:06:27.237 12285 12285 D BlackBoxCore: BlackBox initialization completed in 53ms
+10-14 22:06:28.222 11928 11928 I Phase1  : ERROR: no frame yet
+10-14 22:06:28.399 11999 11999 D BlackBoxCore: Executing delayed server service start
+10-14 22:06:28.409 11999 11999 D BlackBoxCore: Delayed server service start successful
+10-14 22:06:29.222 11928 11928 I Phase1  : ERROR: no frame yet

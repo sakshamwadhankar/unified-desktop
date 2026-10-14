@@ -6,32 +6,36 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 1 of 13 (hidden Android app). **Round 1 ran and was cut off** (OmniRush
-  model service unreachable mid-run). **Phase 1 is NOT passed: nothing proven on a device.**
-- **Last updated:** 2026-10-14. Manager reviewed round 1 and committed the clean work.
-- **Phone:** OnePlus CPH2619, adb serial `2c0f6edc`, Android 16 / SDK 36. **This run adb
-  saw no phone and no emulator**, so no gate was tested on hardware.
-- **Next action:** the manager writes the Phase 1 round-2 prompt (verify/fix the build,
-  then do the real guest-app integration and the device proofs).
+- **Phase:** 1 of 13 (hidden Android app). **CONCLUDED on the real phone: NO-GO for the
+  Phase 1 architecture.** See `docs/PHASE1_RESULT.md`. Virtualization works; the Android 16
+  display-hosting rule blocks the bet.
+- **Last updated:** 2026-10-14. Run on OnePlus CPH2619 (adb `2c0f6edc`), Android 16/SDK 36.
+- **Next action:** the OWNER/manager decides the pivot (DECISIONS.md): MediaProjection-based
+  design, a custom in-process rendering attempt, or stop. Do NOT start Phase 2 until decided.
 
-## Done (verified by the manager, round 1)
+## Done (verified on the phone, 2026-10-14)
 
-- **T1 engine choice** — `docs/PHASE1_ENGINE.md`: real licenses read from the LICENSE
-  files, ZENINXOP rejected (no LICENSE in the ZIP; free edition excludes Android 16/17),
-  pick is **Blacks-BlackBox** (Apache-2.0). Solid, trusted. Not yet a DECISIONS entry.
-- **T2 project skeleton (partial)** — `android/` Gradle project, `:app` + `:engine`;
-  engine brought in as pinned, SHA-256-checked source via `fetch-source.sh` (no binaries
-  tracked: tarballs, `.gradle/`, `build/`, fetched `cpp/`/`java/` are all gitignored —
-  manager confirmed with `git check-ignore`). `THIRD_PARTY.md` components registered.
-  **The build is NOT verified** and the Gradle wrapper is incomplete (see SKIPS).
+- **T1 engine** — `docs/PHASE1_ENGINE.md`: pick **Blacks-BlackBox** (Apache-2.0).
+- **T2 build (G6)** — the whole `android/` project now **builds**: Java, Kotlin, AIDL, the
+  native Dobby+BlackBox engine, dex, APK. Fixes made this session: library `targetSdk`
+  removed, AGP-9 `sourceSets` DSL, `local.properties` path, submodule names
+  (`:black-reflection`/`:compiler`), dropped the bad kotlin-stdlib pin, Bcore manifest
+  wired in, Dobby re-pinned to self-consistent `e9fe7fb` + NDK 26, two Dobby/Bcore source
+  patches (case-collision, `Logger::Shared` inline) applied reproducibly in `fetch-source.sh`.
+- **T3 virtualization** — BlackBox runs a real Play app (Google Tasks) inside our app
+  (ProxyActivity, uid 10189, process `:p0`); it renders. **But on the real screen, not our
+  display.** Evidence in `evidence/phase1/`.
+- **T5 numbers** — 2 processes (host + `:black`), TOTAL PSS ≈ 43.7 MB. No frame ever lands
+  on our display.
+- **T6** — `docs/PHASE1_PLAY_POLICY.md` (REQUIRE_SECURE_ENV, avoid QUERY_ALL_PACKAGES).
 
-## Not done in Phase 1 (the actual bet is still open)
+## The blocker (why NO-GO)
 
-- **T3** — no Google-Play guest app was launched inside our process on our display. The
-  harness only launches **our own** control activity (the agent's own README says so);
-  this does not prove virtualization. This is the core bet and it is unproven.
-- **T4** input is wired to our own activity only, not an injected guest.
-- **T5** no measurements (no device this run). **T6** Play-policy doc missing.
+A Play-installed app cannot host an activity on a VirtualDisplay it creates on Android 16:
+`canHostTasks=false`, `launchDisplayId` is refused with SecurityException **even for our own
+same-UID activity**, and no app-available display flag helps (PUBLIC needs MediaProjection/
+CAPTURE_VIDEO_OUTPUT). Trusted-display / INTERNAL_SYSTEM_WINDOW are signature-only. Full
+evidence and gate table in `docs/PHASE1_RESULT.md`.
 
 ## Open
 

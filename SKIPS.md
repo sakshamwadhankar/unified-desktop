@@ -10,11 +10,12 @@ Rules:
 
 ---
 
-| Phase / task | Why skipped | What is needed | Done when |
-|---|---|---|---|
-| P1 T2 build (G6) | Round 1 cut off; build never verified. Gradle wrapper is incomplete in the tracked tree (no `gradle/wrapper/` jar or `.properties`, no `gradlew.bat`), so `./gradlew` likely cannot bootstrap from a clean checkout. | Complete/repair the wrapper (commit `gradle-wrapper.jar` + `gradle-wrapper.properties` + `gradlew.bat`), run `fetch-source.sh`, then pass `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug`. | The three gradle tasks pass and the command/output is in the report. |
-| P1 T3 (G1) | Cut off before engine integration. Only our own control activity runs on the display; no guest app. | Integrate Blacks-BlackBox, launch a Play-installed app (simple app + a browser) on our virtual display, save ImageReader PNGs. | PNGs show the guest app on our display, on the phone. |
-| P1 T3 (G2) | Not reached. | Real-screen `screencap` at the same moment showing something else. | Paired PNG exists on the phone. |
-| P1 T4 (G3) | Input wired to our own activity only. | Inject tap + keys into the guest app from in-process, before/after PNGs. | PNGs prove the guest changed, on the phone. |
-| P1 T5 (G5) | No device this run (adb saw nothing). | Phone or emulator available; run the T5 measurements. | Numbers (first-frame ms, PSS/RSS, CPU, process count, kills) in the report. |
-| P1 T6 | Cut off. | Write `docs/PHASE1_PLAY_POLICY.md` per the prompt. | The one-page doc exists with sources. |
+Nothing skipped. Phase 1 is concluded as a NO-GO on the real phone — the gates G1/G2/G3
+cannot be met by this architecture because of an Android 16 platform rule, not because work
+was deferred. Full result and evidence: `docs/PHASE1_RESULT.md`. The next move is an
+owner/manager DECISION (pivot or stop), not a skipped task.
+
+One thing NOT re-tested (not a gate blocker): a **browser** guest (e.g. Chrome). The simple
+guest (Google Tasks) already demonstrated the blocker — it renders on the real screen, not
+our display — so a browser would hit the same display rule. Re-test only if the architecture
+pivots to a path that can host on our own surface.

@@ -1,0 +1,16 @@
+Phase 1 display-flag sweep (OnePlus CPH2619, Android 16 / SDK 36, ColorOS).
+Test: create an app-owned VirtualDisplay with each flag set, then launch OUR OWN
+SelfTestActivity (same package, same UID 10189) onto it via ActivityOptions.launchDisplayId.
+
+flags=8  (OWN_CONTENT_ONLY)      -> display CREATED; activity launch DENIED:
+                                     SecurityException Permission Denial ... launchDisplayId
+flags=1  (PUBLIC)                -> display NOT CREATED: SecurityException requires
+                                     ADD_MIRROR_DISPLAY / CAPTURE_VIDEO_OUTPUT / MediaProjection
+flags=9  (PUBLIC|OWN_CONTENT_ONLY) -> display CREATED; activity launch DENIED (launchDisplayId)
+flags=3  (PUBLIC|PRESENTATION)   -> display NOT CREATED (same MediaProjection requirement)
+flags=0  (none)                  -> display CREATED; activity launch DENIED (launchDisplayId)
+
+Conclusion: no VirtualDisplay flag combination available to an ordinary Google-Play app
+(no system/signature permission, no MediaProjection token) can host an activity. The only
+displays we can create (OWN_CONTENT_ONLY family) report canHostTasks=false and reject
+launchDisplayId even for the owner's own same-UID activity.

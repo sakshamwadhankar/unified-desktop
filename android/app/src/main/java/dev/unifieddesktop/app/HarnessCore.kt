@@ -51,11 +51,6 @@ object PairedEventDispatcher {
         is KeyEvent -> "key display=$displayId action=${event.action} code=${event.keyCode}"
         else -> "unsupported display=$displayId type=${event::class.java.simpleName}"
     }
-    fun dispatch(displayId: Int, event: Any): Boolean {
-        val a = HarnessState.target ?: return false
-        if (a.display?.displayId != displayId || a.isFinishing) return false
-        return when (event) { is MotionEvent -> a.dispatchTouchEvent(event); is KeyEvent -> a.dispatchKeyEvent(event); else -> false }
-    }
 }
 
 class HarnessCallbacks : Application.ActivityLifecycleCallbacks {
