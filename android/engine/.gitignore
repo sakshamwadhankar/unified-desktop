@@ -1,0 +1,6 @@
+vendor/
+src/main/java/
+src/main/aidl/
+src/main/cpp/
+src/main/res/
+build/

@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -eu
+VERSION=9.8.1
+SHA=dce76f55f8e251a3a1f130eb120f30b3d271de2b76c9b0729d316b5a1b6dc01f
+CACHE="${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists/gradle-$VERSION-bin"
+ZIP="$CACHE/gradle-$VERSION-bin.zip"
+if [ ! -f "$ZIP" ] || [ "$(sha256sum "$ZIP" | cut -d' ' -f1)" != "$SHA" ]; then
+  mkdir -p "$CACHE"
+  tmp="$ZIP.tmp"
+  curl -fsSL "https://services.gradle.org/distributions/gradle-$VERSION-bin.zip" -o "$tmp"
+  test "$(sha256sum "$tmp" | cut -d' ' -f1)" = "$SHA"
+  mv "$tmp" "$ZIP"
+fi
+dist="$CACHE/gradle-$VERSION"
+if [ ! -x "$dist/bin/gradle" ]; then unzip -q "$ZIP" -d "$CACHE"; fi
+exec "$dist/bin/gradle" "$@"

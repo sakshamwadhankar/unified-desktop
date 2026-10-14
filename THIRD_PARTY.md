@@ -7,7 +7,21 @@ AGPL needs a DECISIONS.md entry first, because it affects how the app may be shi
 
 | Component | Version / commit | License | Used for | Source URL |
 |---|---|---|---|---|
-| (none yet) | | | | |
+| Blacks-BlackBox (including bundled BlackReflection/compiler) | `40282a7bf4500948cfd598fc67e6e63114b26dd9` | Apache License, Version 2.0 (root LICENSE read); bundled attribution audit still required before shipping | Phase 1 source integration candidate | https://github.com/Black00Z/Blacks-BlackBox |
+| Dobby | `5dfc8546954ce3b3198132ab13fddb89ee92cdd7` | Apache License, Version 2.0 (LICENSE read) | Build native hooks from source; do not use fork's prebuilt `.a` files | https://github.com/jmpews/Dobby |
+| xDL | fork-bundled source at Blacks-BlackBox commit above | MIT License (upstream LICENSE read); fork has stripped headers, restore notice before distribution | Native symbol lookup | https://github.com/hexhacking/xDL |
+| FreeReflection | 3.2.2; upstream LICENSE checked at `550e36e464539fe59fcc6e49c8f54bfbf376dbfe` | MIT (actual LICENSE text read) | Engine hidden-API access | https://github.com/tiann/FreeReflection |
+| Android SDK / build tools / emulator | platform 36; build-tools 36.0.0; exact emulator version recorded if installed | Android SDK License Agreement; platform source Apache-2.0 | Build and emulator-only validation; tools not shipped | https://developer.android.com/studio/terms |
+| Android Gradle Plugin | 9.4.1 | Apache-2.0 | Android build | https://android.googlesource.com/platform/tools/base/ |
+| Gradle | 9.8.1 | Apache-2.0 | Build tool (download checksum verified) | https://github.com/gradle/gradle |
+| Kotlin | 2.4.21 (or AGP built-in version, report resolved value) | Apache-2.0 | App language/compiler and stdlib | https://github.com/JetBrains/kotlin |
+| AndroidX (appcompat, annotation and transitive AndroidX libraries) | engine declared appcompat 1.2.0; resolved versions to be reported | Apache-2.0 | Engine Android compatibility helpers | https://android.googlesource.com/platform/frameworks/support/ |
+| Material Components Android | 1.3.0 (engine declaration) | Apache-2.0 | Engine dependency | https://github.com/material-components/material-components-android |
+| toml4j | 0.7.2 | MIT | Engine configuration parsing | https://github.com/mwanji/toml4j |
+| Gson (toml4j dependency) | 2.3.1 (declared transitively) | Apache-2.0 | TOML conversion | https://github.com/google/gson |
+| JavaPoet | 1.13.0 | Apache-2.0 | Reflection annotation processor | https://github.com/square/javapoet |
+| AutoService / Auto Common / Guava and transitive annotations | AutoService 1.1.1; resolved versions recorded by build | Apache-2.0; annotation dependencies Apache-2.0 / MIT as declared in their POMs | Compile-time processor only | https://github.com/google/auto |
+| JUnit / Hamcrest | 4.13.2 / 1.3 | Eclipse Public License 1.0 / BSD-3-Clause | Local unit tests only | https://github.com/junit-team/junit4 ; https://github.com/hamcrest/JavaHamcrest |
 
 ## Candidates (not used yet; licenses to confirm from the real LICENSE file)
 
