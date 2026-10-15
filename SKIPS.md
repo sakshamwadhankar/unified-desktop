@@ -10,12 +10,8 @@ Rules:
 
 ---
 
-Nothing skipped. Phase 1 is concluded as a NO-GO on the real phone — the gates G1/G2/G3
-cannot be met by this architecture because of an Android 16 platform rule, not because work
-was deferred. Full result and evidence: `docs/PHASE1_RESULT.md`. The next move is an
-owner/manager DECISION (pivot or stop), not a skipped task.
+| Round 2 / T0 phone placement | The authorized phone `2c0f6edc` was not visible to the coding container, so the required clean Google Tasks phone run and same-moment phone PNG could not be captured. Needed: rerun the exact headless Google Tasks placement command on the phone with the screen kept on; done when `evidence/phase1/round2_placement.txt` contains one run's full `dumpsys activity activities` and `dumpsys window displays` from that phone and explains the activity/window display ids. | 2026-10-14 |
+| Round 2 / T2 phone path-B proof | B1/B2 were exercised on the available Pixel_8_Pro emulator with DeskClock, but no phone-side guest frame could be proved. Needed: repeat B1/B2 with Google Tasks on the phone; done when a phone ImageReader frame contains the guest while the real-screen screencap shows something else, or the phone failure is recorded. | 2026-10-14 |
+| Round 2 / T3 input and T4 measurements | T2 did not produce a guest frame, so injected input and guest performance/browser measurements were not meaningful. Needed: a successful phone/emulator T2 first; done when before/after guest frames and the requested timing, PSS/RSS, CPU, process, kill, and browser results exist. | 2026-10-14 |
 
-One thing NOT re-tested (not a gate blocker): a **browser** guest (e.g. Chrome). The simple
-guest (Google Tasks) already demonstrated the blocker — it renders on the real screen, not
-our display — so a browser would hit the same display rule. Re-test only if the architecture
-pivots to a path that can host on our own surface.
+The emulator limitation and all round-2 results are summarized in `docs/PHASE1_RESULT.md`.

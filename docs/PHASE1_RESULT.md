@@ -97,6 +97,64 @@ Honest adjacent options, for the manager/owner to weigh (each has a real cost):
 Recommendation for the manager: record this as a NO-GO for the current Phase 1 design and
 decide (DECISIONS.md) whether to pivot the architecture (MediaProjection-based) or stop.
 
+## Round 2 (path B) — 2026-10-14/15
+
+### Device availability and T0 placement contradiction
+
+The authorized phone serial `2c0f6edc` was not visible to the coding container (`adb devices`
+returned no devices). I did not touch the phone screen. The available `Pixel_8_Pro` AVD was
+used and every result below is labeled **emulator**, not phone. The required clean Google
+Tasks phone placement run remains in `SKIPS.md`.
+
+The clean emulator placement run is in `evidence/phase1/round2_placement.txt`. It used
+Google's bundled DeskClock as the substitute guest. In that one run:
+
+- the host-created display was **Display #12**;
+- `dumpsys activity activities` listed the BlackBox `ProxyActivity$P0` task/resumed record
+  under **Display #12**;
+- `dumpsys window displays` listed the actual guest window,
+  `com.google.android.deskclock/com.android.deskclock.DeskClock`, on the built-in **Display
+  #0**; and
+- the ImageReader on Display #12 reported `ERROR: no frame yet`.
+
+This resolves the apparent contradiction in the earlier evidence: the activity dump is
+reporting the BlackBox proxy task record that received the requested `launchDisplayId`,
+while the window dump is reporting the actual guest WindowState. BlackBox starts the
+proxy task with the requested display metadata, then its in-process activity replacement
+creates the guest window using the normal/default window context and window token. The
+guest window therefore lands on Display #0 even though the proxy activity record remains
+associated with Display #12. These are not two frames of one window and the activity dump
+was not proof that guest pixels were on the private display.
+
+### T1 private-display pipe
+
+The harness now creates an `OWN_CONTENT_ONLY` 1280x720 RGBA ImageReader with
+`USAGE_CPU_READ_OFTEN`, installs an `OnImageAvailableListener`, drains with
+`acquireLatestImage()`, and shows a changing public `Presentation` containing a counter
+view. On the emulator, the final run received **97 frames in 10.684 s: 9.08 fps**, with
+the first frame at **833 ms**. Local samples `smoke-frame-{1,2,3,30,60,90}.png` were
+written only to the emulator's app-private `filesDir`; no image is repository evidence.
+Text evidence: `evidence/phase1/round2_smoke_final_log.txt` and
+`round2_smoke_final_files.txt`. This proves the capture pipe and Presentation window path
+independently of BlackBox.
+
+### T2 path-B attempts
+
+The experiments used the available emulator's `com.google.android.deskclock` package as a
+simple guest substitute. They did not claim the phone/Tasks gate.
+
+| Attempt | What was tried | Result and evidence |
+|---|---|---|
+| B1 Presentation host | A public `AppLifecycleCallback` observes the guest Activity, makes its real window transparent/non-touchable, detaches its decor, and installs that decor in a `Presentation` on the named private display. The guest launch itself used no `launchDisplayId`. | **Failed.** At `onActivityCreated`, the decor was not yet attached to a WindowManager, so `WindowManager.removeViewImmediate(decor)` failed exactly with `java.lang.IllegalArgumentException: View=...DecorView... not attached to window manager` at `WindowManagerGlobal.findViewLocked` / `WindowManagerGlobal.removeView` / `WindowManagerImpl.removeViewImmediate`. Evidence: `round2_b1_clock_final_logcat.txt`. No private-display frame arrived. |
+| B2 SurfaceControlViewHost | A public `SurfaceControlViewHost` was bound to a `SurfaceView` inside a private-display `Presentation`; the guest decor was passed as its view tree. The first version failed because the decor already had a parent. A delayed retry detached the now-attached guest window root with public `removeViewImmediate`, and logged `B2_SURFACE_PACKAGE_SHOWN`. | **No usable result.** After the delayed retry the SurfacePackage was created, but the ImageReader still received no guest frame; the final guest run produced no new frame sample. Evidence: `round2_b2_clock_final2_logcat.txt`, `round2_b2_clock_final2_windows.txt`; the log has the exact earlier exception `RuntimeException: view ...DecorView... being added, but it already has a parent` and the later `B2_SURFACE_PACKAGE_SHOWN` without pixels. |
+| B3 public alternative | Reviewed the remaining app-allowed public choices in scope: a normal `Presentation`/window and `SurfaceControlViewHost`/SurfacePackage. No third public API was found that re-roots an already-windowed guest ViewRoot onto an app-owned display without either the same detach/reparent problem or hidden/signature APIs. | **Not pursued as a speculative third implementation.** No system permission, Accessibility service, or hidden API was added. |
+
+The round-2 code is therefore an instrumented experiment, not a working path-B
+implementation. On the available emulator, B1 and B2 did not meet G1. T3 input and T4
+performance/browser measurements were not run because there was no guest frame to operate
+on or measure. The phone-specific G1/G2/G3 proof is deferred in `SKIPS.md`; no phone
+verdict is claimed from these emulator results.
+
 ## Manager review (2026-10-15)
 
 **Accepted:** launching an activity onto our own virtual display is impossible for a Play
@@ -124,3 +182,38 @@ app (path A). **Corrected:** the reason, and how far the NO-GO reaches.
 5. **Rule broken:** the committed PNG (`guest_on_REAL_screen_welcome_to_tasks.png`, 132 KB)
    goes against "never commit images". It stays (removing it from history would need a
    force-push); future evidence images are kept out of git and described in text.
+
+## Manager review of round 2 (2026-10-15)
+
+**Accepted:** T0 explanation (the proxy *task record* sits on our display, the guest
+*window* on display 0); T1 display pipe works on the emulator (97 frames / 10.684 s =
+9.08 fps, first frame 833 ms; the arithmetic checks); G6 build passes; honest emulator
+labels; nothing committed by the agent.
+
+**Not accepted as a verdict on path B.** Both failures are implementation problems, not
+an Android rule:
+1. **B1** called `removeViewImmediate(decor)` inside `onActivityCreated`, i.e. during the
+   guest's `onCreate`. The decor is only added to the WindowManager later, at resume
+   (`ActivityThread.handleResumeActivity` -> `Activity.makeVisible`). The log shows exactly
+   that: `DecorView{... 0,0-0,0} not attached to window manager`
+   (`GuestPresentationHost.java:54`, excerpt in `round2_b1_excerpt.txt`). The move must happen after the window is added
+   (e.g. `onActivityPostResumed`, then post to the next frame), or the window must be
+   kept from being added at all.
+2. **B2** reached `B2_SURFACE_PACKAGE_SHOWN` but the zero frames were never diagnosed. The
+   excerpt (`round2_b2_excerpt.txt`) shows `no frame yet` even though a black
+   Presentation was on the display, so not even the host window reached the ImageReader in
+   that run: the problem is before the guest content. Not checked: did the Presentation (black SurfaceView) itself still produce ImageReader
+   frames in that run; was `setChildSurfacePackage` called before `surfaceCreated`; was
+   the moved decor VISIBLE and laid out with a non-zero size; did the guest `ViewRootImpl`
+   on the new host draw at all.
+3. **B3** was skipped without trying anything. Acceptable only because B1/B2 were not
+   finished; next round must finish B1/B2 first.
+
+**Process problems:**
+- The phone was not visible because the coding agent runs inside the WSL 2 distro
+  `OmniRushBox`, which cannot see USB devices and has Windows interop disabled (its
+  `/etc/wsl.conf`). Fix for next round: adb over Wi-Fi (LESSONS.md section 5).
+- The emulator was run with 2 GB RAM; LESSONS.md says 6 GB (heavy work is killed at 2 GB).
+  The B2 log shows `Skipped 46 frames`, so emulator timing numbers are weak.
+- About 3.5 MB of raw dumps (logcat, activities, windows) were left in `evidence/phase1/`.
+  Raw dumps are now gitignored; evidence must be short excerpts with the key lines.

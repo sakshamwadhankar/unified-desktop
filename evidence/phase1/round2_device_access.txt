@@ -1,0 +1,8 @@
+Round 2 device access check (2026-10-14 container time)
+
+adb devices -l:
+List of devices attached
+
+The authorized phone serial 2c0f6edc was not visible to the coding container. No phone
+screen touch or phone-side test was performed. The available AVD Pixel_8_Pro was used for
+the code/smoke/path-B experiments and is labeled emulator in the report.

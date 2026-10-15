@@ -1,0 +1,21 @@
+Excerpt of round2_b1_clock_final_logcat.txt (emulator, DeskClock). Raw file stays local.
+10-14 18:39:30.102  5438  5438 I Phase1-B1: callback_registered process=dev.unifieddesktop.app:black
+10-14 18:39:30.106  5401  5401 I Phase1-B1: callback_registered process=dev.unifieddesktop.app
+10-14 18:39:31.729  5401  5401 I Phase1  : Created display id=8 flags=8
+10-14 18:39:31.730  5401  5401 I Phase1  : Guest com.google.android.deskclock: importing...
+10-14 18:39:31.939  5401  5401 I Phase1  : Guest com.google.android.deskclock imported; launching on display 8
+10-14 18:39:32.283  5471  5471 I Phase1-B1: callback_registered process=dev.unifieddesktop.app:p0
+10-14 18:39:32.286  5401  5401 I Phase1  : Guest com.google.android.deskclock launch requested on display 8
+10-14 18:39:32.779  5471  5471 I Phase1-B1: callback_onActivityCreated class=com.android.deskclock.DeskClock package=com.google.android.deskclock
+10-14 18:39:32.781  5471  5471 E Phase1-B1: B1_PRESENTATION_FAILED guest=com.android.deskclock.DeskClock
+10-14 18:39:32.781  5471  5471 E Phase1-B1: java.lang.IllegalArgumentException: View=com.android.internal.policy.DecorView{4a4053 V.E...... R.....ID 0,0-0,0}[] not attached to window manager
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at android.view.WindowManagerGlobal.findViewLocked(WindowManagerGlobal.java:626)
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at android.view.WindowManagerGlobal.removeView(WindowManagerGlobal.java:532)
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at android.view.WindowManagerImpl.removeViewImmediate(WindowManagerImpl.java:216)
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at dev.unifieddesktop.app.GuestPresentationHost.onActivityCreated(GuestPresentationHost.java:54)
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at top.niunaijun.blackbox.fake.delegate.BaseInstrumentationDelegate.callActivityOnCreate(BaseInstrumentationDelegate.java:316)
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at top.niunaijun.blackbox.fake.delegate.AppInstrumentation.callActivityOnCreate(AppInstrumentation.java:424)
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at android.app.ActivityThread.performLaunchActivity(ActivityThread.java:4262)
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at android.app.ActivityThread.handleLaunchActivity(ActivityThread.java:4467)
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at android.app.servertransaction.LaunchActivityItem.execute(LaunchActivityItem.java:222)
+10-14 18:39:32.781  5471  5471 E Phase1-B1: 	at android.app.servertransaction.TransactionExecutor.executeNonLifecycleItem(TransactionExecutor.java:133)

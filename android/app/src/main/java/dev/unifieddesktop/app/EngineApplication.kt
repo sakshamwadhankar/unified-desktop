@@ -19,6 +19,9 @@ class EngineApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         BlackBoxCore.get().doCreate()
+        BlackBoxCore.get().addAppLifecycleCallback(GuestPresentationHost())
+        BlackBoxCore.get().addAppLifecycleCallback(GuestSurfacePresentationHost())
+        android.util.Log.i("Phase1-B1", "callback_registered pid=${android.os.Process.myPid()}")
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityCreated(a: Activity, b: Bundle?) = Unit
             override fun onActivityStarted(a: Activity) = Unit

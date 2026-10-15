@@ -37,3 +37,8 @@ Thumbs.db
 evidence/**/*.png
 evidence/**/*.jpg
 evidence/**/*.mp4
+# Raw device dumps stay local; commit short excerpts with the key lines instead
+evidence/**/*_logcat.txt
+evidence/**/*_activities.txt
+evidence/**/*_windows.txt
+evidence/**/*_display.txt

@@ -22,3 +22,18 @@ export ANDROID_HOME=/opt/android-sdk
 stored here. Install the debug APK on a test device, open it, press **Create display**, then
 **Launch control** and **Capture PNG**. The host control buttons exercise paired tap/key
 dispatch and report actual errors.
+
+For the round-2 display-pipe smoke test:
+
+```sh
+adb shell am force-stop dev.unifieddesktop.app
+adb shell am start -n dev.unifieddesktop.app/.HarnessActivity --ez smoke true --ei duration 10
+adb logcat -s Phase1:I
+```
+
+The smoke run creates an `OWN_CONTENT_ONLY` 1280x720 display, shows a changing public
+`Presentation`, drains `ImageReader` frames with `acquireLatestImage()`, and reports the
+frame count/fps/first-frame time. Samples stay in the app-private `filesDir/phase1/`.
+The optional diagnostic flags `--ez b1 true` and `--ez b2 true` exercise the round-2
+Presentation and `SurfaceControlViewHost` guest experiments; they are not a working guest
+hosting claim unless the ImageReader reports guest pixels.

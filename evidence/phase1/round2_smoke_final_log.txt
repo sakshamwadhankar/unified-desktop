@@ -1,0 +1,3 @@
+--------- beginning of main
+10-14 18:46:42.069  6179  6179 I Phase1  : Created display id=13 flags=8
+10-14 18:46:52.081  6179  6179 I Phase1  : SMOKE_DONE frames=97 elapsed_s=10.684 fps=9.08 first_frame_ms=833

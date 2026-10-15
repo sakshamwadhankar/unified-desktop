@@ -1,0 +1,21 @@
+Excerpt of round2_b2_clock_final2_logcat.txt (emulator, DeskClock). Raw file stays local.
+10-14 18:45:28.138 I/Phase1-B1( 5956): callback_registered process=dev.unifieddesktop.app:black
+10-14 18:45:28.146 I/Phase1-B1( 5916): callback_registered process=dev.unifieddesktop.app
+10-14 18:45:28.906 I/Choreographer( 5916): Skipped 37 frames!  The application may be doing too much work on its main thread.
+10-14 18:45:29.994 I/Phase1  ( 5916): Created display id=11 flags=8
+10-14 18:45:29.994 I/Phase1  ( 5916): Guest com.google.android.deskclock: importing...
+10-14 18:45:30.329 I/Phase1  ( 5916): Guest com.google.android.deskclock imported; launching on display 11
+10-14 18:45:30.765 I/Phase1  ( 5916): Guest com.google.android.deskclock launch requested on display 11
+10-14 18:45:30.765 I/Choreographer( 5916): Skipped 46 frames!  The application may be doing too much work on its main thread.
+10-14 18:45:30.767 I/Phase1-B1( 5990): callback_registered process=dev.unifieddesktop.app:p0
+10-14 18:45:31.604 I/Phase1-B1( 5990): callback_onActivityCreated class=com.android.deskclock.DeskClock package=com.google.android.deskclock
+10-14 18:45:31.767 I/Phase1  ( 5916): ERROR: no frame yet
+10-14 18:45:32.358 I/Choreographer( 5990): Skipped 37 frames!  The application may be doing too much work on its main thread.
+10-14 18:45:32.930 I/Choreographer(  711): Skipped 30 frames!  The application may be doing too much work on its main thread.
+10-14 18:45:33.085 I/Phase1-B2( 5990): B2_SURFACE_PACKAGE_SHOWN guest=com.android.deskclock.DeskClock display=11
+10-14 18:45:33.104 I/Phase1  ( 5916): ERROR: no frame yet
+10-14 18:45:33.133 I/Choreographer( 5990): Skipped 46 frames!  The application may be doing too much work on its main thread.
+10-14 18:45:33.187 I/Choreographer( 1123): Skipped 48 frames!  The application may be doing too much work on its main thread.
+10-14 18:45:33.200 I/Choreographer(  976): Skipped 46 frames!  The application may be doing too much work on its main thread.
+10-14 18:45:33.782 I/Phase1  ( 5916): ERROR: no frame yet
+10-14 18:45:34.766 I/Phase1  ( 5916): ERROR: no frame yet
