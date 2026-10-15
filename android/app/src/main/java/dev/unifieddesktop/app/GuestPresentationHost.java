@@ -228,6 +228,10 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             }
             root.postDelayed(() -> {
                 if ("org.mozilla.firefox".equals(activity.getPackageName())) {
+                    // Firefox's home search is rendered by Compose and is not represented by an
+                    // EditText in the guest view tree. Give it the same real touch path as a user
+                    // before attempting keyboard input.
+                    tap(root, root.getWidth() * 0.39f, root.getHeight() * 0.09f, "firefox-search");
                     drag(root, root.getWidth() / 2f, root.getHeight() * 0.82f,
                             root.getWidth() / 2f, root.getHeight() * 0.18f, "scroll");
                 }
@@ -237,11 +241,15 @@ final class GuestPresentationHost extends AppLifecycleCallback {
                     edit.requestFocus();
                 }
                 Log.i(TAG, "B1_INPUT_FOCUS view=" + edit + " rootFocus=" + root.findFocus());
-                int[] keys = {KeyEvent.KEYCODE_T, KeyEvent.KEYCODE_E, KeyEvent.KEYCODE_S, KeyEvent.KEYCODE_T,
-                        KeyEvent.KEYCODE_DEL};
+                int[] keys = {
+                        KeyEvent.KEYCODE_E, KeyEvent.KEYCODE_X, KeyEvent.KEYCODE_A,
+                        KeyEvent.KEYCODE_M, KeyEvent.KEYCODE_P, KeyEvent.KEYCODE_L,
+                        KeyEvent.KEYCODE_E, KeyEvent.KEYCODE_PERIOD, KeyEvent.KEYCODE_C,
+                        KeyEvent.KEYCODE_O, KeyEvent.KEYCODE_M, KeyEvent.KEYCODE_ENTER
+                };
                 for (int key : keys) {
-                    boolean keyDown = root.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
-                    boolean keyUp = root.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
+                    boolean keyDown = activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
+                    boolean keyUp = activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
                     Log.i(TAG, "B1_INPUT_KEY code=" + key + " down=" + keyDown + " up=" + keyUp +
                             " focus=" + root.findFocus() + " text=" + editableText(edit));
                 }

@@ -36,13 +36,55 @@ class EngineBridge(private val context: Context) {
             if (!supported) {
                 return EngineResult(false, "engine host package manager does not expose $GMS_PACKAGE")
             }
-            val result = core.installGms(userId)
+            val packages = listOf(
+                "com.google.android.gms",
+                "com.google.android.gsf",
+                "com.android.vending",
+                "com.google.android.gsf.login",
+                "com.google.android.backuptransport",
+                "com.google.android.backup",
+                "com.google.android.configupdater",
+                "com.google.android.syncadapters.contacts",
+                "com.google.android.feedback",
+                "com.google.android.onetimeinitializer",
+                "com.google.android.partnersetup",
+                "com.google.android.setupwizard",
+                "com.google.android.syncadapters.calendar",
+                "com.google.android.play.games",
+                "com.google.android.wearable.app",
+                "com.google.android.wearable.app.cn"
+            )
+            val packageResults = mutableListOf<String>()
+            var allSuccess = true
+            for (packageName in packages) {
+                val hostInfo = try {
+                    val info = context.packageManager.getApplicationInfo(packageName, 0)
+                    "present source=${info.sourceDir} splits=${info.splitSourceDirs?.size ?: 0}"
+                } catch (t: Throwable) {
+                    "missing:${t.javaClass.simpleName}"
+                }
+                val before = core.isInstalled(packageName, userId)
+                val result = if (before || !hostInfo.startsWith("present")) {
+                    null
+                } else {
+                    core.installPackageAsUser(packageName, userId)
+                }
+                val after = core.isInstalled(packageName, userId)
+                val success = result?.success ?: true
+                val postconditionSuccess = before || !hostInfo.startsWith("present") || (success && after)
+                if (!postconditionSuccess) allSuccess = false
+                val detail = "package=$packageName host=$hostInfo before=$before " +
+                    "installSuccess=${result?.success ?: "skipped"} installMsg=${result?.msg} " +
+                    "after=$after postconditionSuccess=$postconditionSuccess"
+                packageResults += detail
+                Log.i("Phase1-GMS", "GMS_PACKAGE $detail")
+            }
             val installed = core.isInstallGms(userId)
             val traces = core.hasGmsTraces(userId)
-            val details = "success=${result.success} package=${result.packageName} msg=${result.msg} " +
-                "installedGms=$installed traces=$traces"
+            val details = "success=$allSuccess installedGms=$installed traces=$traces " +
+                packageResults.joinToString(" | ")
             Log.i("Phase1-GMS", "GMS_INSTALL $details")
-            EngineResult(result.success, details)
+            EngineResult(allSuccess, details)
         } catch (t: Throwable) {
             Log.e("Phase1-GMS", "GMS_INSTALL_EXCEPTION", t)
             EngineResult(false, "${t.javaClass.name}: ${t.message}")

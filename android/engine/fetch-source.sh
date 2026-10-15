@@ -127,5 +127,71 @@ if "private void notifyBeforeMainActivityOnCreate" not in text:
     base.write_text(text)
 PY
 
+# Make package import failures observable and non-successful. The upstream service returns a
+# default-success InstallResult even when its broad catch drops an exception, which makes a
+# failed system-package import look successful to the host harness.
+python3 - "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java" \
+         "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java" <<'PY'
+from pathlib import Path
+import sys
+
+pm = Path(sys.argv[1])
+settings = Path(sys.argv[2])
+
+text = pm.read_text()
+old = """        } catch (Throwable t) {
+            t.printStackTrace();
+        } finally {
+"""
+new = """        } catch (Throwable t) {
+            String detail = t.getClass().getName() + ": " + t.getMessage();
+            Slog.e(TAG, "installPackageAsUserLocked failed file=" + file
+                    + " package=" + result.packageName + " detail=" + detail);
+            result.installError(result.packageName, detail);
+            t.printStackTrace();
+        } finally {
+"""
+if old not in text:
+    raise SystemExit("BPackageManagerService install catch marker not found")
+text = text.replace(old, new, 1)
+
+old = """        String name = file.getName();
+        if (name != null && name.toLowerCase().endsWith(\".apks\")) {
+            return true;
+        }
+"""
+new = """        String name = file.getName();
+        if (name != null) {
+            String lowerName = name.toLowerCase();
+            if (lowerName.endsWith(\".apks\")) {
+                return true;
+            }
+            // A normal APK may embed multiple APK-shaped assets (GMS does this for Dynamite).
+            // Never reinterpret a directly supplied .apk as an APK-set bundle.
+            if (lowerName.endsWith(\".apk\")) {
+                return false;
+            }
+        }
+"""
+if old not in text:
+    raise SystemExit("APKS detection marker not found")
+text = text.replace(old, new, 1)
+pm.write_text(text)
+
+text = settings.read_text()
+old = """        } catch (Throwable e) {
+            e.printStackTrace();
+"""
+new = """        } catch (Throwable e) {
+            Slog.e(TAG, "bad Package " + packageName + " detail="
+                    + e.getClass().getName() + ": " + e.getMessage());
+            e.printStackTrace();
+"""
+if old not in text:
+    raise SystemExit("Settings scan catch marker not found")
+text = text.replace(old, new, 1)
+settings.write_text(text)
+PY
+
 # Gradle/CMake read the ignored vendor tree; no generated sources enter tracked src/.
 printf '%s\n' "Fetched $REV and Dobby $DOBBY_REV; prebuilt artifacts excluded." > "$VENDOR/MANIFEST"

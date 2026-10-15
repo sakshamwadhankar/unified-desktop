@@ -10,10 +10,15 @@ corrects it after review.
   virtual display) is NO-GO**, confirmed on the phone and in Android's source. Round 3
   proved public path B1 and B2 guest rendering on the real phone: Google Tasks frames land
   on our private display while a same-run real-screen capture shows something else.
-- **Last updated:** 2026-10-15, manager review of round 5 (phone). B-001 fixed and
-  re-verified by the manager; Firefox renders on our display; GMS still missing in the guest.
-- **Next action:** round 6: B-002 (why `installGms` installs nothing), typed keys into
-  Firefox's search field, a web page in Firefox, moving workload numbers.
+- **Last updated:** 2026-10-15, manager review of round 6 (partial; the agent stopped
+  mid-round). GMS now imports into the engine: an engine bug read the normal GMS APK as an
+  APK set (fix in `fetch-source.sh`). Manager re-run: `installedGms=true`, a
+  `com.google.android.gms` process runs under our uid. Tasks still shows "Update Google Play
+  Services": its log says `requires Google Play Store, but its signature is invalid` /
+  `error 9` (the guest sees a Play Store whose signature fails Google's check).
+- **Next action:** finish Phase 1 in one prompt: Play Store signature (B-002), typed text
+  into Firefox (through an InputConnection, since key events to a Compose field in an
+  unfocused Presentation window return false), a loaded web page, moving numbers, survival.
 
 ## Done (verified on the phone, 2026-10-14)
 
@@ -64,4 +69,4 @@ corrections in `docs/PHASE1_RESULT.md`.
 | Item | Notes |
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6, questions Q1-Q6 |
-| Phase 1 round-5 remaining proof | BUGS.md B-002/B-003/B-004/B-005; SKIPS.md typed keys and moving workload; B-001 awaits manager review/commit |
+| Phase 1 round-6 remaining proof | Firefox typed keys/web page, moving workload and survival numbers; BUGS.md B-003/B-004/B-005; SKIPS.md typed keys and moving workload |
