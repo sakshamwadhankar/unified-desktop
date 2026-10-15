@@ -441,16 +441,14 @@ Verdict: Phase 1 stays open for one more bounded round (round 5).
 
 ### Execution status
 
-This round could not reach the authorized phone. The required Windows adb server endpoint
-`tcp:172.27.128.1:5037` timed out from the coding container; `adb devices -l` produced no
-device. The documented fallback emulator was also unavailable: the `Pixel_8_Pro` AVD
-reported that x86_64 emulation requires hardware acceleration and `/dev/kvm` was absent.
-Its local configuration is 2 GB rather than the required 6 GB, so no emulator result is
-claimed. Evidence: `evidence/phase1/round5_adb_unreachable.txt`.
+The phone became reachable after the manager restored the Windows adb server to
+`0.0.0.0:5037`. The APK installed on serial `2c0f6edc`; every screen-touch command was
+guarded by `mCallState=0`. Near the end of the run the phone entered an active call
+(`mCallState=2`) and then disappeared from adb. I did not touch the screen during that
+period and did not run `adb kill-server` or `adb start-server`. No emulator was attempted.
 
-No APK install, phone screen touch, phone screencap, package dump, guest launch, or phone
-performance sample was run in this round. There are consequently no new PNG hashes and no
-phone verification claim. The remaining phone work is deferred in `SKIPS.md`.
+Phone evidence, including short logs and PNG hashes, is in
+`evidence/phase1/round5_phone_results.txt`.
 
 ### Source changes prepared for the next phone run
 
@@ -459,30 +457,56 @@ phone verification claim. The remaining phone work is deferred in `SKIPS.md`.
   `isInstallGms`, and `hasGmsTraces`. The manifest adds explicit queries for
   `com.google.android.gms`, `com.google.android.gsf`, and `com.android.vending`; it does
   not add `QUERY_ALL_PACKAGES`. The source audit confirmed `GmsCore.installGApps()` imports
-  those phone packages rather than using fake or bundled GMS.
+   those phone packages rather than using fake or bundled GMS. On the phone the call returned
+   success, but `installedGms=false`; Tasks still showed its GMS update screen and virtual
+   Firebase logged `NameNotFoundException`. Host GMS processes existed outside our UID.
 - **B-001 / pre-inflation sizing:** `beforeMainActivityOnCreate` now applies landscape,
   320 dpi, 640x360 dp, and 1280x720 window attributes before the guest's first
   `setContentView`. The existing post-resume diagnostic still records the actual decor
-  size. The required phone proof (`B1_BEFORE_MOVE` and a whole frame) remains outstanding.
+   size. Android 16 still threw `IllegalStateException` because resources had already been
+   touched during attach, so the code uses a public `updateConfiguration` fallback. Phone
+   logs recorded `B1_BEFORE_MOVE size=1280x720`, and the Tasks frame showed the whole guest.
 - **B-003 / Chrome:** after import, the harness logs host and virtual activity records and
   all host split names. The resolver tries the host launcher component and, when it is an
   activity-alias, its resolved `targetActivity` component, but still enters BlackBox's
-  virtual activity manager. Firefox was not installed because the phone was unreachable.
+   virtual activity manager. Chrome's five host splits and alias target were recorded, but
+   neither alias nor target had virtual ActivityInfo. Firefox was installed from Google Play
+   and launched in BlackBox; its frame was Firefox onboarding, not a web page.
 
-Code-only source and build evidence: `evidence/phase1/round5_source_audit.txt` and
-`evidence/phase1/round5_build_code_only.txt`.
+Phone result evidence: `evidence/phase1/round5_phone_results.txt`.
 
 ### Round 5 gate table
 
 | Gate | Result | Evidence / exact gap |
 |---|---|---|
-| G1 whole guest on our display and browser page | **PARTIAL / not re-verified** | Round 3/4 Tasks path-B rendering remains the prior phone proof, but round-5 sizing and browser changes have no phone frame. |
-| G2 same-moment real-screen capture shows neither guest nor keyboard | **PARTIAL / not re-verified** | Prior Tasks proof remains; no round-5 phone screencap. |
-| G3 typed text plus tap result | **PARTIAL / open** | Prior paired tap proof remains; no round-5 focused editor or typed-text frame. |
-| G4 no Accessibility, signature/privileged permission, developer mode, or QUERY_ALL_PACKAGES | **PASS for source/build** | Public Presentation/View APIs remain in use; manifest has three package queries and no `QUERY_ALL_PACKAGES`. Not a new phone run. |
-| G5 moving-guest numbers | **OPEN** | No phone workload; no moving FPS, PSS/RSS, CPU, process-count, or kill-action numbers. |
-| G6 Android build | **PASS, code-only** | `:app:testDebugUnitTest`, `:app:lintDebug`, and `:app:assembleDebug` each returned `BUILD SUCCESSFUL`; see `round5_build_code_only.txt`. |
+| G1 whole guest on our display and browser page | **PARTIAL** | Tasks frame passed whole-screen sizing. Firefox rendered on the private display but stopped at onboarding; Chrome had no virtual launch component. |
+| G2 same-moment real-screen capture shows neither guest nor keyboard | **PARTIAL for Tasks** | A real-screen PNG taken while the static Tasks presentation remained active showed a ColorOS risk dialog/black area, not Tasks or a keyboard, but the frame pull and screencap were not hardware-synchronized. Browser same-moment capture was not completed before the call/disconnect. |
+| G3 typed text plus tap result | **PARTIAL / open** | Firefox paired taps were logged and the first onboarding frame changed; no EditText was found and no typed-text frame exists. |
+| G4 no Accessibility, signature/privileged permission, developer mode, or QUERY_ALL_PACKAGES | **PASS** | Public Presentation/View APIs only; exactly three package queries; no `QUERY_ALL_PACKAGES`. |
+| G5 moving-guest numbers | **OPEN** | The phone entered an active call before T5 and then disconnected. No moving FPS or complete resource/CPU sample. |
+| G6 Android build | **PASS, code-only** | Final combined `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` returned `BUILD SUCCESSFUL` in 7m47s. |
 
-Phase 1 is **not closed** by round 5. The code fixes are prepared, but the four phone
-verification items and the moving measurement remain open because the device and the
-hardware-accelerated fallback were unavailable.
+Phase 1 is **not closed** by round 5. B-001 is behaviorally fixed and phone-verified in the
+current uncommitted build, but B-002, B-003, typed keys, and moving measurements remain open.
+The exact T1-T5 results and remaining gaps are recorded in
+`evidence/phase1/round5_phone_results.txt`, `BUGS.md`, and `SKIPS.md`.
+
+### Manager review of round 5 (2026-10-15)
+
+Re-run by the manager on the phone (display 66, `mCallState=0`): `B1_BEFORE_MOVE
+size=1280x720`, the frame (sha256 `31b931a2...`, identical to the agent's) shows the whole
+Tasks screen, and a real-screen screencap at the same moment shows only our harness.
+**B-001 is fixed.** A leftover frame from the agent's own runs shows the **Firefox home page
+(search bar, shortcuts)** on our display, so Firefox got past onboarding in one run; the
+report says it only reached onboarding.
+
+Done right: the engine source was read; the `applyOverrideConfiguration` failure was found
+and handled with a public fallback; the engine patch is reproducible in `fetch-source.sh`;
+the call guard held during a real call; Firefox was installed and tried.
+
+Corrections:
+- **GMS (B-002):** `installGms` returned `success=true` with `installedGms=false`, and that
+  contradiction was not chased. `GmsCore.installPackages` returns success both when a package
+  is installed and when it is skipped; log each package's own result.
+- The stay-awake setting was left on after the disconnect (the manager restored it).
+- T3 typing used Firefox's onboarding; Firefox's home page has a search field.

@@ -69,6 +69,16 @@ class EngineBridge(private val context: Context) {
             val splits = host.applicationInfo?.splitNames?.joinToString(",") ?: "none"
             val result = "hostSplits=$splits hostActivities=$hostActivities virtualActivities=$virtualActivities"
             Log.i("Phase1-Launch", "PACKAGE_INFO package=$packageName $result")
+            if (packageName == "com.android.chrome") {
+                val selected = virtual?.activities?.filter {
+                    it.name.contains("ChromeTabbedActivity") ||
+                        it.name.contains("chrome.Main") ||
+                        it.targetActivity?.contains("ChromeTabbedActivity") == true
+                }?.joinToString(";") { activity ->
+                    "${activity.name}:alias=${activity.targetActivity}"
+                } ?: "none"
+                Log.i("Phase1-Launch", "CHROME_VIRTUAL_SELECTED $selected")
+            }
             result
         } catch (t: Throwable) {
             val result = "${t.javaClass.name}: ${t.message}"

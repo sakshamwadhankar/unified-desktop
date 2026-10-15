@@ -1,0 +1,57 @@
+Round 5 phone evidence excerpt — OnePlus CPH2619, serial 2c0f6edc, 2026-10-15
+
+Reachability/install:
+- `adb devices -l` listed `2c0f6edc`; APK install succeeded after the manager restored the
+  Windows adb server. A later long phone call caused the device to disappear; no adb
+  kill/start command was run from the box.
+
+T1 GMS / Tasks:
+- `GMS_SUPPORT supported=true`
+- `GMS_INSTALL success=true package=null msg=null installedGms=false traces=true`
+- Tasks launched in BlackBox and a private-display frame was captured. PNG SHA-256:
+  `31b931a28398217c5e6972a555d89afa0b807099615e89955ccb76ddbc123e3b`.
+- The frame visibly shows the complete Google Tasks Welcome screen, including the full
+  `Update Google Play Services` button. It is not a sign-in screen, so no account was
+  entered.
+- `dumpsys activity processes` showed host GMS processes `21326:com.google.android.gms`
+  and `27391:com.google.android.gms.unstable` outside the app UID. The virtual guest was
+  `22904:dev.unifieddesktop.app:p0`; it had GMS service connection records but its log
+  still reported `FirebaseInstanceId: ... NameNotFoundException: com.google.android.gms`.
+  No virtual GMS process was established. PSS/CPU-over-time samples were not completed.
+
+T2 sizing / same-moment real screen:
+- `B1_GUEST_OVERRIDE_FAILED` was reproduced exactly:
+  `IllegalStateException: getResources() or getAssets() has already been called`.
+- The public fallback then logged `B1_GUEST_OVERRIDE_FALLBACK widthDp=640 heightDp=360
+  densityDpi=320` and `window=1280x720`.
+- `B1_BEFORE_MOVE ... size=1280x720`; `B1_PRESENTATION_SHOWN ... target=1280x720
+  size=1280x720`.
+- The captured frame visibly shows the whole Tasks Welcome screen with no clipped bottom
+  button. PNG SHA-256 is the Tasks hash above.
+- A real-screen capture taken while the static Tasks presentation remained active visibly
+  shows only a black phone screen/status bar area and a ColorOS Phone Manager risk dialog,
+  not Tasks and not a keyboard. The frame pull and screencap were not hardware-synchronized.
+  PNG SHA-256:
+  `fafc000458157f7a3580a846644711f9be53ea3029e9d0c9ef6e87233fc84b9e`.
+
+T4 browser:
+- Chrome host package audit reported exactly five splits:
+  `chrome,config.en,dev_ui,on_demand,stack_unwinder`.
+- Host launcher was `com.google.android.apps.chrome.Main`, an alias targeting
+  `org.chromium.chrome.browser.ChromeTabbedActivity`. BlackBox virtual lookup returned no
+  ActivityInfo for either candidate; launch ended with
+  `VIRTUAL_LAUNCH_COMPONENT_MISSING ... candidates=[...Main,...ChromeTabbedActivity]` and
+  `ERROR launch com.android.chrome: no launch activity`. No Chrome frame was claimed.
+- Firefox was installed from Google Play (`package:org.mozilla.firefox`). Its BlackBox
+  guest launched on display 61. Captured PNG SHA-256:
+  `b3f2392ba3d2aa94254af804110e781bccf3d0f0329c26fed54e44e3dbd00e25`.
+  The frame visibly shows Firefox's `Welcome to Firefox` onboarding screen, not a web page.
+  The public View tree exposed no EditText; the Compose `Not now` button did not respond to
+  the public root dispatch in this run. Typed text was therefore not claimed.
+
+T3/T5/end condition:
+- Firefox input log recorded `B1_INPUT_FOCUS view=null` with DecorView focus and every
+  T/E/S/T/Backspace pair returned `down=false up=false`; no typed-text frame exists.
+- Before the moving workload could run, `mCallState` became 2. Polling was continued without
+  touching the screen; the phone then disappeared from adb. No moving FPS or final T5
+  resource sample is claimed.

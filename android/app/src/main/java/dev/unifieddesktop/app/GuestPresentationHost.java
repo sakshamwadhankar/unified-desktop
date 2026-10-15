@@ -17,6 +17,7 @@ import android.view.WindowManager;
 import android.view.ViewGroup;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.util.DisplayMetrics;
 
 import java.util.Collections;
@@ -32,18 +33,24 @@ import top.niunaijun.blackbox.app.configuration.AppLifecycleCallback;
  */
 final class GuestPresentationHost extends AppLifecycleCallback {
     private static final String TAG = "Phase1-B1";
+    private static final int TARGET_WIDTH = 1280;
+    private static final int TARGET_HEIGHT = 720;
     private static final int TARGET_DENSITY_DPI = 320;
     static final String PREFS = "phase1-path-b";
     static final String DISPLAY_ID = "display_id";
     private Presentation presentation;
     private final Set<Activity> moveScheduled =
             Collections.newSetFromMap(new WeakHashMap<Activity, Boolean>());
+    private final Set<Activity> configurationPrepared =
+            Collections.newSetFromMap(new WeakHashMap<Activity, Boolean>());
 
     @Override
     public void beforeMainActivityOnCreate(Activity activity) {
+        Log.i(TAG, "B1_BEFORE_MAIN_CREATE class=" + activity.getClass().getName() +
+                " package=" + activity.getPackageName());
         if (isHostActivity(activity)) return;
+        if (configurationPrepared.contains(activity)) return;
         Display display = targetDisplay(activity);
-        if (display == null) return;
         // Make the activity window non-visible before the guest's onCreate. This is not an
         // accessibility or system permission; it is the normal public Window attribute.
         activity.getWindow().setDimAmount(0f);
@@ -55,33 +62,63 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         // landscape, so make the guest create its content in the target orientation and
         // target density before its first layout.
         activity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-        applyGuestConfiguration(activity, display);
+        applyGuestConfiguration(activity, display == null ? TARGET_WIDTH : display.getMode().getPhysicalWidth(),
+                display == null ? TARGET_HEIGHT : display.getMode().getPhysicalHeight());
+        if (display == null) {
+            Log.w(TAG, "B1_BEFORE_MAIN_CREATE_NO_DISPLAY");
+            return;
+        }
         Log.i(TAG, "prepared guest activity " + activity.getClass().getName() +
                 " for private display=" + display.getDisplayId());
     }
 
-    private void applyGuestConfiguration(Activity activity, Display display) {
+    private void applyGuestConfiguration(Activity activity, int width, int height) {
         try {
-            int width = display.getMode().getPhysicalWidth();
-            int height = display.getMode().getPhysicalHeight();
-            Configuration config = new Configuration(activity.getResources().getConfiguration());
+            // This callback is invoked before AppInstrumentation performs its normal activity
+            // setup. Do not touch activity resources here: applyOverrideConfiguration() rejects
+            // an Activity whose Resources object has already been initialized.
+            Configuration config = new Configuration(Resources.getSystem().getConfiguration());
             config.densityDpi = TARGET_DENSITY_DPI;
             config.screenWidthDp = Math.round(width * 160f / TARGET_DENSITY_DPI);
             config.screenHeightDp = Math.round(height * 160f / TARGET_DENSITY_DPI);
             config.smallestScreenWidthDp = Math.min(config.screenWidthDp, config.screenHeightDp);
             config.orientation = width >= height ? Configuration.ORIENTATION_LANDSCAPE :
                     Configuration.ORIENTATION_PORTRAIT;
-            activity.applyOverrideConfiguration(config);
+            try {
+                activity.applyOverrideConfiguration(config);
+            } catch (IllegalStateException alreadyInitialized) {
+                // BlackBox/Android may initialize Activity resources during attach(), before
+                // its earliest lifecycle callback. updateConfiguration() is the remaining
+                // public pre-onCreate path on this device; unlike applyOverrideConfiguration,
+                // it is allowed after Resources has been initialized.
+                Log.w(TAG, "B1_GUEST_OVERRIDE_FAILED", alreadyInitialized);
+                DisplayMetrics metrics = targetMetrics(width, height);
+                activity.getResources().updateConfiguration(config, metrics);
+                Log.i(TAG, "B1_GUEST_OVERRIDE_FALLBACK widthDp=" + config.screenWidthDp +
+                        " heightDp=" + config.screenHeightDp + " densityDpi=" + metrics.densityDpi);
+            }
             WindowManager.LayoutParams attrs = activity.getWindow().getAttributes();
             attrs.width = width;
             attrs.height = height;
             activity.getWindow().setAttributes(attrs);
+            configurationPrepared.add(activity);
             Log.i(TAG, "B1_GUEST_OVERRIDE widthDp=" + config.screenWidthDp +
                     " heightDp=" + config.screenHeightDp + " densityDpi=" + config.densityDpi +
                     " window=" + width + "x" + height);
         } catch (Throwable t) {
             Log.w(TAG, "B1_GUEST_OVERRIDE_FAILED", t);
         }
+    }
+
+    @SuppressLint("WrongConstant")
+    private DisplayMetrics targetMetrics(int width, int height) {
+        DisplayMetrics metrics = new DisplayMetrics();
+        metrics.densityDpi = TARGET_DENSITY_DPI;
+        metrics.density = TARGET_DENSITY_DPI / 160f;
+        metrics.scaledDensity = metrics.density;
+        metrics.widthPixels = width;
+        metrics.heightPixels = height;
+        return metrics;
     }
 
     @Override
@@ -178,8 +215,22 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         final long downTime = System.currentTimeMillis();
         tap(root, root.getWidth() / 2f, Math.max(1f, root.getHeight() - 45f), "onboarding");
         root.postDelayed(() -> {
-            tap(root, Math.max(1f, root.getWidth() - 70f), Math.max(1f, root.getHeight() - 70f), "add-task");
+            View notNow = findText(root, "Not now");
+            if (notNow != null) {
+                tapView(root, notNow, "not-now");
+            } else if ("org.mozilla.firefox".equals(activity.getPackageName())) {
+                // Firefox's Compose onboarding text is not exposed as a TextView in the
+                // virtual hierarchy. On its second page, the public Not now button is at
+                // the center of the lower half of the 1280x720 target.
+                tap(root, root.getWidth() / 2f, root.getHeight() * 0.7f, "firefox-not-now");
+            } else {
+                tap(root, Math.max(1f, root.getWidth() - 70f), Math.max(1f, root.getHeight() - 70f), "add-task");
+            }
             root.postDelayed(() -> {
+                if ("org.mozilla.firefox".equals(activity.getPackageName())) {
+                    drag(root, root.getWidth() / 2f, root.getHeight() * 0.82f,
+                            root.getWidth() / 2f, root.getHeight() * 0.18f, "scroll");
+                }
                 View edit = findEditable(root);
                 if (edit != null) {
                     edit.setFocusableInTouchMode(true);
@@ -187,12 +238,12 @@ final class GuestPresentationHost extends AppLifecycleCallback {
                 }
                 Log.i(TAG, "B1_INPUT_FOCUS view=" + edit + " rootFocus=" + root.findFocus());
                 int[] keys = {KeyEvent.KEYCODE_T, KeyEvent.KEYCODE_E, KeyEvent.KEYCODE_S, KeyEvent.KEYCODE_T,
-                        KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_ENTER};
+                        KeyEvent.KEYCODE_DEL};
                 for (int key : keys) {
                     boolean keyDown = root.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
                     boolean keyUp = root.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
                     Log.i(TAG, "B1_INPUT_KEY code=" + key + " down=" + keyDown + " up=" + keyUp +
-                            " focus=" + root.findFocus());
+                            " focus=" + root.findFocus() + " text=" + editableText(edit));
                 }
             }, 800L);
         }, 1200L);
@@ -208,6 +259,54 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         up.recycle();
         Log.i(TAG, "B1_INPUT_TAP label=" + label + " x=" + x + " y=" + y +
                 " down=" + tapDown + " up=" + tapUp);
+    }
+
+    private void tapView(View root, View target, String label) {
+        int[] location = new int[2];
+        target.getLocationOnScreen(location);
+        tap(root, location[0] + target.getWidth() / 2f,
+                location[1] + target.getHeight() / 2f, label);
+    }
+
+    private void drag(View root, float startX, float startY, float endX, float endY, String label) {
+        long downTime = System.currentTimeMillis();
+        MotionEvent down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, startX, startY, 0);
+        root.dispatchTouchEvent(down);
+        down.recycle();
+        for (int i = 1; i <= 8; i++) {
+            float fraction = i / 8f;
+            MotionEvent move = MotionEvent.obtain(downTime, downTime + i * 30L,
+                    MotionEvent.ACTION_MOVE, startX + (endX - startX) * fraction,
+                    startY + (endY - startY) * fraction, 0);
+            root.dispatchTouchEvent(move);
+            move.recycle();
+        }
+        MotionEvent up = MotionEvent.obtain(downTime, downTime + 300L, MotionEvent.ACTION_UP, endX, endY, 0);
+        root.dispatchTouchEvent(up);
+        up.recycle();
+        Log.i(TAG, "B1_INPUT_DRAG label=" + label + " start=" + startX + "," + startY +
+                " end=" + endX + "," + endY);
+    }
+
+    private View findText(View view, String text) {
+        if (view instanceof android.widget.TextView && text.contentEquals(((android.widget.TextView) view).getText())) {
+            return view;
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                View result = findText(group.getChildAt(i), text);
+                if (result != null) return result;
+            }
+        }
+        return null;
+    }
+
+    private String editableText(View edit) {
+        if (edit instanceof android.widget.TextView) {
+            return ((android.widget.TextView) edit).getText().toString();
+        }
+        return "<none>";
     }
 
     private View findEditable(View view) {
@@ -226,6 +325,7 @@ final class GuestPresentationHost extends AppLifecycleCallback {
     public void onActivityDestroyed(Activity activity) {
         if (isHostActivity(activity)) return;
         moveScheduled.remove(activity);
+        configurationPrepared.remove(activity);
         if (presentation != null) {
             try { presentation.dismiss(); } catch (Throwable ignored) { }
             presentation = null;

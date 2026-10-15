@@ -49,5 +49,83 @@ pmproxy="$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/fake/service/
 logging_h="$VENDOR/dobby/external/logging/logging/logging.h"
 [[ -f "$logging_h" ]] && sed -i 's/^Logger \*Logger::Shared() {/inline Logger *Logger::Shared() {/' "$logging_h"
 
+# The fork's lifecycle callback list is dispatched after Activity.onCreate. The path-B host
+# needs one callback after Activity.attach() but before the delegate initializes resources or
+# calls the guest onCreate, otherwise applyOverrideConfiguration() is already too late. Keep
+# this patch here because Bcore is fetched into the ignored vendor tree on every clean build.
+python3 - "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/fake/delegate/AppInstrumentation.java" \
+         "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/fake/delegate/BaseInstrumentationDelegate.java" <<'PY'
+from pathlib import Path
+import sys
+
+app = Path(sys.argv[1])
+base = Path(sys.argv[2])
+
+text = app.read_text()
+if "notifyBeforeMainActivityOnCreate(activity);" not in text:
+    old = """    public void callActivityOnCreate(Activity activity, Bundle icicle, PersistableBundle persistentState) {
+        checkActivity(activity);
+        super.callActivityOnCreate(activity, icicle, persistentState);
+    }"""
+    new = """    public void callActivityOnCreate(Activity activity, Bundle icicle, PersistableBundle persistentState) {
+        notifyBeforeMainActivityOnCreate(activity);
+        checkActivity(activity);
+        super.callActivityOnCreate(activity, icicle, persistentState);
+    }"""
+    text = text.replace(old, new)
+    old = """    public void callActivityOnCreate(Activity activity, Bundle icicle) {
+        checkActivity(activity);
+        super.callActivityOnCreate(activity, icicle);
+    }"""
+    new = """    public void callActivityOnCreate(Activity activity, Bundle icicle) {
+        notifyBeforeMainActivityOnCreate(activity);
+        checkActivity(activity);
+        super.callActivityOnCreate(activity, icicle);
+    }"""
+    text = text.replace(old, new)
+    marker = "\n    @Override\n    public void callApplicationOnCreate(Application app) {"
+    helper = """
+    private void notifyBeforeMainActivityOnCreate(Activity activity) {
+        try {
+            BlackBoxCore.get().onBeforeMainActivityOnCreate(activity);
+        } catch (Throwable t) {
+            Log.w(TAG, \"beforeMainActivityOnCreate callback failed\", t);
+        }
+    }
+"""
+    text = text.replace(marker, helper + marker)
+    app.write_text(text)
+
+text = base.read_text()
+if "private void notifyBeforeMainActivityOnCreate" not in text:
+    old = """    public void callActivityOnCreate(Activity activity, Bundle icicle) {
+        mBaseInstrumentation.callActivityOnCreate(activity, icicle);"""
+    new = """    public void callActivityOnCreate(Activity activity, Bundle icicle) {
+        notifyBeforeMainActivityOnCreate(activity);
+        mBaseInstrumentation.callActivityOnCreate(activity, icicle);"""
+    text = text.replace(old, new)
+    old = """    public void callActivityOnCreate(Activity activity, Bundle icicle, PersistableBundle persistentState) {
+        mBaseInstrumentation.callActivityOnCreate(activity, icicle, persistentState);"""
+    new = """    public void callActivityOnCreate(Activity activity, Bundle icicle, PersistableBundle persistentState) {
+        notifyBeforeMainActivityOnCreate(activity);
+        mBaseInstrumentation.callActivityOnCreate(activity, icicle, persistentState);"""
+    text = text.replace(old, new)
+    marker = "\n    @Override\n    public void callActivityOnDestroy(Activity activity) {"
+    helper = """
+    private void notifyBeforeMainActivityOnCreate(Activity activity) {
+        try {
+            // Activity.attach() has completed, but the delegate has not yet called the base
+            // Instrumentation or guest onCreate().
+            BlackBoxCore.get().onBeforeMainActivityOnCreate(activity);
+        } catch (Throwable t) {
+            android.util.Log.w(\"BaseInstrumentationDelegate\",
+                    \"beforeMainActivityOnCreate callback failed\", t);
+        }
+    }
+"""
+    text = text.replace(marker, helper + marker)
+    base.write_text(text)
+PY
+
 # Gradle/CMake read the ignored vendor tree; no generated sources enter tracked src/.
 printf '%s\n' "Fetched $REV and Dobby $DOBBY_REV; prebuilt artifacts excluded." > "$VENDOR/MANIFEST"

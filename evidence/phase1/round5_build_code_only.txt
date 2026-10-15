@@ -3,6 +3,11 @@ Round 5 build evidence (code-only, 2026-10-15)
 Environment: /opt/android-sdk, Java 17, Gradle wrapper 9.8.1.
 
 Commands and results:
+- Final combined command after the T2 fallback, Firefox input/drag diagnostics, and Chrome
+  compact audit:
+  `ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk ./gradlew
+  :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain`
+  -> `BUILD SUCCESSFUL` in 7m47s.
 - ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk ./gradlew
   :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain -> BUILD SUCCESSFUL
 - ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk ./gradlew
