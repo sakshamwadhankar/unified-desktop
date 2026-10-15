@@ -85,10 +85,15 @@ these facts.** Re-verify anything critical: Android changes.
   `mCallState=0` (no active call).
 - WSL2 cannot reach adb forwards bound on Windows `127.0.0.1`.
 - **The coding agent (OmniRush) runs inside its own WSL 2 distro `OmniRushBox`.** It cannot
-  see USB devices, and Windows interop is off (no `adb.exe` from inside). To reach the
-  phone: with the phone on USB, on Windows run `adb -s 2c0f6edc tcpip 5555`, read the
-  phone's Wi-Fi IP, then inside the box `adb connect <ip>:5555`. Same Wi-Fi needed; redo
-  after a phone reboot. Developer-only; the user never does this.
+  see USB devices, and Windows interop is off (no `adb.exe` from inside). Working method
+  (verified 2026-10-15): on Windows, `adb kill-server` then `adb -a start-server` (listens
+  on all interfaces, phone stays on USB); inside the box
+  `export ADB_SERVER_SOCKET=tcp:<Windows WSL IP>:5037` (was `172.27.128.1`; it is the
+  box's default gateway, or `vEthernet (WSL)` in `ipconfig`). The box's adb client must
+  be protocol 41 (Windows: platform-tools 37.0.0); never run `adb kill-server` or
+  `start-server` from the box, that would stop the Windows server. Redo `-a start-server`
+  after a PC reboot. Fallback: adb over Wi-Fi (`adb tcpip 5555`, then `adb connect`).
+  Developer-only; the user never does this.
 - `ssh-keygen -N ''` run through `cmd /c` sets a literal `''` passphrase: make keys in WSL.
 - Android emulator: AVD `Pixel_8_Pro` has 6 GB RAM (`hw.ramSize=6144`); at 2 GB heavy work
   was killed. If its NFC/UWB crash loop starts, reboot it before measuring. Its UDP port
