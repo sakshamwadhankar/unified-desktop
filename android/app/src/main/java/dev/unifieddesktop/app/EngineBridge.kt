@@ -4,6 +4,8 @@ import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
 import android.content.ComponentName
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.util.Log
 import top.niunaijun.blackbox.BlackBoxCore
 
@@ -24,6 +26,54 @@ class EngineBridge(private val context: Context) {
             EngineResult(result.success, result.msg)
         } catch (t: Throwable) {
             EngineResult(false, t.message ?: t.javaClass.simpleName)
+        }
+    }
+
+    fun installGms(userId: Int): EngineResult {
+        return try {
+            val supported = core.isSupportGms()
+            Log.i("Phase1-GMS", "GMS_SUPPORT supported=$supported")
+            if (!supported) {
+                return EngineResult(false, "engine host package manager does not expose $GMS_PACKAGE")
+            }
+            val result = core.installGms(userId)
+            val installed = core.isInstallGms(userId)
+            val traces = core.hasGmsTraces(userId)
+            val details = "success=${result.success} package=${result.packageName} msg=${result.msg} " +
+                "installedGms=$installed traces=$traces"
+            Log.i("Phase1-GMS", "GMS_INSTALL $details")
+            EngineResult(result.success, details)
+        } catch (t: Throwable) {
+            Log.e("Phase1-GMS", "GMS_INSTALL_EXCEPTION", t)
+            EngineResult(false, "${t.javaClass.name}: ${t.message}")
+        }
+    }
+
+    fun describePackage(packageName: String): String {
+        return try {
+            val virtual = BlackBoxCore.getBPackageManager().getPackageInfo(
+                packageName,
+                PackageManager.GET_ACTIVITIES or PackageManager.GET_SERVICES or PackageManager.GET_PROVIDERS,
+                0
+            )
+            val host = context.packageManager.getPackageInfo(
+                packageName,
+                PackageManager.GET_ACTIVITIES or PackageManager.GET_SERVICES or PackageManager.GET_PROVIDERS
+            )
+            val virtualActivities = virtual?.activities?.joinToString(";") { activity ->
+                "${activity.name}:alias=${activity.targetActivity}"
+            } ?: "null"
+            val hostActivities = host.activities?.joinToString(";") { activity ->
+                "${activity.name}:alias=${activity.targetActivity}"
+            } ?: "null"
+            val splits = host.applicationInfo?.splitNames?.joinToString(",") ?: "none"
+            val result = "hostSplits=$splits hostActivities=$hostActivities virtualActivities=$virtualActivities"
+            Log.i("Phase1-Launch", "PACKAGE_INFO package=$packageName $result")
+            result
+        } catch (t: Throwable) {
+            val result = "${t.javaClass.name}: ${t.message}"
+            Log.e("Phase1-Launch", "PACKAGE_INFO_EXCEPTION package=$packageName $result", t)
+            result
         }
     }
 
@@ -67,19 +117,48 @@ class EngineBridge(private val context: Context) {
      * virtual package record (for example a split-installed browser). */
     private fun launchIntent(packageName: String): Intent? {
         val virtual = BlackBoxCore.getBPackageManager().getLaunchIntentForPackage(packageName, 0)
-        if (virtual != null) return virtual
+        if (virtual != null) {
+            Log.i("Phase1-Launch", "VIRTUAL_LAUNCH_COMPONENT package=$packageName component=${virtual.component}")
+            return virtual
+        }
         val host = context.packageManager.getLaunchIntentForPackage(packageName)
             ?: return null
         val component: ComponentName = host.component ?: return null
-        val virtualInfo = BlackBoxCore.getBPackageManager().getActivityInfo(component, 0, 0)
-        if (virtualInfo == null) {
-            Log.e("Phase1-Launch", "VIRTUAL_LAUNCH_COMPONENT_MISSING package=$packageName component=$component")
-            return null
+        val hostInfo = try {
+            context.packageManager.getActivityInfo(component, PackageManager.MATCH_ALL)
+        } catch (_: PackageManager.NameNotFoundException) {
+            null
         }
-        return Intent(Intent.ACTION_MAIN)
-            .addCategory(Intent.CATEGORY_LAUNCHER)
-            .setComponent(component)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            .also { Log.w("Phase1-Launch", "VIRTUAL_LAUNCH_FALLBACK package=$packageName component=$component") }
+        val candidates = linkedSetOf<ComponentName>()
+        candidates += component
+        hostInfo?.targetActivity?.let { target ->
+            val targetName = when {
+                target.startsWith(".") -> packageName + target
+                target.indexOf('.') < 0 -> "$packageName.$target"
+                else -> target
+            }
+            candidates += ComponentName(packageName, targetName)
+            Log.i("Phase1-Launch", "HOST_LAUNCH_ALIAS package=$packageName alias=$component target=${candidates.last()}")
+        }
+        for (candidate in candidates) {
+            val virtualInfo: ActivityInfo? = try {
+                BlackBoxCore.getBPackageManager().getActivityInfo(candidate, 0, 0)
+            } catch (_: Throwable) {
+                null
+            }
+            if (virtualInfo != null) {
+                return Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_LAUNCHER)
+                    .setComponent(candidate)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .also { Log.w("Phase1-Launch", "VIRTUAL_LAUNCH_FALLBACK package=$packageName component=$candidate") }
+            }
+        }
+        Log.e("Phase1-Launch", "VIRTUAL_LAUNCH_COMPONENT_MISSING package=$packageName candidates=$candidates")
+        return null
+    }
+
+    private companion object {
+        const val GMS_PACKAGE = "com.google.android.gms"
     }
 }

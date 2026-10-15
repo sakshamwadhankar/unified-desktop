@@ -1,0 +1,24 @@
+Round 5 source audit (code-only, 2026-10-15)
+
+T1 GMS:
+- Bcore exposes BlackBoxCore.isSupportGms(), installGms(userId), isInstallGms(userId), and
+  hasGmsTraces(userId).
+- GmsCore.installGApps() imports the phone packages in its GOOGLE_SERVICE/GOOGLE_APP sets;
+  those sets include com.google.android.gms, com.google.android.gsf, and com.android.vending.
+- EngineBridge now calls isSupportGms() before installGms(0), logs the InstallResult fields,
+  and continues to launch the requested guest. The app manifest has three explicit <queries>
+  package entries and does not use QUERY_ALL_PACKAGES.
+
+T2 sizing:
+- GuestPresentationHost.beforeMainActivityOnCreate now sets densityDpi=320,
+  screenWidthDp=640, screenHeightDp=360, landscape, and the window attributes to 1280x720
+  before the guest lifecycle reaches onCreate/setContentView.
+- The post-resume diagnostic remains in place to report B1_BEFORE_MOVE and the final decor
+  size. No phone log or PNG was produced in this round because the adb server was unreachable.
+
+T4 resolver:
+- EngineBridge now logs host and virtual activity records, host split names, and considers
+  an activity-alias target component before reporting VIRTUAL_LAUNCH_COMPONENT_MISSING.
+- The package audit runs after virtual import, so it can compare the imported virtual
+  activity records with the host's split/alias records.
+- No phone package dump or browser PNG was produced in this round.

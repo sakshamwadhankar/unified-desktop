@@ -1,0 +1,17 @@
+Round 5 build evidence (code-only, 2026-10-15)
+
+Environment: /opt/android-sdk, Java 17, Gradle wrapper 9.8.1.
+
+Commands and results:
+- ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk ./gradlew
+  :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain -> BUILD SUCCESSFUL
+- ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk ./gradlew
+  :app:testDebugUnitTest --console=plain -> BUILD SUCCESSFUL
+- ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk ./gradlew
+  :app:lintDebug --console=plain -> BUILD SUCCESSFUL
+- ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk ./gradlew
+  :app:assembleDebug --console=plain -> BUILD SUCCESSFUL
+
+Lint reported no errors after suppressing the intentional non-standard 320-dpi test
+configuration assignment. The APK was assembled locally. It was not installed because the
+Windows adb server was unreachable from the coding container.

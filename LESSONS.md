@@ -94,6 +94,12 @@ these facts.** Re-verify anything critical: Android changes.
   `start-server` from the box, that would stop the Windows server. Redo `-a start-server`
   after a PC reboot. Fallback: adb over Wi-Fi (`adb tcpip 5555`, then `adb connect`).
   Developer-only; the user never does this.
+- **The Windows adb server falls back to localhost-only** whenever it is restarted without
+  `-a` (any plain `adb` command after the server died, Android Studio). Then the box times out
+  on `172.27.128.1:5037` (round 5 lost its whole phone run to this). Before handing out a
+  phone round, check `netstat -ano | grep LISTENING | grep :5037` shows `0.0.0.0:5037`.
+- The box has no `/dev/kvm`: the emulator cannot run inside it. An emulator fallback must
+  run on Windows, reached through the same adb server.
 - `ssh-keygen -N ''` run through `cmd /c` sets a literal `''` passphrase: make keys in WSL.
 - Android emulator: AVD `Pixel_8_Pro` has 6 GB RAM (`hw.ramSize=6144`); at 2 GB heavy work
   was killed. If its NFC/UWB crash loop starts, reboot it before measuring. Its UDP port

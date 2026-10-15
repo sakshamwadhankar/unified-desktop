@@ -2,6 +2,7 @@ package dev.unifieddesktop.app;
 
 import android.app.Activity;
 import android.app.Presentation;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -31,6 +32,7 @@ import top.niunaijun.blackbox.app.configuration.AppLifecycleCallback;
  */
 final class GuestPresentationHost extends AppLifecycleCallback {
     private static final String TAG = "Phase1-B1";
+    private static final int TARGET_DENSITY_DPI = 320;
     static final String PREFS = "phase1-path-b";
     static final String DISPLAY_ID = "display_id";
     private Presentation presentation;
@@ -62,17 +64,21 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         try {
             int width = display.getMode().getPhysicalWidth();
             int height = display.getMode().getPhysicalHeight();
-            DisplayMetrics metrics = new DisplayMetrics();
-            display.getRealMetrics(metrics);
             Configuration config = new Configuration(activity.getResources().getConfiguration());
-            config.screenWidthDp = Math.round(width * 160f / metrics.densityDpi);
-            config.screenHeightDp = Math.round(height * 160f / metrics.densityDpi);
+            config.densityDpi = TARGET_DENSITY_DPI;
+            config.screenWidthDp = Math.round(width * 160f / TARGET_DENSITY_DPI);
+            config.screenHeightDp = Math.round(height * 160f / TARGET_DENSITY_DPI);
             config.smallestScreenWidthDp = Math.min(config.screenWidthDp, config.screenHeightDp);
             config.orientation = width >= height ? Configuration.ORIENTATION_LANDSCAPE :
                     Configuration.ORIENTATION_PORTRAIT;
             activity.applyOverrideConfiguration(config);
+            WindowManager.LayoutParams attrs = activity.getWindow().getAttributes();
+            attrs.width = width;
+            attrs.height = height;
+            activity.getWindow().setAttributes(attrs);
             Log.i(TAG, "B1_GUEST_OVERRIDE widthDp=" + config.screenWidthDp +
-                    " heightDp=" + config.screenHeightDp + " densityDpi=" + metrics.densityDpi);
+                    " heightDp=" + config.screenHeightDp + " densityDpi=" + config.densityDpi +
+                    " window=" + width + "x" + height);
         } catch (Throwable t) {
             Log.w(TAG, "B1_GUEST_OVERRIDE_FAILED", t);
         }
@@ -107,20 +113,26 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         }, 200L);
     }
 
+    @SuppressLint("WrongConstant")
     private void moveAfterResume(Activity activity, Display display) {
         try {
             View decor = activity.getWindow().getDecorView();
             int width = display.getMode().getPhysicalWidth();
             int height = display.getMode().getPhysicalHeight();
-            DisplayMetrics metrics = new DisplayMetrics();
-            display.getRealMetrics(metrics);
             Configuration config = new Configuration(activity.getResources().getConfiguration());
-            config.screenWidthDp = Math.round(width * 160f / metrics.densityDpi);
-            config.screenHeightDp = Math.round(height * 160f / metrics.densityDpi);
+            config.densityDpi = TARGET_DENSITY_DPI;
+            config.screenWidthDp = Math.round(width * 160f / TARGET_DENSITY_DPI);
+            config.screenHeightDp = Math.round(height * 160f / TARGET_DENSITY_DPI);
             config.smallestScreenWidthDp = Math.min(config.screenWidthDp, config.screenHeightDp);
             config.orientation = width >= height ? Configuration.ORIENTATION_LANDSCAPE :
                     Configuration.ORIENTATION_PORTRAIT;
             try {
+                DisplayMetrics metrics = new DisplayMetrics();
+                metrics.densityDpi = TARGET_DENSITY_DPI;
+                metrics.density = TARGET_DENSITY_DPI / 160f;
+                metrics.scaledDensity = metrics.density;
+                metrics.widthPixels = width;
+                metrics.heightPixels = height;
                 activity.getResources().updateConfiguration(config, metrics);
                 Log.i(TAG, "B1_GUEST_CONFIGURATION widthDp=" + config.screenWidthDp +
                         " heightDp=" + config.screenHeightDp + " densityDpi=" + metrics.densityDpi);

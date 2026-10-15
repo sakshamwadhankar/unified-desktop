@@ -436,3 +436,53 @@ Corrections:
   field proves typing.
 
 Verdict: Phase 1 stays open for one more bounded round (round 5).
+
+## Round 5 (phone) — 2026-10-15
+
+### Execution status
+
+This round could not reach the authorized phone. The required Windows adb server endpoint
+`tcp:172.27.128.1:5037` timed out from the coding container; `adb devices -l` produced no
+device. The documented fallback emulator was also unavailable: the `Pixel_8_Pro` AVD
+reported that x86_64 emulation requires hardware acceleration and `/dev/kvm` was absent.
+Its local configuration is 2 GB rather than the required 6 GB, so no emulator result is
+claimed. Evidence: `evidence/phase1/round5_adb_unreachable.txt`.
+
+No APK install, phone screen touch, phone screencap, package dump, guest launch, or phone
+performance sample was run in this round. There are consequently no new PNG hashes and no
+phone verification claim. The remaining phone work is deferred in `SKIPS.md`.
+
+### Source changes prepared for the next phone run
+
+- **B-002 / GMS:** `EngineBridge` now checks `BlackBoxCore.isSupportGms()` and calls the
+  engine's existing `installGms(0)`. It records `InstallResult.success`, package, message,
+  `isInstallGms`, and `hasGmsTraces`. The manifest adds explicit queries for
+  `com.google.android.gms`, `com.google.android.gsf`, and `com.android.vending`; it does
+  not add `QUERY_ALL_PACKAGES`. The source audit confirmed `GmsCore.installGApps()` imports
+  those phone packages rather than using fake or bundled GMS.
+- **B-001 / pre-inflation sizing:** `beforeMainActivityOnCreate` now applies landscape,
+  320 dpi, 640x360 dp, and 1280x720 window attributes before the guest's first
+  `setContentView`. The existing post-resume diagnostic still records the actual decor
+  size. The required phone proof (`B1_BEFORE_MOVE` and a whole frame) remains outstanding.
+- **B-003 / Chrome:** after import, the harness logs host and virtual activity records and
+  all host split names. The resolver tries the host launcher component and, when it is an
+  activity-alias, its resolved `targetActivity` component, but still enters BlackBox's
+  virtual activity manager. Firefox was not installed because the phone was unreachable.
+
+Code-only source and build evidence: `evidence/phase1/round5_source_audit.txt` and
+`evidence/phase1/round5_build_code_only.txt`.
+
+### Round 5 gate table
+
+| Gate | Result | Evidence / exact gap |
+|---|---|---|
+| G1 whole guest on our display and browser page | **PARTIAL / not re-verified** | Round 3/4 Tasks path-B rendering remains the prior phone proof, but round-5 sizing and browser changes have no phone frame. |
+| G2 same-moment real-screen capture shows neither guest nor keyboard | **PARTIAL / not re-verified** | Prior Tasks proof remains; no round-5 phone screencap. |
+| G3 typed text plus tap result | **PARTIAL / open** | Prior paired tap proof remains; no round-5 focused editor or typed-text frame. |
+| G4 no Accessibility, signature/privileged permission, developer mode, or QUERY_ALL_PACKAGES | **PASS for source/build** | Public Presentation/View APIs remain in use; manifest has three package queries and no `QUERY_ALL_PACKAGES`. Not a new phone run. |
+| G5 moving-guest numbers | **OPEN** | No phone workload; no moving FPS, PSS/RSS, CPU, process-count, or kill-action numbers. |
+| G6 Android build | **PASS, code-only** | `:app:testDebugUnitTest`, `:app:lintDebug`, and `:app:assembleDebug` each returned `BUILD SUCCESSFUL`; see `round5_build_code_only.txt`. |
+
+Phase 1 is **not closed** by round 5. The code fixes are prepared, but the four phone
+verification items and the moving measurement remain open because the device and the
+hardware-accelerated fallback were unavailable.

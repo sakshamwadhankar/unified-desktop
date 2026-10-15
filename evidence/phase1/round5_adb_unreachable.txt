@@ -1,0 +1,17 @@
+Round 5 device reachability evidence (2026-10-15)
+
+Required server attempt:
+- ADB_SERVER_SOCKET=tcp:172.27.128.1:5037 adb devices -l -> no device output and the
+  command timed out.
+- TCP probe to 172.27.128.1:5037 -> timeout.
+- The container default route gateway is 172.27.128.1, so the documented fallback is the
+  same address and also timed out.
+
+The authorized phone serial 2c0f6edc could not be reached in this session. No adb install,
+screen touch, phone screencap, package dump, guest launch, or device measurement was run.
+There is no PNG hash for this round: no phone frame was captured.
+
+Fallback emulator attempt:
+- `Pixel_8_Pro` could not start because `/dev/kvm` is unavailable (`x86_64 emulation
+  currently requires hardware acceleration`). The local AVD configuration also reports
+  `hw.ramSize = 2G`; no emulator test was claimed or run.
