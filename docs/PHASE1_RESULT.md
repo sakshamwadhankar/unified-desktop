@@ -510,3 +510,122 @@ Corrections:
   is installed and when it is skipped; log each package's own result.
 - The stay-awake setting was left on after the disconnect (the manager restored it).
 - T3 typing used Firefox's onboarding; Firefox's home page has a search field.
+
+## Round 6 (phone) — 2026-10-15
+
+Round 6 used the authorized phone `2c0f6edc`. The phone was guarded with
+`dumpsys telephony.registry` before the runs that touched the guest. The later moving run
+entered an active call and then lost adb; no touch was sent after the call state changed.
+Short evidence and PNG hashes are in `evidence/phase1/round6_phone_results.txt`.
+
+### Google Play services and signatures
+
+The remaining GMS contradiction was diagnosed in two layers. First, the installer treated a
+normal GMS `.apk` as an APK-set because the APK contains embedded APK-shaped assets. Second,
+the vendored package-manager proxy returned a hard-coded fake Play Store `PackageInfo` with no
+real signing fields. The reproducible fixes are in `android/engine/fetch-source.sh`:
+
+- `.apk` inputs are never reinterpreted as `.apks` bundles;
+- `com.android.vending` follows the normal virtual package path, where
+  `PackageManagerCompat` returns the host certificate or parsed APK certificate;
+- virtual `getPackageUid` no longer delegates to the host package manager for installed
+  virtual packages;
+- broad installer exceptions are returned as failed `InstallResult`s with diagnostics.
+
+On the phone, guest and host SHA-256 signature output matched for both Play Store and GMS.
+`GMS_INSTALL` reported `installedGms=true`. Google Tasks reached its unauthenticated **Sign
+in** screen rather than the previous **Update Google Play Services** screen. No account was
+entered. Residual `Package ... does not belong to 10295` messages remain in the complete
+system log from other Google service paths; they did not prevent Tasks reaching sign-in and
+are not claimed fixed by this round.
+
+### Firefox input and page
+
+The Firefox input path now uses a public `InputConnection` on the focused Compose view rather
+than `Activity.dispatchKeyEvent`. The Presentation window is focusable, pointer timestamps use
+`uptimeMillis`, and the detached guest decor is reattached inside a normal public FrameLayout
+container so Firefox's later Compose relayout does not receive incompatible window layout
+parameters.
+
+The phone log recorded:
+
+```text
+B1_INPUT_TAP label=firefox-search x=499.19998 y=64.8 down=true up=true
+B1_INPUT_CONNECTION target=androidx.compose.ui.platform.AndroidComposeView
+  commit=true action=true textLength=19
+```
+
+The captured page frame showed Firefox's address bar with `example.com`; the corresponding
+typed frame was captured before the committed text was visibly painted. Therefore the input
+implementation is phone-exercised, but the strict visual typed-text gate remains partial.
+The real-screen capture from the same round showed the harness and no real-screen keyboard.
+
+### Moving workload and survival
+
+The valid moving workload was not completed. The corrected guarded attempt first encountered
+an unsupported `am start` flag, then the retry ran into an active phone call and adb
+disconnected. No FPS, first-frame, per-process PSS/RSS/CPU, or kill-action result is claimed
+for that invalid run. A fresh Firefox ten-minute page survival watch was consequently not
+run. The earlier Round 4 ten-minute idle Tasks watch remains valid but is not a Firefox-page
+survival result.
+
+### Round 6 gate table
+
+| Gate | Result | Evidence / exact gap |
+|---|---|---|
+| G1 guest plus loaded Firefox page | **PARTIAL** | Firefox address bar reached `example.com`; body was blank in the captured frame, and a final post-container re-run was blocked by phone availability. |
+| G2 real screen shows neither guest nor keyboard | **PASS for the captured Tasks control; PARTIAL for Firefox** | `round6_tasks_real_screen.png` shows the harness, not the guest or keyboard; no synchronized final Firefox screencap survived the disconnect. |
+| G3 typed text plus tap | **PARTIAL** | Tap and `InputConnection.commitText`/IME action returned true; no frame visibly showing the typed string before navigation. |
+| G4 no Accessibility/signature permission/dev mode/QUERY_ALL_PACKAGES | **PASS** | Public Presentation/View/InputConnection APIs; no Accessibility service or privileged permission; no `QUERY_ALL_PACKAGES`. |
+| G5 moving numbers | **FAIL / skipped** | Active call and adb loss; exact skip row is in `SKIPS.md`. |
+| G6 Android build | **PASS, code-only** | The combined required Gradle command was run after the final source changes and returned `BUILD SUCCESSFUL`. |
+| GMS / Tasks | **PASS for the requested prompt gate** | Guest/host signatures match; Tasks reached sign-in without the Play-services update prompt. |
+
+## Phase 1 verdict
+
+Phase 1 proves the central path-B rendering architecture on the real phone: a Play-installed
+app can run inside the BlackBox process and its real window can be shown on our app-owned
+1280x720 Presentation while the physical screen shows something else. Taps work. GMS and Play
+Store signing metadata now match the host APKs, and Tasks passes the previous Play-services
+availability screen. Firefox accepts text through the same in-process InputConnection style
+that a future PC keyboard router can use.
+
+The strict Phase 1 performance and visual-input gates are **not closed** in this round. A
+fresh moving guest benchmark and Firefox ten-minute survival sample were invalidated by the
+phone call/adb disconnect, and the final Firefox capture did not show the committed text as a
+separate painted frame. The honest product implication is therefore:
+
+- hidden Android rendering is demonstrated, with a real phone smoke rate of 8.77 fps for the
+  earlier pipe test and prior loaded-guest PSS samples of roughly 45,880–55,071 kB;
+- GMS is usable enough for Tasks to reach sign-in, but residual virtual UID errors require
+  another stability pass before claiming broad Play-app compatibility;
+- the input method is technically demonstrated at the API boundary, but its visual frame
+  confirmation and sustained moving/survival numbers remain open;
+- no claim is made that the PRD's 30-fps moving target or long-session resource budget has
+  passed on this Snapdragon 695 phone.
+
+The remaining rows are explicit in `BUGS.md` and `SKIPS.md`; Chrome remains deferred to Phase 7
+as B-003. No system-only permission, Accessibility service, developer mode, root, ADB user
+requirement, or VM was added.
+
+### Manager review of round 6 (2026-10-16)
+
+Checked: the code diff, the evidence file, all round-6 PNG hashes (match the report), the
+frames themselves, and the Firefox logcat. The phone was offline at review time, so no re-run.
+
+- **GMS: verified.** The Tasks frame shows its own "Welcome to Tasks / Sign in" screen; the
+  Play-services prompt is gone. B-002 moved to Fixed.
+- **Typing: the input path works.** The page frame shows `example.com` in Firefox's address
+  bar after the `InputConnection` commit + Go, so the text reached Firefox and was submitted.
+  Only a frame of the text before submit is missing.
+- **The blank page is a crash, not slow loading.** The logcat shows Firefox crashing with
+  `ClassCastException: WindowManager$LayoutParams cannot be cast to MarginLayoutParams`
+  right after its browser screen opens (new bug B-006). The write-up above only said "body was
+  blank"; the cause was in the agent's own log. The FrameLayout wrapper meant to fix it is
+  built but not yet run on the phone.
+- The second real-screen capture (`round6_tasks_after_uid_real_screen.png`, local only)
+  shows the owner using another app on the phone at that moment: the guest was hidden and
+  the phone stayed usable. It holds private content and must never be committed or shared.
+- Moving numbers and Firefox survival: not done (phone call, then adb lost). Valid skip.
+- Phase 1 gate is not closed: G1 (loaded page), G3 (visible typed text), G5 (moving numbers,
+  survival) remain for round 7.

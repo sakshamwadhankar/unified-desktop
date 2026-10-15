@@ -131,14 +131,30 @@ PY
 # default-success InstallResult even when its broad catch drops an exception, which makes a
 # failed system-package import look successful to the host harness.
 python3 - "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/BPackageManagerService.java" \
-         "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java" <<'PY'
+         "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/core/system/pm/Settings.java" \
+         "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/fake/service/IPackageManagerProxy.java" <<'PY'
 from pathlib import Path
 import sys
 
 pm = Path(sys.argv[1])
 settings = Path(sys.argv[2])
+ipm = Path(sys.argv[3])
 
 text = pm.read_text()
+ipm_text = ipm.read_text()
+start = ipm_text.find('            if ("com.android.vending".equals(packageName)) {')
+if start < 0:
+    raise SystemExit("Play Store fake package branch marker not found")
+end = ipm_text.find('            PackageInfo packageInfo =', start)
+if end < 0:
+    raise SystemExit("Play Store normal package branch marker not found")
+replacement = """            // Play Store must use the normal virtual package path. The former hard-coded fake
+            // response omitted signing fields and used a host-independent UID, so Google apps
+            // rejected it as an invalid Play Store (error 9). PackageManagerCompat supplies the
+            // real host certificate for installed packages, with the parsed APK as fallback.
+"""
+ipm_text = ipm_text[:start] + replacement + ipm_text[end:]
+ipm.write_text(ipm_text)
 old = """        } catch (Throwable t) {
             t.printStackTrace();
         } finally {
@@ -177,6 +193,36 @@ if old not in text:
     raise SystemExit("APKS detection marker not found")
 text = text.replace(old, new, 1)
 pm.write_text(text)
+
+ipm_text = ipm.read_text()
+old = """    public static class GetPackageUid extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            MethodParameterUtils.replaceFirstAppPkg(args);
+            return method.invoke(who, args);
+        }
+    }
+"""
+new = """    public static class GetPackageUid extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String packageName = (String) args[0];
+            ApplicationInfo info = BlackBoxCore.getBPackageManager().getApplicationInfo(
+                    packageName, 0, BlackBoxCore.getUserId());
+            if (info != null) {
+                // Return the virtual app id. Delegating this query to the host PM makes Android
+                // reject Play Store/GMS checks because the caller is our host UID, not the host
+                // package's real UID.
+                return info.uid;
+            }
+            MethodParameterUtils.replaceFirstAppPkg(args);
+            return method.invoke(who, args);
+        }
+    }
+"""
+if old not in ipm_text:
+    raise SystemExit("GetPackageUid marker not found")
+ipm.write_text(ipm_text.replace(old, new, 1))
 
 text = settings.read_text()
 old = """        } catch (Throwable e) {

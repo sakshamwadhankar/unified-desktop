@@ -10,15 +10,13 @@ corrects it after review.
   virtual display) is NO-GO**, confirmed on the phone and in Android's source. Round 3
   proved public path B1 and B2 guest rendering on the real phone: Google Tasks frames land
   on our private display while a same-run real-screen capture shows something else.
-- **Last updated:** 2026-10-15, manager review of round 6 (partial; the agent stopped
-  mid-round). GMS now imports into the engine: an engine bug read the normal GMS APK as an
-  APK set (fix in `fetch-source.sh`). Manager re-run: `installedGms=true`, a
-  `com.google.android.gms` process runs under our uid. Tasks still shows "Update Google Play
-  Services": its log says `requires Google Play Store, but its signature is invalid` /
-  `error 9` (the guest sees a Play Store whose signature fails Google's check).
-- **Next action:** finish Phase 1 in one prompt: Play Store signature (B-002), typed text
-  into Firefox (through an InputConnection, since key events to a Compose field in an
-  unfocused Presentation window return false), a loaded web page, moving numbers, survival.
+- **Last updated:** 2026-10-16, manager review of round 6. Google Play services now work
+  for guests (B-002 fixed: Tasks reaches its own Sign in screen). Typed text reaches Firefox
+  through an `InputConnection` (address bar shows `example.com`). Firefox then crashes when
+  it opens the page (B-006, ClassCastException on the moved window's LayoutParams), so no
+  loaded page yet. Moving numbers and survival not measured (phone call, then adb lost).
+- **Next action:** round 7, the last Phase 1 prompt: run the B-006 fix on the phone, a
+  loaded web page, a visible typed-text frame, moving numbers, Firefox 10-minute survival.
 
 ## Done (verified on the phone, 2026-10-14)
 
@@ -69,4 +67,4 @@ corrections in `docs/PHASE1_RESULT.md`.
 | Item | Notes |
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6, questions Q1-Q6 |
-| Phase 1 round-6 remaining proof | Firefox typed keys/web page, moving workload and survival numbers; BUGS.md B-003/B-004/B-005; SKIPS.md typed keys and moving workload |
+| Phase 1 round-6 remaining proof | Strict visual typed-text frame, moving workload and Firefox-page survival; BUGS.md B-003/B-004/B-005; SKIPS.md Round 6 T3/T4 |

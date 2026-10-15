@@ -1,0 +1,67 @@
+Round 6 phone evidence — 2026-10-15, serial 2c0f6edc
+
+Device guard: adb reached the authorized OnePlus CPH2619. Before the successful GMS and
+Firefox runs, dumpsys telephony.registry reported mCallState=0. The later moving attempt
+entered a non-zero call state; no screen-touch or other touch command was issued after that
+point. The phone then disappeared from adb.
+
+GMS / Play Store
+----------------
+Source fix: android/engine/fetch-source.sh now prevents a normal .apk containing embedded
+APK-shaped assets from being treated as an .apks bundle; the fake com.android.vending
+PackageInfo branch is removed; virtual getPackageUid returns the virtual package UID instead
+of delegating to the host package manager.
+
+Phone log excerpts from /tmp/round6_t1_tasks_after_uid.txt:
+
+  GMS_INSTALL success=true installedGms=true traces=true
+  B1_SIGNATURE guest package=com.android.vending uid=10003
+    signatures=[f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83]
+    apkContents=[7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053]
+  B1_SIGNATURE host package=com.android.vending uid=10003
+    signatures=[f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83]
+  B1_SIGNATURE guest package=com.google.android.gms uid=10011
+    signatures=[f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83]
+    apkContents=[5f2391277b1dbd489000467e4c2fa6af802430080457dce2f618992e9dfb5402]
+  B1_SIGNATURE host package=com.google.android.gms uid=10011
+    signatures=[f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83]
+    apkContents=[5f2391277b1dbd489000467e4c2fa6af802430080457dce2f618992e9dfb5402]
+
+  Tasks frame result: the guest reached "Welcome to Tasks" and then the unauthenticated
+  "Sign in" screen. It did not show the earlier "Update Google Play Services" prompt.
+  Do not sign in. Frame SHA-256: round6_tasks_after_uid.png =
+  9a8a636833ef0c1d9c0f3923430a5fc82f98c21dcf494410238056f026370dcd.
+
+Firefox input / page
+--------------------
+Phone log excerpt from /tmp/round6_t2_input.txt:
+
+  B1_INPUT_TAP label=firefox-search x=499.19998 y=64.8 down=true up=true
+  B1_INPUT_CONNECTION target=androidx.compose.ui.platform.AndroidComposeView
+    focus=androidx.compose.ui.platform.AndroidComposeView ... commit=true action=true textLength=19
+
+The direct in-process InputConnection path accepted https://example.com and IME_ACTION_GO.
+The real-screen capture at the Tasks run showed the harness, not a guest or keyboard.
+Firefox local frame hashes from the successful input attempt:
+
+  round6_firefox_typed.png = d805c234e7e25a1ac73fba2b40d7e66e29926dc0d0ee7b341e26a07e96553433
+  round6_firefox_page.png  = c11174753a0b05be1513f3ef3e9fb9077af2a056815383d1f30bd4577532e4e3
+
+The page frame visibly shows Firefox's address bar with example.com. The typed-text frame
+was captured before the committed string was visibly painted, so the visual typed-text gate
+is partial despite the InputConnection return values. A subsequent container-reparent fix
+was built to prevent Firefox's Compose relayout ClassCastException, but the final re-run was
+blocked by a later background-launch failure / phone disconnect and did not produce a new
+typed/page pair.
+
+Moving / survival
+-----------------
+No valid Round 6 moving or fresh Firefox ten-minute survival sample exists. The attempted
+corrected run was invalidated when the phone call state became non-zero and adb disappeared.
+The only valid earlier survival result remains the Round 4 ten-minute idle Tasks watch.
+
+Other hashes
+------------
+  round6_tasks_frame2.png = 527f19e0c37f93a2060574f4162d7eafc016fafb91db4b3b7a1fbbf8fa6669a6
+  round6_tasks_frame3.png = 14940cd1957031d6968bf4119d40fc268aa21929c9c34622b2378472a6d3734d
+  round6_tasks_real_screen.png = 5c95cd0eea9d8b3cfd8bd9913ca7e77f581068f2e1c822936c9afcf9a36cf0b6

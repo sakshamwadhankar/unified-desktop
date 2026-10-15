@@ -147,7 +147,14 @@ class EngineBridge(private val context: Context) {
     }
 
     /** B1: launch normally, then the guest lifecycle callback moves its decor to a Presentation. */
-    fun launchPathB1(packageName: String, displayId: Int, injectInput: Boolean = false): EngineResult {
+    fun launchPathB1(
+        packageName: String,
+        displayId: Int,
+        injectInput: Boolean = false,
+        inputText: String? = null,
+        moving: Boolean = false,
+        moveSeconds: Int = 60
+    ): EngineResult {
         return try {
             if (!core.isInstalled(packageName, 0)) {
                 return EngineResult(false, "package is not imported")
@@ -155,6 +162,11 @@ class EngineBridge(private val context: Context) {
             val intent: Intent = launchIntent(packageName)
                 ?: return EngineResult(false, "no launch activity")
             if (injectInput) intent.putExtra("phase1_inject_input", true)
+            if (!inputText.isNullOrEmpty()) intent.putExtra("phase1_input_text", inputText)
+            if (moving) {
+                intent.putExtra("phase1_inject_moving", true)
+                intent.putExtra("phase1_move_seconds", moveSeconds)
+            }
             val code = BlackBoxCore.getBActivityManager()
                 .startActivityAms(0, intent, null, null, null, -1, 0, null)
             EngineResult(code >= 0, if (code >= 0) null else "startActivityAms returned $code")

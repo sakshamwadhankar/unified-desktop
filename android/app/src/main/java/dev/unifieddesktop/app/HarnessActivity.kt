@@ -39,6 +39,9 @@ class HarnessActivity : Activity() {
     private var pathB1 = false
     private var pathB2 = false
     private var injectInput = false
+    private var inputText: String? = null
+    private var movingGuest = false
+    private var moveSeconds = 60
     private var measureGuest = false
     private var guestMeasureStartNs = 0L
     private var displayName = "phase1-owned"
@@ -74,6 +77,9 @@ class HarnessActivity : Activity() {
         pathB1 = i?.getBooleanExtra("b1", false) == true
         pathB2 = i?.getBooleanExtra("b2", false) == true
         injectInput = i?.getBooleanExtra("input", false) == true
+        inputText = i?.getStringExtra("text")
+        movingGuest = i?.getBooleanExtra("moving", false) == true
+        moveSeconds = i?.getIntExtra("moveSeconds", 60) ?: 60
         measureGuest = i?.getBooleanExtra("measure", false) == true
         displayName = if (pathB2) "phase1-owned-b2" else "phase1-owned"
         if (i?.getBooleanExtra("smoke", false) == true) {
@@ -182,7 +188,9 @@ class HarnessActivity : Activity() {
         engine.describePackage(pkg)
         say("Guest $pkg imported; launching on display $displayId")
         guestMeasureStartNs = System.nanoTime()
-        val res = if (pathB1 || pathB2) engine.launchPathB1(pkg, displayId, injectInput) else engine.launch(pkg, displayId)
+        val res = if (pathB1 || pathB2) {
+            engine.launchPathB1(pkg, displayId, injectInput, inputText, movingGuest, moveSeconds)
+        } else engine.launch(pkg, displayId)
         if (!res.ok) { say("ERROR launch $pkg: ${res.message}"); return }
         say("Guest $pkg launch requested on display $displayId")
         // capture a sequence so the guest has time to draw its first frame

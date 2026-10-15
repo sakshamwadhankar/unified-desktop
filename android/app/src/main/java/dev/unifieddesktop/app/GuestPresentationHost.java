@@ -16,14 +16,22 @@ import android.view.View;
 import android.view.WindowManager;
 import android.view.ViewGroup;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.util.DisplayMetrics;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.os.SystemClock;
 
+import java.security.MessageDigest;
 import java.util.Collections;
 import java.util.Set;
 import java.util.WeakHashMap;
 
+import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.app.configuration.AppLifecycleCallback;
 
 /**
@@ -42,6 +50,8 @@ final class GuestPresentationHost extends AppLifecycleCallback {
     private final Set<Activity> moveScheduled =
             Collections.newSetFromMap(new WeakHashMap<Activity, Boolean>());
     private final Set<Activity> configurationPrepared =
+            Collections.newSetFromMap(new WeakHashMap<Activity, Boolean>());
+    private final Set<Activity> signatureProbed =
             Collections.newSetFromMap(new WeakHashMap<Activity, Boolean>());
 
     @Override
@@ -201,6 +211,7 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             Log.i(TAG, "B1_PRESENTATION_SHOWN guest=" + activity.getClass().getName() +
                     " display=" + display.getDisplayId() + " target=" + width + "x" + height +
                     " size=" + decor.getWidth() + "x" + decor.getHeight());
+            probeGuestSignatures(activity);
             if (activity.getIntent().getBooleanExtra("phase1_inject_input", false)) {
                 decor.postDelayed(() -> injectInput(activity, decor), 700L);
             }
@@ -210,11 +221,9 @@ final class GuestPresentationHost extends AppLifecycleCallback {
     }
 
     private void injectInput(Activity activity, View root) {
-        root.setFocusableInTouchMode(true);
-        root.requestFocus();
-        final long downTime = System.currentTimeMillis();
+        View timer = activity.getWindow().getDecorView();
         tap(root, root.getWidth() / 2f, Math.max(1f, root.getHeight() - 45f), "onboarding");
-        root.postDelayed(() -> {
+        timer.postDelayed(() -> {
             View notNow = findText(root, "Not now");
             if (notNow != null) {
                 tapView(root, notNow, "not-now");
@@ -226,41 +235,24 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             } else {
                 tap(root, Math.max(1f, root.getWidth() - 70f), Math.max(1f, root.getHeight() - 70f), "add-task");
             }
-            root.postDelayed(() -> {
+            timer.postDelayed(() -> {
                 if ("org.mozilla.firefox".equals(activity.getPackageName())) {
                     // Firefox's home search is rendered by Compose and is not represented by an
                     // EditText in the guest view tree. Give it the same real touch path as a user
                     // before attempting keyboard input.
                     tap(root, root.getWidth() * 0.39f, root.getHeight() * 0.09f, "firefox-search");
-                    drag(root, root.getWidth() / 2f, root.getHeight() * 0.82f,
-                            root.getWidth() / 2f, root.getHeight() * 0.18f, "scroll");
                 }
-                View edit = findEditable(root);
-                if (edit != null) {
-                    edit.setFocusableInTouchMode(true);
-                    edit.requestFocus();
-                }
-                Log.i(TAG, "B1_INPUT_FOCUS view=" + edit + " rootFocus=" + root.findFocus());
-                int[] keys = {
-                        KeyEvent.KEYCODE_E, KeyEvent.KEYCODE_X, KeyEvent.KEYCODE_A,
-                        KeyEvent.KEYCODE_M, KeyEvent.KEYCODE_P, KeyEvent.KEYCODE_L,
-                        KeyEvent.KEYCODE_E, KeyEvent.KEYCODE_PERIOD, KeyEvent.KEYCODE_C,
-                        KeyEvent.KEYCODE_O, KeyEvent.KEYCODE_M, KeyEvent.KEYCODE_ENTER
-                };
-                for (int key : keys) {
-                    boolean keyDown = activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
-                    boolean keyUp = activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
-                    Log.i(TAG, "B1_INPUT_KEY code=" + key + " down=" + keyDown + " up=" + keyUp +
-                            " focus=" + root.findFocus() + " text=" + editableText(edit));
-                }
-            }, 800L);
+                timer.postDelayed(() -> commitGuestText(activity, root), 500L);
+            }, 1200L);
         }, 1200L);
     }
 
     private void tap(View root, float x, float y, String label) {
-        long downTime = System.currentTimeMillis();
+        long downTime = SystemClock.uptimeMillis();
         MotionEvent down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0);
         MotionEvent up = MotionEvent.obtain(downTime, downTime + 40L, MotionEvent.ACTION_UP, x, y, 0);
+        down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+        up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
         boolean tapDown = root.dispatchTouchEvent(down);
         boolean tapUp = root.dispatchTouchEvent(up);
         down.recycle();
@@ -277,8 +269,9 @@ final class GuestPresentationHost extends AppLifecycleCallback {
     }
 
     private void drag(View root, float startX, float startY, float endX, float endY, String label) {
-        long downTime = System.currentTimeMillis();
+        long downTime = SystemClock.uptimeMillis();
         MotionEvent down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, startX, startY, 0);
+        down.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
         root.dispatchTouchEvent(down);
         down.recycle();
         for (int i = 1; i <= 8; i++) {
@@ -286,10 +279,12 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             MotionEvent move = MotionEvent.obtain(downTime, downTime + i * 30L,
                     MotionEvent.ACTION_MOVE, startX + (endX - startX) * fraction,
                     startY + (endY - startY) * fraction, 0);
+            move.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
             root.dispatchTouchEvent(move);
             move.recycle();
         }
         MotionEvent up = MotionEvent.obtain(downTime, downTime + 300L, MotionEvent.ACTION_UP, endX, endY, 0);
+        up.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
         root.dispatchTouchEvent(up);
         up.recycle();
         Log.i(TAG, "B1_INPUT_DRAG label=" + label + " start=" + startX + "," + startY +
@@ -310,23 +305,117 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         return null;
     }
 
-    private String editableText(View edit) {
-        if (edit instanceof android.widget.TextView) {
-            return ((android.widget.TextView) edit).getText().toString();
+    private void commitGuestText(Activity activity, View root) {
+        View focused = root.findFocus();
+        EditorInfo info = new EditorInfo();
+        InputConnection connection = createInputConnection(root, info);
+        String text = activity.getIntent().getStringExtra("phase1_input_text");
+        if (text == null || text.isEmpty()) text = "https://example.com";
+        boolean committed = connection != null && connection.commitText(text, 1);
+        boolean action = connection != null && connection.performEditorAction(EditorInfo.IME_ACTION_GO);
+        if (connection != null && !action) {
+            connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+            connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
         }
-        return "<none>";
+        Log.i(TAG, "B1_INPUT_CONNECTION target=" + inputTargetName(root) +
+                " focus=" + focused + " commit=" + committed + " action=" + action +
+                " textLength=" + text.length());
+        if (activity.getIntent().getBooleanExtra("phase1_inject_moving", false)) {
+            startMoving(root, activity.getIntent().getIntExtra("phase1_move_seconds", 60));
+        }
     }
 
-    private View findEditable(View view) {
-        if (view instanceof android.widget.EditText) return view;
+    private InputConnection createInputConnection(View view, EditorInfo info) {
+        try {
+            if (view.hasFocus() || view.onCheckIsTextEditor()) {
+                InputConnection connection = view.onCreateInputConnection(info);
+                if (connection != null) return connection;
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "B1_INPUT_CONNECTION_VIEW_FAILED class=" + view.getClass().getName(), t);
+        }
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int i = 0; i < group.getChildCount(); i++) {
-                View result = findEditable(group.getChildAt(i));
+                InputConnection result = createInputConnection(group.getChildAt(i), info);
                 if (result != null) return result;
             }
         }
         return null;
+    }
+
+    private String inputTargetName(View view) {
+        View focused = view.findFocus();
+        return focused == null ? "null" : focused.getClass().getName();
+    }
+
+    private void startMoving(View root, int seconds) {
+        final long end = SystemClock.uptimeMillis() + Math.max(5, Math.min(seconds, 60)) * 1000L;
+        Log.i(TAG, "B1_MOVING_START seconds=" + Math.max(5, Math.min(seconds, 60)));
+        final Runnable[] loop = new Runnable[1];
+        loop[0] = () -> {
+            if (SystemClock.uptimeMillis() >= end) {
+                Log.i(TAG, "B1_MOVING_STOP");
+                return;
+            }
+            drag(root, root.getWidth() / 2f, root.getHeight() * 0.82f,
+                    root.getWidth() / 2f, root.getHeight() * 0.18f, "moving-up");
+            root.postDelayed(loop[0], 650L);
+        };
+        root.postDelayed(loop[0], 1500L);
+    }
+
+    private void probeGuestSignatures(Activity activity) {
+        if (signatureProbed.contains(activity)) return;
+        signatureProbed.add(activity);
+        final int flags = PackageManager.GET_SIGNATURES | PackageManager.GET_SIGNING_CERTIFICATES;
+        String[] packages = {"com.android.vending", "com.google.android.gms"};
+        for (String packageName : packages) {
+            try {
+                PackageInfo guest = activity.getPackageManager().getPackageInfo(packageName, flags);
+                Log.i(TAG, "B1_SIGNATURE guest package=" + packageName + " " + signatureSummary(guest));
+            } catch (Throwable t) {
+                Log.w(TAG, "B1_SIGNATURE guest package=" + packageName + " error=" +
+                        t.getClass().getName() + ":" + t.getMessage());
+            }
+            try {
+                PackageInfo host = BlackBoxCore.getContext().getPackageManager().getPackageInfo(packageName, flags);
+                Log.i(TAG, "B1_SIGNATURE host package=" + packageName + " " + signatureSummary(host));
+            } catch (Throwable t) {
+                Log.w(TAG, "B1_SIGNATURE host package=" + packageName + " error=" +
+                        t.getClass().getName() + ":" + t.getMessage());
+            }
+        }
+    }
+
+    private String signatureSummary(PackageInfo info) {
+        if (info == null) return "info=null";
+        StringBuilder out = new StringBuilder("uid=")
+                .append(info.applicationInfo == null ? -1 : info.applicationInfo.uid)
+                .append(" signatures=").append(signatureDigests(info.signatures));
+        if (info.signingInfo != null) {
+            out.append(" apkContents=").append(signatureDigests(info.signingInfo.getApkContentsSigners()))
+                    .append(" history=").append(signatureDigests(info.signingInfo.getSigningCertificateHistory()));
+        } else {
+            out.append(" signingInfo=null");
+        }
+        return out.toString();
+    }
+
+    private String signatureDigests(Signature[] signatures) {
+        if (signatures == null) return "null";
+        StringBuilder out = new StringBuilder("[");
+        for (int i = 0; i < signatures.length; i++) {
+            if (i > 0) out.append(',');
+            try {
+                byte[] digest = MessageDigest.getInstance("SHA-256")
+                        .digest(signatures[i].toByteArray());
+                for (byte value : digest) out.append(String.format("%02x", value));
+            } catch (Throwable t) {
+                out.append("error");
+            }
+        }
+        return out.append(']').toString();
     }
 
     @Override
@@ -334,6 +423,7 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         if (isHostActivity(activity)) return;
         moveScheduled.remove(activity);
         configurationPrepared.remove(activity);
+        signatureProbed.remove(activity);
         if (presentation != null) {
             try { presentation.dismiss(); } catch (Throwable ignored) { }
             presentation = null;
@@ -366,6 +456,8 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         @Override
         protected void onCreate(Bundle state) {
             super.onCreate(state);
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL);
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
             getWindow().getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
@@ -382,9 +474,17 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             getWindow().setLayout(width, height);
             getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.BLACK));
             decor.setBackgroundColor(Color.BLACK);
-            decor.setLayoutParams(new ViewGroup.LayoutParams(width, height));
-            setContentView(decor);
-            decor.post(() -> {
+            // Put the detached guest decor in a normal public container. Directly using the
+            // decor as Presentation content lets Firefox's later Compose relayout encounter
+            // its old WindowManager.LayoutParams in a MarginLayoutParams parent.
+            android.widget.FrameLayout container = new android.widget.FrameLayout(getContext());
+            container.setLayoutParams(new ViewGroup.LayoutParams(width, height));
+            container.addView(decor, new android.widget.FrameLayout.LayoutParams(width, height));
+            setContentView(container);
+            container.post(() -> {
+                container.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
+                container.layout(0, 0, width, height);
                 decor.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
                 decor.layout(0, 0, width, height);
