@@ -17,5 +17,6 @@ Rules:
 | Round 7 / T1 page-content proof | Typed-before-Go is proven, but after Go no Example Domain body frame was captured; the latest frames are dark blank content. Needed: a phone run that visibly captures Example Domain text and confirms the Gecko content surface is composited. | 2026-10-16 |
 | Round 7 / T3 moving metrics | Drag injection produced paired down/move/up sequences, but the run was invalid because Firefox was not focused in a fresh address field (`commit=false`). No valid Wikipedia workload metrics were collected. | 2026-10-16 |
 | Round 7 / T4 Firefox survival | Not run because the page-content gate is still open. Needed: a valid loaded Firefox page, ten-minute guest CPU-tick watch, and exit/kill attribution. | 2026-10-16 |
+| Round 8 / T1-T3 phone execution | The coding-agent shell became unreachable before the phone build/install command, so no adb run could start. Needed: restore the shell/adb tool, then run B-007 diagnostics, the independent moving workload, and the ten-minute survival watch. Counts done only when the phone evidence file contains actual logs, changing frame hashes, resource samples, and survival CPU samples. | 2026-10-16 |
 
 The emulator limitation and all round-2 results are summarized in `docs/PHASE1_RESULT.md`.

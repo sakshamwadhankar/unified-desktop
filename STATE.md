@@ -10,11 +10,16 @@ corrects it after review.
   virtual display) is NO-GO**, confirmed on the phone and in Android's source. Round 3
   proved public path B1 and B2 guest rendering on the real phone: Google Tasks frames land
   on our private display while a same-run real-screen capture shows something else.
-- **Last updated:** 2026-10-16, manager review of round 7. Typed text is visible in Firefox
-  before Go (B-005 fixed); Firefox's relayout crashes are gone (B-006 fixed). After Go the
-  page area stays blank (B-007). Moving numbers and Firefox survival still not measured.
-- **Next action:** round 8: B-007 (Gecko child processes / surface), then moving numbers
-  and survival on any guest that scrolls, so they no longer wait on B-007.
+- **Last updated:** 2026-10-16, Round 8 preparation/write-up. The shell became unreachable
+  before the required phone build/install command, so no Round 8 adb, frame, process, metric,
+  or survival result is claimed. Code prepared for the next reachable run watches dynamically
+  created Gecko SurfaceView/TextureView children, places Gecko SurfaceView content on top of
+  the Presentation with a public API, logs isolated-service/proxy mapping, and starts moving
+  independently of browser input. B-007 remains open; B-004 remains unmeasured.
+- **Next action:** restore a reachable coding-agent shell/adb path, run the prepared build on
+  phone `2c0f6edc`, then complete B-007 diagnostics, independent moving metrics, and ten-minute
+  survival. The exact interruption is in `evidence/phase1/round8_phone_results.txt` and the
+  Round 8 skip is in `SKIPS.md`.
 
 ## Done (verified on the phone, 2026-10-14)
 
@@ -65,4 +70,4 @@ corrections in `docs/PHASE1_RESULT.md`.
 | Item | Notes |
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6, questions Q1-Q6 |
-| Phase 1 round-7 remaining proof | Firefox body/page-content proof (B-007), valid moving workload metrics, and Firefox-page survival; see BUGS.md B-003/B-004/B-005/B-007 and SKIPS.md Round 7 T1/T3/T4 |
+| Phase 1 round-8 remaining proof | Firefox body/page-content proof (B-007), valid moving workload metrics, and guest survival (B-004); Round 8 phone execution was blocked by the shell outage, see `SKIPS.md` Round 8 T1-T3 |

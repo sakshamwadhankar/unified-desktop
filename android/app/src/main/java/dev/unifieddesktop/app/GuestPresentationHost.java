@@ -16,6 +16,7 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.SurfaceView;
+import android.view.TextureView;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -220,6 +221,11 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             probeGuestSignatures(activity);
             if (activity.getIntent().getBooleanExtra("phase1_inject_input", false)) {
                 decor.postDelayed(() -> injectInput(activity, decor), 700L);
+            } else if (activity.getIntent().getBooleanExtra("phase1_inject_moving", false)) {
+                // T3 is intentionally independent of browser input/page loading. Start the
+                // paired drag workload on whatever guest screen is currently visible.
+                decor.postDelayed(() -> startMoving(decor,
+                        activity.getIntent().getIntExtra("phase1_move_seconds", 60)), 1200L);
             }
         } catch (Throwable t) {
             Log.e(TAG, "B1_PRESENTATION_FAILED guest=" + activity.getClass().getName(), t);
@@ -599,23 +605,87 @@ final class GuestPresentationHost extends AppLifecycleCallback {
                 decor.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
                 decor.layout(0, 0, width, height);
-                prepareGuestSurfaces(decor);
+                watchGuestSurfaces(decor);
                 Log.i(TAG, "B1_PRESENTATION_LAYOUT size=" + decor.getWidth() + "x" + decor.getHeight());
             });
         }
 
-        private void prepareGuestSurfaces(View view) {
+        private void watchGuestSurfaces(View view) {
             if (view instanceof SurfaceView) {
-                ((SurfaceView) view).setZOrderMediaOverlay(true);
-                Log.i(TAG, "B1_GUEST_SURFACE class=" + view.getClass().getName() +
-                        " zOrder=media-overlay");
+                watchSurface((SurfaceView) view);
+            } else if (view instanceof TextureView) {
+                watchTexture((TextureView) view);
             }
             if (view instanceof ViewGroup) {
                 ViewGroup group = (ViewGroup) view;
+                group.setOnHierarchyChangeListener(new ViewGroup.OnHierarchyChangeListener() {
+                    @Override public void onChildViewAdded(View parent, View child) {
+                        Log.i(TAG, "B1_GUEST_CHILD_ADDED parent=" + parent.getClass().getName() +
+                                " child=" + child.getClass().getName() + " attached=" +
+                                child.isAttachedToWindow());
+                        watchGuestSurfaces(child);
+                    }
+
+                    @Override public void onChildViewRemoved(View parent, View child) {
+                        Log.i(TAG, "B1_GUEST_CHILD_REMOVED parent=" + parent.getClass().getName() +
+                                " child=" + child.getClass().getName());
+                    }
+                });
                 for (int i = 0; i < group.getChildCount(); i++) {
-                    prepareGuestSurfaces(group.getChildAt(i));
+                    watchGuestSurfaces(group.getChildAt(i));
                 }
             }
+        }
+
+        private void watchSurface(SurfaceView surface) {
+            // GeckoView creates this child after the guest decor is moved. A SurfaceView keeps
+            // its own layer; putting it on top of the Presentation is the public way to make
+            // that layer participate in the new window rather than remaining behind the moved
+            // decor's opaque background. The browser toolbar is outside this content-sized view.
+            surface.setZOrderOnTop(true);
+            Log.i(TAG, "B1_GUEST_SURFACE_FOUND class=" + surface.getClass().getName() +
+                    " attached=" + surface.isAttachedToWindow() + " size=" +
+                    surface.getWidth() + "x" + surface.getHeight() + " zOrder=top");
+            surface.getHolder().addCallback(new android.view.SurfaceHolder.Callback() {
+                @Override public void surfaceCreated(android.view.SurfaceHolder holder) {
+                    Log.i(TAG, "B1_GUEST_SURFACE_CREATED class=" + surface.getClass().getName() +
+                            " valid=" + holder.getSurface().isValid() + " attached=" +
+                            surface.isAttachedToWindow() + " size=" + surface.getWidth() + "x" +
+                            surface.getHeight());
+                }
+                @Override public void surfaceChanged(android.view.SurfaceHolder holder, int format,
+                                                      int width, int height) {
+                    Log.i(TAG, "B1_GUEST_SURFACE_CHANGED class=" + surface.getClass().getName() +
+                            " valid=" + holder.getSurface().isValid() + " size=" + width + "x" + height);
+                }
+                @Override public void surfaceDestroyed(android.view.SurfaceHolder holder) {
+                    Log.w(TAG, "B1_GUEST_SURFACE_DESTROYED class=" + surface.getClass().getName());
+                }
+            });
+        }
+
+        private void watchTexture(TextureView texture) {
+            texture.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+                @Override public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture surface,
+                                                                 int width, int height) {
+                    Log.i(TAG, "B1_GUEST_TEXTURE_AVAILABLE class=" + texture.getClass().getName() +
+                            " attached=" + texture.isAttachedToWindow() + " size=" + width + "x" + height);
+                }
+                @Override public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture surface,
+                                                                    int width, int height) {
+                    Log.i(TAG, "B1_GUEST_TEXTURE_CHANGED size=" + width + "x" + height);
+                }
+                @Override public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture surface) {
+                    Log.w(TAG, "B1_GUEST_TEXTURE_DESTROYED");
+                    return true;
+                }
+                @Override public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture surface) {
+                    // A callback proves that Gecko is producing frames; do not log every frame.
+                }
+            });
+            Log.i(TAG, "B1_GUEST_TEXTURE_FOUND class=" + texture.getClass().getName() +
+                    " attached=" + texture.isAttachedToWindow() + " size=" + texture.getWidth() +
+                    "x" + texture.getHeight());
         }
 
         private void copyViewTreeOwnerTags(View container, View decor) {

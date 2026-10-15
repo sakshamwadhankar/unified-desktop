@@ -239,5 +239,95 @@ text = text.replace(old, new, 1)
 settings.write_text(text)
 PY
 
+# Round 8 service diagnostics are injected into the fetched vendor sources below.
+python3 - "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/fake/service/IActivityManagerProxy.java" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = '            if (resolveInfo != null || AppSystemEnv.isOpenPackage(intent.getComponent())) {'
+insert = '''            if (resolveInfo != null && resolveInfo.serviceInfo != null) {
+                android.content.pm.ServiceInfo target = resolveInfo.serviceInfo;
+                Slog.i(TAG, "B1_SERVICE_RESOLVED method=" + method.getName() +
+                        " package=" + target.packageName + " class=" + target.name +
+                        " process=" + target.processName + " flags=0x" +
+                        Integer.toHexString(target.flags) + " isolated=" +
+                        ((target.flags & android.content.pm.ServiceInfo.FLAG_ISOLATED_PROCESS) != 0));
+            } else {
+                Slog.w(TAG, "B1_SERVICE_UNRESOLVED method=" + method.getName() +
+                        " intent=" + intent);
+            }
+'''
+if marker not in text:
+    raise SystemExit('service resolve marker not found')
+path.write_text(text.replace(marker, insert + marker, 1))
+PY
+python3 - "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/fake/service/IActivityManagerProxy.java" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = '''                if (proxyIntent != null) {
+                    args[2] = proxyIntent;
+                    return method.invoke(who, args);
+                }
+'''
+replacement = '''                if (proxyIntent != null) {
+                    Slog.i(TAG, "B1_SERVICE_PROXY method=" + method.getName() +
+                            " component=" + proxyIntent.getComponent() +
+                            " original=" + intent.getComponent());
+                    args[2] = proxyIntent;
+                    return method.invoke(who, args);
+                }
+'''
+if marker not in text:
+    raise SystemExit('service proxy marker not found')
+path.write_text(text.replace(marker, replacement, 1))
+PY
+python3 - "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/fake/service/IActivityManagerProxy.java" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+start = text.index('public static class BindIsolatedService')
+end = text.index('public static class UnbindService', start)
+part = text[start:end]
+marker = '            args[6] = null;'
+replacement = '''            Slog.i(TAG, "B1_BIND_ISOLATED_SERVICE args=" +
+                    (args == null ? -1 : args.length) + " instance=" +
+                    (args != null && args.length > 6 ? args[6] : null));
+            args[6] = null;'''
+if marker not in part:
+    raise SystemExit('isolated bind marker not found')
+text = text[:start] + part.replace(marker, replacement, 1) + text[end:]
+path.write_text(text)
+PY
+
+# Log the service metadata again at ProxyService creation, after the proxy intent has crossed the
+# virtual AMS. This distinguishes a resolved child service from a service that never instantiates.
+python3 - "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/app/dispatcher/AppServiceDispatcher.java" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = "        ServiceInfo serviceInfo = serviceRecord.mServiceInfo;\n\n        if (intent == null || serviceInfo == null)"
+replacement = """        ServiceInfo serviceInfo = serviceRecord.mServiceInfo;
+
+        if (serviceInfo != null) {
+            android.util.Log.i(TAG, \"B1_SERVICE_CREATE package=\" + serviceInfo.packageName +
+                    \" class=\" + serviceInfo.name + \" process=\" + serviceInfo.processName +
+                    \" flags=0x\" + Integer.toHexString(serviceInfo.flags) + \" isolated=\" +
+                    ((serviceInfo.flags & ServiceInfo.FLAG_ISOLATED_PROCESS) != 0));
+        }
+        if (intent == null || serviceInfo == null)"""
+if marker not in text:
+    raise SystemExit('dispatcher service marker not found')
+path.write_text(text.replace(marker, replacement, 1))
+PY
+
 # Gradle/CMake read the ignored vendor tree; no generated sources enter tracked src/.
 printf '%s\n' "Fetched $REV and Dobby $DOBBY_REV; prebuilt artifacts excluded." > "$VENDOR/MANIFEST"

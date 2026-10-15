@@ -1,0 +1,30 @@
+Phase 1 Round 8 phone results
+Date: 2026-10-16
+Device: 2c0f6edc, OnePlus CPH2619, Android 16
+
+Execution status: NOT RUN. The coding-agent shell became unreachable before the required
+phone build/install command (`omnirush sandbox: the sandbox is not reachable`, connection
+refused at 127.0.0.1:34285). Because the shell was unavailable, no adb command, build, phone
+input, frame capture, process sample, or logcat sample was claimed.
+
+Code prepared but not phone-verified:
+- GuestPresentationHost now watches SurfaceView/TextureView children added after the decor move,
+  logs surface creation/size/destruction, and places dynamically-created Gecko SurfaceView
+  content on top of the Presentation using the public setZOrderOnTop API.
+- The B1 moving workload can start without browser input, so T2/T3 do not depend on a loaded
+  web page or a successful InputConnection.
+- fetch-source.sh adds diagnostics for resolved services, isolated-service binds, proxy service
+  mapping, and service creation. The existing BlackBox ordinary ProxyService routing was not
+  changed without a phone reproduction.
+
+Required Round 8 measurements: unavailable. No PNG hashes, page result, real-screen result,
+FPS, first-frame latency, PSS/RSS, CPU ticks/percent, process count, kill audit, or ten-minute
+survival result exists for this round.
+
+Known prior evidence remains unchanged:
+- Round 7 proves visible typed text before Go.
+- Round 7 does not prove Example Domain body text; B-007 remains open.
+- Round 4 proves ten-minute idle Tasks survival, not Round 8 moving/survival.
+
+Verdict: Phase 1 remains open. This file records an infrastructure interruption, not a phone
+pass or failure.

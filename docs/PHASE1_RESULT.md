@@ -664,3 +664,45 @@ Checked: the diff, the evidence file, all round-7 PNG hashes (they match), and t
   missing permission is not the cause of B-007.
 - The agent ended the session again with T3/T4 undone. Moving numbers and survival do not
   need a loaded web page; round 8 measures them on any guest screen that scrolls.
+
+## Round 8 (phone) — execution interrupted
+
+Round 8 prepared, but could not execute the required phone work. The coding-agent shell became
+unreachable before the build/install command and every subsequent shell call failed with a
+connection refusal from the OmniRush sandbox. No adb command was run after that failure, and no
+phone result is claimed. The exact interruption and the code prepared for the next reachable
+run are recorded in `evidence/phase1/round8_phone_results.txt`.
+
+The prepared B-007 diagnostic watches SurfaceView/TextureView children that GeckoView adds
+after the guest decor is moved, logs surface lifecycle/size/attachment, and uses public
+`SurfaceView.setZOrderOnTop(true)` for the dynamically-created Gecko content surface. The
+engine fetch script also logs isolated-service resolution, proxy mapping, and service creation;
+it does not change BlackBox's ordinary ProxyService routing without phone evidence. The moving
+workload can now start independently of input/page loading.
+
+## Final Phase 1 verdict (replaces earlier round-7 provisional verdict)
+
+**NOT CLOSED.** The phone evidence proves the central path-B architecture, hidden Tasks
+rendering, input delivery into Firefox, and visible typed text before Go. The previous Firefox
+window/lifecycle crashes are not reproduced in the Round 7 callback-protected run. However,
+Firefox's post-Go page body remains unproven (B-007), and Round 8 did not execute the required
+diagnostic, independent moving workload, resource/CPU/kill measurements, or ten-minute survival
+watch because the coding-agent shell became unavailable before phone execution.
+
+Therefore the honest Phase 1 result is:
+
+- **Pass:** public path-B guest rendering on the app-owned 1280x720 Presentation, phone remains
+  usable in the prior same-run control, tap/input path, visible typed text, targetSdk-36 build,
+  and GMS/Tasks sign-in behavior from earlier phone rounds.
+- **Open:** Firefox loaded-page body/compositing, moving frame-rate and resource numbers,
+  process/kill audit, and fresh moving/survival proof. Firefox page content is not claimed to
+  work merely because the browser process exists.
+- **Product implication:** the in-process hidden Android-window bet is promising and works for
+  the tested Tasks screen, but broad Android-app compatibility and the Phase 1 performance
+  gate are not established. No claim is made for the PRD's 30-fps target, RAM/CPU budget, or
+  long-session survival.
+- **Constraints:** no Accessibility service, signature/privileged permission, developer-mode
+  user requirement, `QUERY_ALL_PACKAGES`, VM, commit, or push was added.
+
+Phase 1 remains blocked by the Round 8 skip row in `SKIPS.md`; it requires a reachable phone
+execution environment before the manager can close the gate.
