@@ -1,0 +1,16 @@
+Round 4 B-001 phone excerpt — 2026-10-15, OnePlus CPH2619, serial 2c0f6edc
+Every phone interaction in this excerpt was preceded by mCallState=0.
+
+The requested private display is 1280x720 at density 320. The guest is now configured for
+640x360dp landscape and the Presentation lays the moved root out at 1280x720:
+
+  B1_GUEST_CONFIGURATION widthDp=640 heightDp=360 densityDpi=320
+  B1_BEFORE_MOVE attached=true size=2400x1080 visibility=0
+  B1_GUEST_SCALE x=1.0 y=1.0 source=2400x1080 target=1280x720
+  B1_PRESENTATION_SHOWN ... display=54 target=1280x720 size=2400x1080
+  B1_PRESENTATION_LAYOUT size=1280x720
+
+The ImageReader frame is 1280x720 and contains the real Tasks onboarding screen, but visual
+inspection of the same-run frame still shows the bottom "Update Google Play Services" action
+clipped at the lower edge. The configuration/layout change is therefore partial evidence and
+does not close B-001.

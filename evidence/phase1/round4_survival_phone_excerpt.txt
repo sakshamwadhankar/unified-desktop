@@ -1,0 +1,13 @@
+Round 4 survival phone excerpt — 2026-10-15, OnePlus CPH2619, serial 2c0f6edc
+
+Google Tasks, dev.unifieddesktop.app, and dev.unifieddesktop.app:black remained present for
+10 minutes. The process-stat samples were taken at sample 0 and sample 10, 60 seconds apart.
+
+  process                         sample 0 CPU ticks   sample 10 CPU ticks
+  dev.unifieddesktop.app          351+55 = 406        354+57 = 411
+  dev.unifieddesktop.app:black    241+45 = 286        244+49 = 293
+  com.google.android.apps.tasks   544+105 = 649       623+125 = 748
+
+All three processes were still listed at sample 10. No am_kill or OsenseKillAction line named
+these processes in the watched run. This closes the idle ten-minute survival observation, but
+does not provide the missing moving-guest or repeated-tap CPU workload.

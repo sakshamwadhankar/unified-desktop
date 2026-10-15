@@ -10,8 +10,8 @@ Rules:
 
 ---
 
-| Round 3 / T3 typed-key proof | The in-process synthetic tap changed Google Tasks, but T/E/S/T dispatch returned false because the moved guest tree had no focused view. Needed: focus a real guest input or other public key target and prove a before/after guest-frame change with paired key down/up events. Done when the key result is visible in the guest frame. | 2026-10-15 |
-| Round 3 / T4 complete guest survival and tapping CPU | PSS/RSS and a 60-second idle CPU sample were collected, but the guest process exited before the second CPU sample; no valid 60-second tapping workload was recorded. Needed: keep the guest process alive for both samples and drive repeated in-process taps; done when guest CPU percentage, process count, and kill lines are recorded for both workloads. | 2026-10-15 |
-| Round 3 / browser | Chrome imported but BlackBox's launch-intent lookup returned `no launch activity` despite system resolution to `com.google.android.apps.chrome.Main`. Needed: a bounded fix or another Google-Play browser with a BlackBox-resolvable launch activity; done when a browser frame is captured on the private display. | 2026-10-15 |
+| Round 4 / T3 typed-key proof | The in-process taps still return true, but Tasks stops at its GMS prompt; no editable child is found and T/E/S/T/Delete/Enter dispatch returns false. Needed: expose working GMS or use a guest screen with a real focused editor, then prove the key result in a guest frame. | 2026-10-15 |
+| Round 4 / T4 moving workload | The guest, host, and `:black` processes survived a watched ten-minute idle run, but the guest stayed on a static GMS prompt. No moving-guest FPS or repeated-tap CPU workload was recorded. Needed: reach a scrollable guest screen and record frame rate plus guest/host CPU for idle and input workloads. | 2026-10-15 |
+| Round 4 / browser | Chrome still imports but the BlackBox resolver returns no launch activity; host resolution is `com.android.chrome/com.google.android.apps.chrome.Main`. Needed: a bounded resolver fix or another Google-Play browser with a virtual launch activity, then capture a browser frame. | 2026-10-15 |
 
 The emulator limitation and all round-2 results are summarized in `docs/PHASE1_RESULT.md`.

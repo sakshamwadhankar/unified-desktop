@@ -1,0 +1,22 @@
+Round 4 GMS/browser phone excerpt — 2026-10-15, OnePlus CPH2619, serial 2c0f6edc
+
+Google Tasks inside BlackBox still cannot resolve Google Play services:
+
+  FirebaseInstanceId: Failed to find package ... NameNotFoundException: com.google.android.gms
+  Metadata: Failed to find package ... NameNotFoundException: com.google.android.gms
+  GoogleApiAvailability: java.lang.IllegalArgumentException
+
+The host package dump contains both a data package and the product GmsCore package, but this
+does not make com.google.android.gms visible to the BlackBox virtual PackageManager. Tapping
+the guest prompt's Install action opened a com.android.vending Google Play services details
+screen on the private display; it did not make the package available to the guest.
+
+Chrome remains imported but not launchable through the virtual resolver:
+
+  ERROR launch com.android.chrome: no launch activity
+
+The host resolver independently returns:
+
+  com.android.chrome/com.google.android.apps.chrome.Main
+
+No browser frame was captured.

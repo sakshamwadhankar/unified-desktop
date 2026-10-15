@@ -345,3 +345,94 @@ Corrections:
 
 Verdict: **path B works on the phone for rendering and taps.** Phase 1 stays open for one
 more bounded round (keys, sizing, Play services, browser, stable measurements).
+
+## Round 4 (phone) — 2026-10-15
+
+Device: the same OnePlus CPH2619, serial `2c0f6edc`, Android 16 / SDK 36. The phone was
+reachable through the Windows adb server at `tcp:172.27.128.1:5037`; every interaction that
+could touch the phone was preceded by `mCallState=0`.
+
+### B-001 sizing
+
+The B1 host now applies a private-display configuration of `640x360dp`, `320dpi`, and
+landscape before the guest is created. The Presentation explicitly measures and lays out the
+detached root at `1280x720`. The phone log confirms those values, but the moved decor still
+reports its original `2400x1080` size. The captured 1280x720 Tasks frame still clips the lower
+part of the `Update Google Play Services` action. B-001 is therefore **not fixed**.
+
+Evidence: `evidence/phase1/round4_b001_phone_excerpt.txt`.
+
+### Typed input
+
+The paired synthetic taps still return `down=true up=true` and reach the guest. The input run
+then encounters the Tasks Play-services prompt; no `EditText` is found, the root receives
+focus, and all six T/E/S/T/Delete/Enter key pairs return false. No frame containing `TEST`
+was produced. T3 remains **open**, with B-002 preventing a real Tasks editor from being
+reached.
+
+Evidence: `evidence/phase1/round4_input_phone_excerpt.txt`.
+
+### Google Play services and browser
+
+Inside BlackBox, Tasks still reports `NameNotFoundException: com.google.android.gms` and
+`GoogleApiAvailability: java.lang.IllegalArgumentException`. The host package manager lists
+GMS data and product entries, but those entries are not visible to the virtual PackageManager.
+The prompt's Install action opened a Play Store details page and did not make GMS available
+inside the guest. B-002 remains **open**.
+
+Chrome is imported, but the virtual resolver still returns no launch activity. The host
+resolver returns `com.android.chrome/com.google.android.apps.chrome.Main`; no browser frame
+was captured. B-003 remains **open**.
+
+Evidence: `evidence/phase1/round4_gms_browser_phone_excerpt.txt`.
+
+### Survival and measurements
+
+The host, BlackBox service, and Tasks guest all remained present for a watched ten-minute idle
+run. CPU ticks advanced for all three processes, and no named kill action was seen. This is a
+successful idle survival observation, but there is still no moving-guest FPS sample or
+repeated-tap CPU workload. The Phase 1 numbers gate remains **partial**.
+
+Evidence: `evidence/phase1/round4_survival_phone_excerpt.txt`.
+
+### Round 4 gate table
+
+| Gate | Result | Evidence / gap |
+|---|---|---|
+| G1 guest on our display | **PASS for Tasks rendering** | B1 frame at 1280x720; lower action still clipped |
+| G2 real screen shows something else | **PASS for Tasks** | Same path-B architecture remains active |
+| G3 injected tap and keys | **PARTIAL** | Paired taps pass; key focus/result still absent |
+| G4 no Accessibility/system permission | **PASS** | Public Presentation/View APIs only |
+| G5 numbers | **PARTIAL** | Ten-minute idle survival; no moving workload |
+| G6 Android build | **PASS** | `:app:testDebugUnitTest`, `:app:lintDebug`, `:app:assembleDebug`, exit 0 |
+
+Round 4 narrowed the remaining blockers but did not close Phase 1: sizing is still visibly
+clipped, GMS is not exposed to the guest, Chrome has no virtual launch activity, typed keys
+are not proven, and moving performance measurements are still missing.
+
+### Manager review of round 4 (2026-10-15)
+
+Checked: the diff, the four round-4 excerpts, the engine source, and the phone.
+
+Done right: the ten-minute idle survival run (CPU time advanced for host, `:black` and
+Tasks; no kill lines); an experiment that caused an ANR was reverted, not left in; partial
+gates were reported as partial; bugs were updated with evidence; no commits.
+
+Corrections:
+- **B-002: the engine already has the answer, and it was not looked for.** BlackBox ships
+  `BlackBoxCore.installGms(userId)` (`Bcore/.../core/GmsCore.java`, `installGApps`): it
+  imports the phone's own `com.google.android.gms`, `com.google.android.gsf` and
+  `com.android.vending` into the virtual space. Tasks reports `NameNotFoundException` because
+  GMS was never imported. Read the engine's source before declaring an engine limit.
+- **B-003: Firefox was not tried**, although the prompt said to try it after the time box. It
+  is not installed on the phone (`pm list packages`); installing it from Google Play was
+  allowed. Chrome is installed as five split APKs (`base`, `split_chrome`, `split_config.en`,
+  `split_dev_ui`, `split_on_demand`); its launcher `...apps.chrome.Main` is an
+  activity-alias. Whether the engine imported all splits was not checked.
+- **B-001: configuration was applied after the guest had already inflated its views** at the
+  phone's size, so the decor stayed 2400x1080. It must hold from before the guest's first
+  inflation.
+- **Typed keys were tied to Tasks**, so B-002 blocked them. Any guest screen with a text
+  field proves typing.
+
+Verdict: Phase 1 stays open for one more bounded round (round 5).

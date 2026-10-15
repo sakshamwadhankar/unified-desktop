@@ -10,12 +10,13 @@ corrects it after review.
   virtual display) is NO-GO**, confirmed on the phone and in Android's source. Round 3
   proved public path B1 and B2 guest rendering on the real phone: Google Tasks frames land
   on our private display while a same-run real-screen capture shows something else.
-- **Last updated:** 2026-10-15, manager review of round 3 (re-run on the phone by the manager:
-  display 25 shows Google Tasks, the real screen shows our harness).
-- **Next action:** Phase 1 round 4 (one bounded round): typed keys into a focused guest view,
-  guest sized to our display (BUGS B-001), Google Play services inside the guest (B-002),
-  Chrome launch (B-003), guest process exit (B-004), then complete T4. Phase 2 may start in
-  parallel only if the owner asks (it does not depend on Phase 1).
+- **Last updated:** 2026-10-15, round-4 phone run by the coding agent. The round-4 APK was
+  built with the required three Gradle tasks (exit 0), installed on serial `2c0f6edc`, and
+  the phone was restored with `mStayOn=false`.
+- **Next action:** Phase 1 round 5 (manager review of round 4 in `docs/PHASE1_RESULT.md`):
+  import GMS with the engine's own `installGms` (B-002), fix sizing before first inflation
+  (B-001), Chrome splits/alias or Firefox (B-003), typed keys in any guest text field, moving
+  workload numbers. Ten-minute idle survival passed in round 4 (B-004 not reproduced).
 
 ## Done (verified on the phone, 2026-10-14)
 
@@ -66,4 +67,4 @@ corrections in `docs/PHASE1_RESULT.md`.
 | Item | Notes |
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6, questions Q1-Q6 |
-| Phase 1 round-3 remaining proof | SKIPS.md: typed-key proof, complete guest survival/tapping CPU, browser |
+| Phase 1 round-4 remaining proof | BUGS.md B-001/B-002/B-003/B-004; SKIPS.md: typed-key proof, moving guest workload, browser |
