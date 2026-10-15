@@ -91,6 +91,15 @@ class EngineBridge(private val context: Context) {
         }
     }
 
+    fun uninstallGuest(packageName: String, userId: Int = 0): EngineResult {
+        return try {
+            core.uninstallPackageAsUser(packageName, userId)
+            EngineResult(true, "uninstalled")
+        } catch (t: Throwable) {
+            EngineResult(false, t.message ?: t.javaClass.simpleName)
+        }
+    }
+
     fun describePackage(packageName: String): String {
         return try {
             val virtual = BlackBoxCore.getBPackageManager().getPackageInfo(

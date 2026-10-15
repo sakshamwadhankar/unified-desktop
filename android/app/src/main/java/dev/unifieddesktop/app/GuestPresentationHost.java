@@ -11,8 +11,13 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
 import android.view.KeyEvent;
+import android.view.ActionMode;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.MotionEvent;
+import android.view.SurfaceView;
 import android.view.View;
+import android.view.Window;
 import android.view.WindowManager;
 import android.view.ViewGroup;
 import android.content.pm.ActivityInfo;
@@ -206,6 +211,7 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             Log.i(TAG, "B1_GUEST_SCALE x=1.0 y=1.0 source=" + decor.getWidth() + "x" +
                     decor.getHeight() + " target=" + width + "x" + height);
             wm.removeViewImmediate(decor);
+            suppressDetachedWindowUpdates(activity);
             presentation = new GuestPresentation(activity, display, decor);
             presentation.show();
             Log.i(TAG, "B1_PRESENTATION_SHOWN guest=" + activity.getClass().getName() +
@@ -217,6 +223,99 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             }
         } catch (Throwable t) {
             Log.e(TAG, "B1_PRESENTATION_FAILED guest=" + activity.getClass().getName(), t);
+        }
+    }
+
+    private void suppressDetachedWindowUpdates(Activity activity) {
+        Window.Callback callback = activity.getWindow().getCallback();
+        if (callback == null || callback instanceof DetachedWindowCallback) return;
+        activity.getWindow().setCallback(new DetachedWindowCallback(callback));
+        Log.i(TAG, "B1_DETACHED_WINDOW_CALLBACK_INSTALLED guest=" + activity.getClass().getName());
+    }
+
+    /**
+     * The guest Activity still owns the original phone Window after its decor is moved to the
+     * private-display Presentation. Firefox changes flags on that Window when navigation starts;
+     * forwarding onWindowAttributesChanged would ask the original WindowManager to update the
+     * now-detached decor and crash. Other callbacks remain delegated unchanged.
+     */
+    private static final class DetachedWindowCallback implements Window.Callback {
+        private final Window.Callback delegate;
+
+        DetachedWindowCallback(Window.Callback delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override public boolean dispatchGenericMotionEvent(MotionEvent event) {
+            return delegate.dispatchGenericMotionEvent(event);
+        }
+        @Override public boolean dispatchKeyEvent(KeyEvent event) {
+            return delegate.dispatchKeyEvent(event);
+        }
+        @Override public boolean dispatchKeyShortcutEvent(KeyEvent event) {
+            return delegate.dispatchKeyShortcutEvent(event);
+        }
+        @Override public boolean dispatchPopulateAccessibilityEvent(
+                android.view.accessibility.AccessibilityEvent event) {
+            return delegate.dispatchPopulateAccessibilityEvent(event);
+        }
+        @Override public boolean dispatchTouchEvent(MotionEvent event) {
+            return delegate.dispatchTouchEvent(event);
+        }
+        @Override public boolean dispatchTrackballEvent(MotionEvent event) {
+            return delegate.dispatchTrackballEvent(event);
+        }
+        @Override public void onActionModeFinished(ActionMode mode) {
+            delegate.onActionModeFinished(mode);
+        }
+        @Override public void onActionModeStarted(ActionMode mode) {
+            delegate.onActionModeStarted(mode);
+        }
+        @Override public void onAttachedToWindow() {
+            delegate.onAttachedToWindow();
+        }
+        @Override public void onContentChanged() {
+            delegate.onContentChanged();
+        }
+        @Override public boolean onCreatePanelMenu(int featureId, Menu menu) {
+            return delegate.onCreatePanelMenu(featureId, menu);
+        }
+        @Override public View onCreatePanelView(int featureId) {
+            return delegate.onCreatePanelView(featureId);
+        }
+        @Override public void onDetachedFromWindow() {
+            delegate.onDetachedFromWindow();
+        }
+        @Override public boolean onMenuItemSelected(int featureId, MenuItem item) {
+            return delegate.onMenuItemSelected(featureId, item);
+        }
+        @Override public boolean onMenuOpened(int featureId, Menu menu) {
+            return delegate.onMenuOpened(featureId, menu);
+        }
+        @Override public void onPanelClosed(int featureId, Menu menu) {
+            delegate.onPanelClosed(featureId, menu);
+        }
+        @Override public boolean onPreparePanel(int featureId, View view, Menu menu) {
+            return delegate.onPreparePanel(featureId, view, menu);
+        }
+        @Override public boolean onSearchRequested() {
+            return delegate.onSearchRequested();
+        }
+        @Override public boolean onSearchRequested(android.view.SearchEvent event) {
+            return delegate.onSearchRequested(event);
+        }
+        @Override public void onWindowAttributesChanged(WindowManager.LayoutParams attrs) {
+            // Deliberately do not forward: the guest decor is no longer in this WindowManager.
+        }
+        @Override public void onWindowFocusChanged(boolean hasFocus) {
+            delegate.onWindowFocusChanged(hasFocus);
+        }
+        @Override public ActionMode onWindowStartingActionMode(ActionMode.Callback callback) {
+            return delegate.onWindowStartingActionMode(callback);
+        }
+        @Override public ActionMode onWindowStartingActionMode(ActionMode.Callback callback,
+                                                                 int type) {
+            return delegate.onWindowStartingActionMode(callback, type);
         }
     }
 
@@ -311,18 +410,27 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         InputConnection connection = createInputConnection(root, info);
         String text = activity.getIntent().getStringExtra("phase1_input_text");
         if (text == null || text.isEmpty()) text = "https://example.com";
+        final String committedText = text;
         boolean committed = connection != null && connection.commitText(text, 1);
-        boolean action = connection != null && connection.performEditorAction(EditorInfo.IME_ACTION_GO);
-        if (connection != null && !action) {
-            connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
-            connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
-        }
         Log.i(TAG, "B1_INPUT_CONNECTION target=" + inputTargetName(root) +
-                " focus=" + focused + " commit=" + committed + " action=" + action +
+                " focus=" + focused + " commit=" + committed + " action=deferred " +
                 " textLength=" + text.length());
-        if (activity.getIntent().getBooleanExtra("phase1_inject_moving", false)) {
-            startMoving(root, activity.getIntent().getIntExtra("phase1_move_seconds", 60));
-        }
+        // Leave the committed address visible long enough for the harness to capture a frame
+        // proving typed text before navigation. The action is still delivered through the same
+        // InputConnection, not through the physical phone keyboard.
+        View timer = activity.getWindow().getDecorView();
+        timer.postDelayed(() -> {
+            boolean action = connection != null && connection.performEditorAction(EditorInfo.IME_ACTION_GO);
+            if (connection != null && !action) {
+                connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
+                connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER));
+            }
+            Log.i(TAG, "B1_INPUT_ACTION action=" + action + " textLength=" + committedText.length());
+            if (activity.getIntent().getBooleanExtra("phase1_inject_moving", false)) {
+                timer.postDelayed(() -> startMoving(root,
+                        activity.getIntent().getIntExtra("phase1_move_seconds", 60)), 3500L);
+            }
+        }, 1800L);
     }
 
     private InputConnection createInputConnection(View view, EditorInfo info) {
@@ -446,10 +554,12 @@ final class GuestPresentationHost extends AppLifecycleCallback {
     }
 
     private static final class GuestPresentation extends Presentation {
+        private final Activity ownerActivity;
         private final View decor;
 
         GuestPresentation(Context context, Display display, View decor) {
             super(context, display);
+            this.ownerActivity = context instanceof Activity ? (Activity) context : null;
             this.decor = decor;
         }
 
@@ -477,8 +587,9 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             // Put the detached guest decor in a normal public container. Directly using the
             // decor as Presentation content lets Firefox's later Compose relayout encounter
             // its old WindowManager.LayoutParams in a MarginLayoutParams parent.
-            android.widget.FrameLayout container = new android.widget.FrameLayout(getContext());
+            NormalizingFrameLayout container = new NormalizingFrameLayout(getContext());
             container.setLayoutParams(new ViewGroup.LayoutParams(width, height));
+            copyViewTreeOwnerTags(container, decor);
             container.addView(decor, new android.widget.FrameLayout.LayoutParams(width, height));
             setContentView(container);
             container.post(() -> {
@@ -488,8 +599,87 @@ final class GuestPresentationHost extends AppLifecycleCallback {
                 decor.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
                 decor.layout(0, 0, width, height);
+                prepareGuestSurfaces(decor);
                 Log.i(TAG, "B1_PRESENTATION_LAYOUT size=" + decor.getWidth() + "x" + decor.getHeight());
             });
+        }
+
+        private void prepareGuestSurfaces(View view) {
+            if (view instanceof SurfaceView) {
+                ((SurfaceView) view).setZOrderMediaOverlay(true);
+                Log.i(TAG, "B1_GUEST_SURFACE class=" + view.getClass().getName() +
+                        " zOrder=media-overlay");
+            }
+            if (view instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) view;
+                for (int i = 0; i < group.getChildCount(); i++) {
+                    prepareGuestSurfaces(group.getChildAt(i));
+                }
+            }
+        }
+
+        private void copyViewTreeOwnerTags(View container, View decor) {
+            // Compose obtains lifecycle/view-model owners from these public View tags. The
+            // detached guest decor already received them from Firefox's Activity window, but a
+            // newly-created Presentation container does not. Copy the existing owner when
+            // present; otherwise the guest Activity is the same public owner implementation.
+            String[] ownerTags = {
+                    "view_tree_lifecycle_owner",
+                    "view_tree_view_model_store_owner",
+                    "view_tree_saved_state_registry_owner",
+                    "view_tree_on_back_pressed_dispatcher_owner"
+            };
+            for (String name : ownerTags) {
+                int id = getContext().getResources().getIdentifier(name, "id",
+                        getContext().getPackageName());
+                if (id == 0) {
+                    id = getContext().getResources().getIdentifier(name, "id", "androidx.lifecycle");
+                }
+                if (id == 0) {
+                    id = getContext().getResources().getIdentifier(name, "id", "androidx.savedstate");
+                }
+                if (id == 0) continue;
+                Object owner = decor.getTag(id);
+                if (owner == null && ownerActivity != null) {
+                    owner = ownerActivity;
+                }
+                if (owner != null) {
+                    container.setTag(id, owner);
+                    Log.i(TAG, "B1_PRESENTATION_OWNER_TAG name=" + name + " id=" + id +
+                            " owner=" + owner.getClass().getName());
+                }
+            }
+        }
+
+        private static final class NormalizingFrameLayout extends android.widget.FrameLayout {
+            NormalizingFrameLayout(Context context) {
+                super(context);
+            }
+
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                normalizeMarginParams(this);
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+            }
+
+            private static void normalizeMarginParams(ViewGroup group) {
+                boolean marginParent = group instanceof android.widget.FrameLayout ||
+                        group instanceof android.widget.LinearLayout;
+                for (int i = 0; i < group.getChildCount(); i++) {
+                    View child = group.getChildAt(i);
+                    ViewGroup.LayoutParams params = child.getLayoutParams();
+                    if (marginParent && !(params instanceof ViewGroup.MarginLayoutParams)) {
+                        int width = params == null ? ViewGroup.LayoutParams.MATCH_PARENT : params.width;
+                        int height = params == null ? ViewGroup.LayoutParams.MATCH_PARENT : params.height;
+                        child.setLayoutParams(new android.widget.FrameLayout.LayoutParams(width, height));
+                        Log.w(TAG, "B1_NORMALIZED_LAYOUT_PARAMS parent=" +
+                                group.getClass().getName() + " child=" + child.getClass().getName());
+                    }
+                    if (child instanceof ViewGroup) {
+                        normalizeMarginParams((ViewGroup) child);
+                    }
+                }
+            }
         }
     }
 }

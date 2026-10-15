@@ -629,3 +629,38 @@ frames themselves, and the Firefox logcat. The phone was offline at review time,
 - Moving numbers and Firefox survival: not done (phone call, then adb lost). Valid skip.
 - Phase 1 gate is not closed: G1 (loaded page), G3 (visible typed text), G5 (moving numbers,
   survival) remain for round 7.
+
+## Round 7 partial phone result (2026-10-16)
+
+The latest B1 run exercised the new public-window safeguards on the real phone. Lifecycle,
+ViewModel, saved-state, and back-dispatcher owner tags were copied from the detached guest
+decor to the Presentation container. FrameLayout/LinearLayout children are normalized when
+Firefox relayouts, and the guest Window callback suppresses updates to the original detached
+WindowManager while delegating all other callbacks. The previous `ViewTreeLifecycleOwner` and
+`WindowManager.LayoutParams`/`MarginLayoutParams` crashes did not recur in the callback-protected
+run.
+
+The deferred IME action now leaves committed text visible for capture before Go. The phone
+captured `https://example.com` in Firefox's address bar before navigation:
+`evidence/phase1/round7_t2_final-frame-2.png`, SHA-256
+`158190a88fee2590f0c12537b4d4ef9c409c459beb3122576a1f36afef3b9ba6`. This closes the strict
+visible typed-text sub-gate for T2.
+
+The post-Go frame still becomes a dark blank content area; no Example Domain body text was
+captured. This is logged as B-007. A moving attempt generated paired drag events, but Firefox
+was not focused in a fresh address field (`commit=false`), so it is invalid T3 evidence. No
+valid moving metrics or Firefox ten-minute survival result is claimed. Full details and frame
+hashes are in `evidence/phase1/round7_t2_phone_results.txt`; the Phase 1 gate remains open.
+
+### Manager review of round 7 (2026-10-16)
+
+Checked: the diff, the evidence file, all round-7 PNG hashes (they match), and the frames.
+- `round7_t2_final-frame-2.png` really shows `https://example.com` typed in the address bar,
+  with Firefox's suggestions under it. Typed-text gate (G3) passes; B-005 and B-006 moved to
+  Fixed.
+- After Go the content area is blank (`round7_t2_frame-4.png`). The five "moving" frames are
+  one identical all-dark image (same sha256 `fdb5ed00...`): nothing moved.
+- The host app has `android.permission.INTERNET: granted=true` (checked on the phone), so a
+  missing permission is not the cause of B-007.
+- The agent ended the session again with T3/T4 undone. Moving numbers and survival do not
+  need a loaded web page; round 8 measures them on any guest screen that scrolls.

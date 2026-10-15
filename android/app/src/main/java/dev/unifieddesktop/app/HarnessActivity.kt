@@ -42,6 +42,7 @@ class HarnessActivity : Activity() {
     private var inputText: String? = null
     private var movingGuest = false
     private var moveSeconds = 60
+    private var resetGuest = false
     private var measureGuest = false
     private var guestMeasureStartNs = 0L
     private var displayName = "phase1-owned"
@@ -80,6 +81,7 @@ class HarnessActivity : Activity() {
         inputText = i?.getStringExtra("text")
         movingGuest = i?.getBooleanExtra("moving", false) == true
         moveSeconds = i?.getIntExtra("moveSeconds", 60) ?: 60
+        resetGuest = i?.getBooleanExtra("reset_guest", false) == true
         measureGuest = i?.getBooleanExtra("measure", false) == true
         displayName = if (pathB2) "phase1-owned-b2" else "phase1-owned"
         if (i?.getBooleanExtra("smoke", false) == true) {
@@ -181,6 +183,10 @@ class HarnessActivity : Activity() {
         if (HarnessState.display == null) createDisplay(showSmoke = false)
         val displayId = currentDisplayId() ?: return say("ERROR: no display")
         say("Guest $pkg: importing...")
+        if (resetGuest) {
+            val reset = engine.uninstallGuest(pkg)
+            say("Guest reset: ok=${reset.ok} ${reset.message ?: ""}")
+        }
         val gms = engine.installGms(0)
         say("GMS install: ok=${gms.ok} ${gms.message ?: ""}")
         val imp = engine.importInstalled(pkg)

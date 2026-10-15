@@ -1,0 +1,33 @@
+Phase 1 Round 7 T2/T1 partial phone evidence
+Date: 2026-10-16
+Device: 2c0f6edc, OnePlus CPH2619, Android 16
+ADB guard: mCallState=0 before each run; no touch command was issued after a non-zero call state.
+
+Build/install:
+- APK built with ANDROID_HOME=/opt/android-sdk and installed successfully.
+- The owner-tag copy and detached-window callback were exercised on display 83.
+
+Input proof (phone, display 83):
+- B1_INPUT_TAP label=firefox-search down=true up=true.
+- B1_INPUT_CONNECTION target=androidx.compose.ui.platform.AndroidComposeView commit=true action=deferred textLength=19.
+- Frame `round7_t2_final-frame-2.png` visibly shows `https://example.com` in Firefox's address bar before Go.
+- SHA-256: 158190a88fee2590f0c12537b4d4ef9c409c459beb3122576a1f36afef3b9ba6
+
+Window-relayout result:
+- `B1_PRESENTATION_OWNER_TAG` copied lifecycle, ViewModel, saved-state, and back-dispatcher owners.
+- The earlier `ViewTreeLifecycleOwner not found` exception did not recur.
+- The earlier `WindowManager.LayoutParams` -> `MarginLayoutParams` ClassCastException did not recur in the callback-protected run.
+- The later detached-window callback prevents Firefox's `not attached to window manager` crash during the secure-window flag update.
+
+Remaining failure:
+- After Go, the guest frame becomes a dark blank content area; no Example Domain page-body text was captured.
+- Repeated GMS failures (`Package com.android.vending does not belong to 10295`) are present in logcat and are not fixed in this run.
+- Moving run produced paired drag logs, but its input connection was `commit=false` because Firefox was no longer on the fresh address field; it is not valid T3 evidence.
+
+Captured frame hashes:
+- round7_t2_final-frame-0.png 3425e99f56e83a9c85709c6bd6fd4838408eb68f37e32f31c8aa69165bce5892
+- round7_t2_final-frame-1.png 1c0b9556ac7d333ad9b6950c6cbbf3ff6300a47bb44f36af04d3ddfa7dc9e2ae
+- round7_t2_final-frame-2.png 158190a88fee2590f0c12537b4d4ef9c409c459beb3122576a1f36afef3b9ba6
+- round7_t2_moving-frame-4.png fdb5ed00828376348f4bbe3425648f33f9fefae0ad88dd537d1a05e80e5c2ee1
+
+Verdict: T2 typed-before-Go proof passes on phone. T1 page-content proof and T3/T4 remain open.

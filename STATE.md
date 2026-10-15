@@ -10,13 +10,11 @@ corrects it after review.
   virtual display) is NO-GO**, confirmed on the phone and in Android's source. Round 3
   proved public path B1 and B2 guest rendering on the real phone: Google Tasks frames land
   on our private display while a same-run real-screen capture shows something else.
-- **Last updated:** 2026-10-16, manager review of round 6. Google Play services now work
-  for guests (B-002 fixed: Tasks reaches its own Sign in screen). Typed text reaches Firefox
-  through an `InputConnection` (address bar shows `example.com`). Firefox then crashes when
-  it opens the page (B-006, ClassCastException on the moved window's LayoutParams), so no
-  loaded page yet. Moving numbers and survival not measured (phone call, then adb lost).
-- **Next action:** round 7, the last Phase 1 prompt: run the B-006 fix on the phone, a
-  loaded web page, a visible typed-text frame, moving numbers, Firefox 10-minute survival.
+- **Last updated:** 2026-10-16, manager review of round 7. Typed text is visible in Firefox
+  before Go (B-005 fixed); Firefox's relayout crashes are gone (B-006 fixed). After Go the
+  page area stays blank (B-007). Moving numbers and Firefox survival still not measured.
+- **Next action:** round 8: B-007 (Gecko child processes / surface), then moving numbers
+  and survival on any guest that scrolls, so they no longer wait on B-007.
 
 ## Done (verified on the phone, 2026-10-14)
 
@@ -67,4 +65,4 @@ corrections in `docs/PHASE1_RESULT.md`.
 | Item | Notes |
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6, questions Q1-Q6 |
-| Phase 1 round-6 remaining proof | Strict visual typed-text frame, moving workload and Firefox-page survival; BUGS.md B-003/B-004/B-005; SKIPS.md Round 6 T3/T4 |
+| Phase 1 round-7 remaining proof | Firefox body/page-content proof (B-007), valid moving workload metrics, and Firefox-page survival; see BUGS.md B-003/B-004/B-005/B-007 and SKIPS.md Round 7 T1/T3/T4 |
