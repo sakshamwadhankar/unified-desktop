@@ -1,0 +1,14 @@
+Phase 1 round 3 B1-fixed — phone, guest=com.google.android.apps.tasks
+10:23:09.026 Phase1: Created display id=17 flags=8
+10:23:10.891 Phase1: Guest launch requested on display 17
+10:23:11.593 Phase1-B1: callback_onActivityCreated TaskListsActivity
+10:23:11.595 Phase1-B1: B1_CREATED_WAITING_FOR_RESUME
+10:23:12.188 Phase1-B1: B1_BEFORE_MOVE attached=true size=2400x1080 visibility=0 token=present
+10:23:12.281 Phase1-B1: B1_PRESENTATION_SHOWN guest=TaskListsActivity display=17
+10:23:14.006 Phase1: Captured /data/user/0/dev.unifieddesktop.app/files/phase1/frame-0.png
+The pulled private-display frame visibly contained Google Tasks “Welcome to Tasks”.
+The same-run real-screen screencap was a black screen with only the status bar; it did not
+contain Google Tasks. Local PNGs (not repository evidence):
+  round3_b1_frame-0.png sha256=619062b98612835eb02cb9d2a54a54a3243483906a50341e230afef30d4f32c9
+  round3_b1_real-screen.png sha256=16109297ac9c6267cc90b54038d9dd645306515c27c985a16916acee66f1a4a8
+No AndroidRuntime crash was observed during the delayed move or the following capture run.

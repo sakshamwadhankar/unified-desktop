@@ -1,0 +1,12 @@
+Phase 1 round 3 B2 diagnosis — phone, guest=com.google.android.apps.tasks
+Host-only proof first (no guest): display id=18, same phase1-owned-b2 name, smoke frames=88,
+elapsed_s=10.299, fps=8.54, first_frame_ms=356. The Presentation host therefore reached
+the ImageReader; this was not a black-host/no-surface failure.
+Guest run:
+10:26:52.513 Phase1: Created display id=19 flags=8
+10:26:54.326 Phase1-B2: B2_PRESENTATION_SHOWN display=19
+10:26:54.870 Phase1-B2: B2_GUEST_VIEW_ATTACHED guest=TaskListsActivity display=19
+10:26:55.005 Phase1: Captured .../files/phase1/frame-0.png
+10:26:56.054 Phase1: Captured .../files/phase1/frame-1.png
+The previous competing ImageReader listener was removed for guest runs; capture() was the
+sole ImageReader consumer. B2 therefore produced usable guest frames on the phone too.

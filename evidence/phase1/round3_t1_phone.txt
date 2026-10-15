@@ -1,0 +1,8 @@
+Phase 1 round 3 T1 — phone pipe check
+Device: 2c0f6edc / OnePlus CPH2619 / Android 16 SDK 36
+ADB client: 1.0.41 / platform-tools 37.0.0 (Windows server reached through tcp:172.27.128.1:5037)
+Call guard before device interaction: dumpsys telephony.registry reported mCallState=0.
+Command: am force-stop dev.unifieddesktop.app; am start -W -n dev.unifieddesktop.app/.HarnessActivity --ez smoke true --ei duration 10
+Result: Created display id=16 flags=8
+Result: SMOKE_DONE frames=90 elapsed_s=10.260 fps=8.77 first_frame_ms=284
+Samples remained in app-private filesDir/phase1/.

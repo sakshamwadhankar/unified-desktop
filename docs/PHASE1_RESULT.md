@@ -4,7 +4,17 @@ Tested 2026-10-14 on the real phone: OnePlus CPH2619, Snapdragon 695, Android 16
 ColorOS. Engine: Blacks-BlackBox (Apache-2.0) built from source with Dobby `e9fe7fb` and
 NDK 26. All evidence under `evidence/phase1/`.
 
-## Verdict: NO-GO for the Phase 1 architecture (clear cause below)
+## Current status after round 3
+
+Path A remains **NO-GO** on stock Android 16: an app cannot launch an activity onto an
+app-owned untrusted virtual display. Round 3 changed the path-B result: the public,
+in-process B1 adapter now renders Google Tasks on the private display on the real phone,
+while the phone's real-screen screencap shows something else. The Phase 1 gate is **not yet
+closed** because typed-key delivery, browser coverage, and a complete guest 60-second CPU /
+survival sample remain incomplete.
+
+The earlier round-2 architecture verdict below is retained as history; it must not be read as
+a verdict that path B is impossible.
 
 The bet was: run a Google-Play app **inside** our app, draw it onto a **virtual display we
 own**, react to input we inject, **while the phone's real screen shows something else**.
@@ -94,8 +104,10 @@ Honest adjacent options, for the manager/owner to weigh (each has a real cost):
 - **System/privileged install** (trusted display): out of scope — violates the owner's rules
   (no dev mode, Play-installable).
 
-Recommendation for the manager: record this as a NO-GO for the current Phase 1 design and
-decide (DECISIONS.md) whether to pivot the architecture (MediaProjection-based) or stop.
+Historical round-2 recommendation: record the then-tested path as a NO-GO for the Phase 1
+design and decide (DECISIONS.md) whether to pivot the architecture. Round 3 supersedes its
+path-B portion with the phone proof below; the phase remains open because G3/G5/browser are
+incomplete.
 
 ## Round 2 (path B) — 2026-10-14/15
 
@@ -217,3 +229,119 @@ an Android rule:
   The B2 log shows `Skipped 46 frames`, so emulator timing numbers are weak.
 - About 3.5 MB of raw dumps (logcat, activities, windows) were left in `evidence/phase1/`.
   Raw dumps are now gitignored; evidence must be short excerpts with the key lines.
+
+## Round 3 (phone) — 2026-10-15
+
+Device: OnePlus CPH2619, serial `2c0f6edc`, Android 16 / SDK 36, screen kept on. Before
+every device interaction that could touch the phone, `dumpsys telephony.registry` reported
+`mCallState=0`. The coding container reached the Windows adb server at
+`tcp:172.27.128.1:5037` with adb protocol 41 / platform-tools 37.0.0.
+
+### T1 pipe
+
+The existing smoke test worked on the phone: 90 frames in 10.260 s, **8.77 fps**, first
+frame **284 ms**, display 16. This is a phone result, not the round-2 emulator number.
+Evidence: `evidence/phase1/round3_t1_phone.txt`.
+
+### T2 path B
+
+#### B1-fixed — successful
+
+The guest window was made alpha 0 and non-touchable in `beforeMainActivityOnCreate`. The
+decor was not removed during `onActivityCreated`. Instead, `onActivityResumed` posted a
+move after resume, checked `isAttachedToWindow`, and called
+`activity.getWindowManager().removeViewImmediate(decor)` — the same manager that added it.
+The decor was then installed in a public `Presentation` on display 17.
+
+Phone log evidence shows `attached=true`, non-zero decor, and `B1_PRESENTATION_SHOWN`. A
+captured ImageReader frame visibly showed Google Tasks “Welcome to Tasks”; a same-run
+real-screen screencap showed only the phone status bar on black, not the guest. No
+AndroidRuntime crash occurred during the move or subsequent capture. Evidence:
+`evidence/phase1/round3_b1_phone_excerpt.txt`.
+
+This proves the central path-B rendering claim on the real phone: a Play-installed app
+running in our process can be shown on our private display without launching its Activity
+onto that display.
+
+#### B2 diagnosis and result
+
+Before the guest test, a host-only B2 run used the same private-display name and a changing
+Presentation; it received 88 frames in 10.299 s (**8.54 fps**, first frame 356 ms). This
+proved that the B2 Presentation reached the ImageReader. Guest runs no longer installed a
+competing ImageReader listener; `capture()` was the sole consumer. The diagnostics then
+reported `B2_PRESENTATION_SHOWN`, `B2_GUEST_VIEW_ATTACHED`, and two captured frames for
+Google Tasks on display 19. Evidence: `evidence/phase1/round3_b2_phone_excerpt.txt`.
+
+#### B3
+
+Not needed: B1 and B2 both reached guest pixels on the phone. No hidden API, Accessibility
+service, signature permission, or privileged permission was added.
+
+### T3 input
+
+The in-process B1 adapter dispatched a synthetic tap with a paired down/up sequence. The
+tap returned `down=true up=true` and changed the captured guest frame from the welcome
+text/button screen to the onboarding illustration. It also dispatched paired down/up
+events for T, E, S, T. Those key events returned false with no focused view, so typed keys
+did **not** yet prove a visible guest change. G3 is therefore partial, not passed. Evidence:
+`evidence/phase1/round3_input_phone_excerpt.txt`.
+
+### T4 measurement and browser
+
+One guest measurement run received 2 frames in 10.958 s (**0.18 fps**) and first frame at
+**2437 ms** from the launch request. This was a mostly static onboarding screen, not a
+moving-window fps benchmark. A resource sample reported package TOTAL PSS **55,071 kB** and
+TOTAL RSS **186,948 kB**; a later sample was **45,880 kB PSS** and **175,648 kB RSS**.
+Three app-uid processes were present at the first sample: host, `:black`, and the guest
+process (`com.google.android.apps.tasks` in that sample). Host and engine CPU time advanced
+over 60 s, but the guest process was gone before the second sample, so a complete guest CPU
+percentage and survival result are not claimed. No `am_kill` or `OsenseKillAction` line named
+our processes; the observed Osense kills were unrelated cached apps. Evidence:
+`evidence/phase1/round3_t4_phone_excerpt.txt`.
+
+Chrome was imported but could not be launched by the existing BlackBox launch-intent lookup:
+`ERROR launch com.android.chrome: no launch activity`, although the system package manager
+resolved `com.android.chrome/com.google.android.apps.chrome.Main`. No browser frame is
+claimed. Evidence: `evidence/phase1/round3_browser_phone_excerpt.txt`.
+
+### Round 3 gate table
+
+| Gate | Result | Evidence / gap |
+|---|---|---|
+| G1 guest on our display | **PASS for Tasks; browser open** | B1 and B2 phone frames; Chrome lookup failure |
+| G2 real screen shows something else | **PASS for Tasks** | Same-run real-screen PNG is not the guest |
+| G3 injected tap and keys | **PARTIAL** | Tap changes frame; key delivery still false/no focus |
+| G4 no Accessibility/system permission | **PASS** | Public Presentation/View APIs only |
+| G5 numbers | **PARTIAL** | T1/T4 numbers; guest CPU/survival and moving fps gaps |
+| G6 Android build | **PASS** | Required three Gradle tasks pass after round-3 changes |
+
+Round 3 therefore proves path-B rendering on the phone, but does not close Phase 1. The
+manager must decide whether to spend another bounded round on focus/key routing, Chrome's
+BlackBox launch lookup, and a stable guest-process measurement, or pivot.
+
+### Manager review of round 3 (2026-10-15)
+
+Verified, not just read:
+- The diff matches the report: the decor move now runs 200 ms after `onActivityResumed`,
+  checks `isAttachedToWindow`, and uses `activity.getWindowManager()`; the guest window is
+  alpha 0 and not touchable from `beforeMainActivityOnCreate`. B2 now waits for
+  `surfaceCreated`; guest runs no longer have a second ImageReader consumer.
+- The manager pulled `files/phase1/frame-0.png` from the phone: sha256 `619062b9...` equals
+  the agent's hash, and it shows Google Tasks "Welcome to Tasks".
+- The manager re-ran B1 independently (display 25, `mCallState=0`): `B1_PRESENTATION_SHOWN`,
+  a captured frame with the same Tasks image, and a real-screen screencap at the same moment
+  showing only our harness activity. **G1 and G2 for Tasks: confirmed.** (The agent saw a
+  black screen at that moment; either way the guest was not on the real screen.)
+
+Corrections:
+- The guest is laid out at 2400x1080 on a 1280x720 display, so it is clipped (BUGS B-001).
+- The guest shows "Update Google Play Services" (BUGS B-002). This matters more than the
+  browser: most Play apps need Google Play services. The agent did not mention it.
+- No bugs were logged although three were found (Chrome lookup, guest exit, clipping).
+  Engine failures are bugs, not only SKIPS rows.
+- The frame is static, so 0.18 fps says nothing about speed. A moving guest is needed.
+- Key dispatch went through `activity.dispatchKeyEvent` with nothing focused; nothing in the
+  guest was given focus first.
+
+Verdict: **path B works on the phone for rendering and taps.** Phase 1 stays open for one
+more bounded round (keys, sizing, Play services, browser, stable measurements).

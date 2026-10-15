@@ -1,0 +1,13 @@
+Phase 1 round 3 T4 — phone measurements
+Guest measure run: display id=23, Google Tasks, B1, 10.958 s measurement window.
+ImageReader guest frames=2, fps=0.18, first_frame_ms=2437 from launch request. The low rate
+is expected for this largely static onboarding screen; it is not a moving-window benchmark.
+At the first resource sample: package TOTAL PSS=55071 kB, TOTAL RSS=186948 kB; processes
+with uid u0_a194 were host dev.unifieddesktop.app, engine dev.unifieddesktop.app:black,
+and guest com.google.android.apps.tasks (3 app processes; first ps field used for counting).
+A later sample reported TOTAL PSS=45880 kB and TOTAL RSS=175648 kB.
+CPU-time sample over 60 s: host utime+stime 493->522 ticks (+0.29 s), engine 323->335
+ticks (+0.12 s). The guest process had exited before the second sample, so a complete
+guest CPU percentage cannot honestly be reported; this is a survival gap, not a pass.
+No am_kill line named our uid/process. OsenseKillAction lines were present but named six
+unrelated cached processes; none was dev.unifieddesktop.app or com.google.android.apps.tasks.

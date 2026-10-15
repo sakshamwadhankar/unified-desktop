@@ -34,6 +34,6 @@ adb logcat -s Phase1:I
 The smoke run creates an `OWN_CONTENT_ONLY` 1280x720 display, shows a changing public
 `Presentation`, drains `ImageReader` frames with `acquireLatestImage()`, and reports the
 frame count/fps/first-frame time. Samples stay in the app-private `filesDir/phase1/`.
-The optional diagnostic flags `--ez b1 true` and `--ez b2 true` exercise the round-2
-Presentation and `SurfaceControlViewHost` guest experiments; they are not a working guest
-hosting claim unless the ImageReader reports guest pixels.
+The optional diagnostic flags `--ez b1 true` and `--ez b2 true` exercise the path-B
+Presentation and `SurfaceControlViewHost` guest hosts. A working claim requires
+`B1_PRESENTATION_SHOWN` or `B2_GUEST_VIEW_ATTACHED` plus captured ImageReader guest pixels.

@@ -1,0 +1,8 @@
+Phase 1 round 3 browser repeat — phone
+Guest package com.android.chrome imported successfully, but EngineBridge returned:
+ERROR launch com.android.chrome: no launch activity
+Independent package-manager resolution on the same phone returned:
+com.android.chrome/com.google.android.apps.chrome.Main
+Thus the failure is in the BlackBox BPackageManager launch-intent lookup for Chrome, not an
+Android display permission refusal. No browser frame is claimed. The alternate OEM browser
+was not used because the task requested a browser from Google Play (Chrome or Firefox).

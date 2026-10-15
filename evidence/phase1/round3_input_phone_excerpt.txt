@@ -1,0 +1,9 @@
+Phase 1 round 3 input — phone, guest=com.google.android.apps.tasks, B1
+10:27:34.427 Phase1-B1: B1_PRESENTATION_SHOWN guest=TaskListsActivity display=20
+10:27:34.940 Phase1-B1: B1_INPUT_TAP x=640.0 y=660.0 down=true up=true
+The injected tap changed the guest frame: the before-run private-display frame showed the
+Google Tasks welcome text/button; the after-tap frame showed the Tasks onboarding illustration.
+Local PNG hashes (not repository evidence): before=619062b98612835eb02cb9d2a54a54a3243483906a50341e230afef30d4f32c9; after=ccd5e5007b6a0b69365624002c33182503f66384aea7bc3ba6943da48035a4c1.
+Key dispatch was attempted as paired down/up events for T,E,S,T:
+codes 48,33,47,48; every line reported down=false up=false and focus=null. Therefore typed
+keys did not yet prove a guest-visible change; G3 is partial, not claimed as passed.

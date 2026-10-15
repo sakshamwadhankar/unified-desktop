@@ -38,6 +38,9 @@ class HarnessActivity : Activity() {
     private var smokeFirstFrameNs = 0L
     private var pathB1 = false
     private var pathB2 = false
+    private var injectInput = false
+    private var measureGuest = false
+    private var guestMeasureStartNs = 0L
     private var displayName = "phase1-owned"
 
     override fun onCreate(b: Bundle?) {
@@ -70,6 +73,8 @@ class HarnessActivity : Activity() {
         if (i != null && i.hasExtra("dflags")) displayFlags = i.getIntExtra("dflags", displayFlags)
         pathB1 = i?.getBooleanExtra("b1", false) == true
         pathB2 = i?.getBooleanExtra("b2", false) == true
+        injectInput = i?.getBooleanExtra("input", false) == true
+        measureGuest = i?.getBooleanExtra("measure", false) == true
         displayName = if (pathB2) "phase1-owned-b2" else "phase1-owned"
         if (i?.getBooleanExtra("smoke", false) == true) {
             main.postDelayed({ runSmoke(i.getIntExtra("duration", 10)) }, 500)
@@ -113,7 +118,9 @@ class HarnessActivity : Activity() {
                 1280, 720, PixelFormat.RGBA_8888, 3,
                 HardwareBuffer.USAGE_CPU_READ_OFTEN
             )
-            r.setOnImageAvailableListener({ reader -> consumeFrame(reader) }, main)
+            // Smoke owns the ImageReader listener. Guest runs use capture() as the sole
+            // consumer; otherwise the listener drains frames before capture() can prove them.
+            if (showSmoke || measureGuest) r.setOnImageAvailableListener({ reader -> consumeFrame(reader) }, main)
             val dm = getSystemService(DisplayManager::class.java)
             val d = dm.createVirtualDisplay(displayName,1280,720,320,r.surface,displayFlags)
             HarnessState.reader = r; HarnessState.display = d
@@ -171,11 +178,22 @@ class HarnessActivity : Activity() {
         val imp = engine.importInstalled(pkg)
         if (!imp.ok) return say("ERROR import $pkg: ${imp.message}")
         say("Guest $pkg imported; launching on display $displayId")
-        val res = if (pathB1 || pathB2) engine.launchPathB1(pkg, displayId) else engine.launch(pkg, displayId)
+        guestMeasureStartNs = System.nanoTime()
+        val res = if (pathB1 || pathB2) engine.launchPathB1(pkg, displayId, injectInput) else engine.launch(pkg, displayId)
         if (!res.ok) { say("ERROR launch $pkg: ${res.message}"); return }
         say("Guest $pkg launch requested on display $displayId")
         // capture a sequence so the guest has time to draw its first frame
-        for (n in 1..caps) main.postDelayed({ capture() }, 1000L * n)
+        if (measureGuest) {
+            main.postDelayed({
+                val elapsed = (System.nanoTime() - guestMeasureStartNs) / 1_000_000_000.0
+                val fps = if (elapsed > 0) smokeFrames / elapsed else 0.0
+                val first = if (smokeFirstFrameNs == 0L) "never" else
+                    ((smokeFirstFrameNs - guestMeasureStartNs) / 1_000_000.0).roundToInt().toString()
+                say("GUEST_MEASURE_DONE frames=$smokeFrames elapsed_s=${"%.3f".format(elapsed)} fps=${"%.2f".format(fps)} first_frame_ms=$first")
+            }, caps.coerceIn(5, 60) * 1000L)
+        } else {
+            for (n in 1..caps) main.postDelayed({ capture() }, 1000L * n)
+        }
     }
 
     private fun capture() {

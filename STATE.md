@@ -7,14 +7,15 @@ corrects it after review.
 ## Now
 
 - **Phase:** 1 of 13 (hidden Android app). **Path A (guest activity launched onto our own
-  virtual display) is NO-GO**, confirmed on the phone and in Android's source. Round 2
-  exercised path B on the Pixel_8_Pro emulator because the authorized phone was not visible
-  to the coding container. The private-display pipe works, but B1/B2 produced no guest
-  frame; no phone path-B verdict is claimed.
-- **Last updated:** 2026-10-15, manager review of round 2.
-- **Next action:** Phase 1 round 3 on the PHONE (reached over adb Wi-Fi, LESSONS.md 5):
-  fix B1 timing, diagnose B2's zero frames. Path B is NOT disproven (manager review in
-  `docs/PHASE1_RESULT.md`). Do not start Phase 2 until Phase 1 has a phone verdict.
+  virtual display) is NO-GO**, confirmed on the phone and in Android's source. Round 3
+  proved public path B1 and B2 guest rendering on the real phone: Google Tasks frames land
+  on our private display while a same-run real-screen capture shows something else.
+- **Last updated:** 2026-10-15, manager review of round 3 (re-run on the phone by the manager:
+  display 25 shows Google Tasks, the real screen shows our harness).
+- **Next action:** Phase 1 round 4 (one bounded round): typed keys into a focused guest view,
+  guest sized to our display (BUGS B-001), Google Play services inside the guest (B-002),
+  Chrome launch (B-003), guest process exit (B-004), then complete T4. Phase 2 may start in
+  parallel only if the owner asks (it does not depend on Phase 1).
 
 ## Done (verified on the phone, 2026-10-14)
 
@@ -65,4 +66,4 @@ corrections in `docs/PHASE1_RESULT.md`.
 | Item | Notes |
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6, questions Q1-Q6 |
-| Phase 1 round-2 phone proof | SKIPS.md: T0 placement, T2 path-B phone proof, T3/T4 |
+| Phase 1 round-3 remaining proof | SKIPS.md: typed-key proof, complete guest survival/tapping CPU, browser |

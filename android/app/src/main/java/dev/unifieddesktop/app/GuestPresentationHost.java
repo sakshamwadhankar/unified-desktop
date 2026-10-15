@@ -9,8 +9,14 @@ import android.hardware.display.DisplayManager;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+
+import java.util.Collections;
+import java.util.Set;
+import java.util.WeakHashMap;
 
 import top.niunaijun.blackbox.app.configuration.AppLifecycleCallback;
 
@@ -24,6 +30,8 @@ final class GuestPresentationHost extends AppLifecycleCallback {
     static final String PREFS = "phase1-path-b";
     static final String DISPLAY_ID = "display_id";
     private Presentation presentation;
+    private final Set<Activity> moveScheduled =
+            Collections.newSetFromMap(new WeakHashMap<Activity, Boolean>());
 
     @Override
     public void beforeMainActivityOnCreate(Activity activity) {
@@ -48,40 +56,79 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         if (isHostActivity(activity)) return;
         Display display = targetDisplay(activity);
         if (display == null) return;
+        Log.i(TAG, "B1_CREATED_WAITING_FOR_RESUME guest=" + activity.getClass().getName());
+    }
+
+    @Override
+    public void afterMainActivityOnCreate(Activity activity) {
+        // The vendored engine exposes this hook but does not dispatch it on current builds.
+        // The reliable public lifecycle point is onActivityResumed below.
+    }
+
+    @Override
+    public void onActivityResumed(final Activity activity) {
+        if (isHostActivity(activity) || moveScheduled.contains(activity)) return;
+        final Display display = targetDisplay(activity);
+        if (display == null) return;
+        moveScheduled.add(activity);
+        // ActivityThread adds the decor during handleResumeActivity after onResume returns.
+        // Post again so removeViewImmediate uses the same WindowManager after that add.
+        activity.getWindow().getDecorView().postDelayed(new Runnable() {
+            @Override public void run() { moveAfterResume(activity, display); }
+        }, 200L);
+    }
+
+    private void moveAfterResume(Activity activity, Display display) {
         try {
             View decor = activity.getWindow().getDecorView();
+            Log.i(TAG, "B1_BEFORE_MOVE attached=" + decor.isAttachedToWindow() +
+                    " size=" + decor.getWidth() + "x" + decor.getHeight() +
+                    " visibility=" + decor.getVisibility() + " token=" + decor.getWindowToken());
+            if (!decor.isAttachedToWindow()) {
+                Log.e(TAG, "B1_MOVE_NOT_READY guest=" + activity.getClass().getName());
+                moveScheduled.remove(activity);
+                return;
+            }
+            // Use the Activity's WindowManager: it is the manager that added this decor.
             WindowManager wm = activity.getWindowManager();
             wm.removeViewImmediate(decor);
             presentation = new GuestPresentation(activity, display, decor);
             presentation.show();
             Log.i(TAG, "B1_PRESENTATION_SHOWN guest=" + activity.getClass().getName() +
-                    " display=" + display.getDisplayId());
+                    " display=" + display.getDisplayId() + " size=" +
+                    decor.getWidth() + "x" + decor.getHeight());
+            if (activity.getIntent().getBooleanExtra("phase1_inject_input", false)) {
+                decor.postDelayed(() -> injectInput(activity, decor), 500L);
+            }
         } catch (Throwable t) {
             Log.e(TAG, "B1_PRESENTATION_FAILED guest=" + activity.getClass().getName(), t);
         }
     }
 
-    @Override
-    public void afterMainActivityOnCreate(Activity activity) {
-        if (isHostActivity(activity)) return;
-        Display display = targetDisplay(activity);
-        if (display == null) return;
-        try {
-            View decor = activity.getWindow().getDecorView();
-            WindowManager wm = activity.getWindowManager();
-            wm.removeViewImmediate(decor);
-            presentation = new GuestPresentation(activity, display, decor);
-            presentation.show();
-            Log.i(TAG, "B1_PRESENTATION_SHOWN guest=" + activity.getClass().getName() +
-                    " display=" + display.getDisplayId());
-        } catch (Throwable t) {
-            Log.e(TAG, "B1_PRESENTATION_FAILED guest=" + activity.getClass().getName(), t);
+    private void injectInput(Activity activity, View root) {
+        final long downTime = System.currentTimeMillis();
+        final float x = Math.max(1f, root.getWidth() / 2f);
+        final float y = Math.max(1f, root.getHeight() - 60f);
+        MotionEvent down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0);
+        MotionEvent up = MotionEvent.obtain(downTime, downTime + 40L, MotionEvent.ACTION_UP, x, y, 0);
+        boolean tapDown = root.dispatchTouchEvent(down);
+        boolean tapUp = root.dispatchTouchEvent(up);
+        down.recycle();
+        up.recycle();
+        Log.i(TAG, "B1_INPUT_TAP x=" + x + " y=" + y + " down=" + tapDown + " up=" + tapUp);
+        int[] keys = {KeyEvent.KEYCODE_T, KeyEvent.KEYCODE_E, KeyEvent.KEYCODE_S, KeyEvent.KEYCODE_T};
+        for (int key : keys) {
+            boolean keyDown = activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
+            boolean keyUp = activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
+            Log.i(TAG, "B1_INPUT_KEY code=" + key + " down=" + keyDown + " up=" + keyUp +
+                    " focus=" + root.findFocus());
         }
     }
 
     @Override
     public void onActivityDestroyed(Activity activity) {
         if (isHostActivity(activity)) return;
+        moveScheduled.remove(activity);
         if (presentation != null) {
             try { presentation.dismiss(); } catch (Throwable ignored) { }
             presentation = null;

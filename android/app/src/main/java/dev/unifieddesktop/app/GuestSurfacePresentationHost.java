@@ -21,6 +21,7 @@ final class GuestSurfacePresentationHost extends AppLifecycleCallback {
     private SurfaceControlViewHost viewHost;
     private Presentation presentation;
     private View pendingDecor;
+    private boolean attached;
 
     @Override
     public void onActivityCreated(Activity activity, Bundle state) {
@@ -46,7 +47,23 @@ final class GuestSurfacePresentationHost extends AppLifecycleCallback {
             presentation = new SurfacePresentation(activity, target);
             presentation.show();
             SurfaceView surface = ((SurfacePresentation) presentation).surface;
-            surface.postDelayed(() -> attach(surface, target, activity), 100L);
+            surface.getHolder().addCallback(new android.view.SurfaceHolder.Callback() {
+                @Override public void surfaceCreated(android.view.SurfaceHolder holder) {
+                    Log.i(TAG, "B2_SURFACE_CREATED valid=" + surface.getHolder().getSurface().isValid() +
+                            " size=" + surface.getWidth() + "x" + surface.getHeight());
+                    surface.post(() -> attach(surface, target, activity));
+                }
+                @Override public void surfaceChanged(android.view.SurfaceHolder holder, int format,
+                                                     int width, int height) {
+                    Log.i(TAG, "B2_SURFACE_CHANGED valid=" + surface.getHolder().getSurface().isValid() +
+                            " size=" + width + "x" + height);
+                    surface.post(() -> attach(surface, target, activity));
+                }
+                @Override public void surfaceDestroyed(android.view.SurfaceHolder holder) {
+                    Log.i(TAG, "B2_SURFACE_DESTROYED");
+                }
+            });
+            Log.i(TAG, "B2_PRESENTATION_SHOWN display=" + target.getDisplayId());
         } catch (Throwable t) {
             Log.e(TAG, "B2_SURFACE_PACKAGE_FAILED guest=" + activity.getClass().getName(), t);
             release();
@@ -54,11 +71,20 @@ final class GuestSurfacePresentationHost extends AppLifecycleCallback {
     }
 
     private void attach(SurfaceView surface, Display display, Activity activity) {
-        if (pendingDecor == null) return;
+        if (pendingDecor == null || attached) return;
         try {
+            if (!surface.isAttachedToWindow() || !surface.isShown() || !surface.getHolder().getSurface().isValid()) {
+                Log.i(TAG, "B2_ATTACH_WAIT surfaceAttached=" + surface.isAttachedToWindow() +
+                        " shown=" + surface.isShown() + " valid=" + surface.getHolder().getSurface().isValid());
+                return;
+            }
             if (surface.getHostToken() == null) {
                 throw new IllegalStateException("SurfaceView.getHostToken() returned null after attach");
             }
+            Log.i(TAG, "B2_BEFORE_MOVE attached=" + pendingDecor.isAttachedToWindow() +
+                    " parent=" + pendingDecor.getParent() + " size=" +
+                    pendingDecor.getWidth() + "x" + pendingDecor.getHeight() +
+                    " visibility=" + pendingDecor.getVisibility());
             // The guest ActivityThread has attached DecorView by the time this delayed
             // callback runs. Detach that public window root before handing the view tree to
             // the SurfaceControlViewHost; otherwise ViewRootImpl rejects a second parent.
@@ -69,7 +95,8 @@ final class GuestSurfacePresentationHost extends AppLifecycleCallback {
             int height = Math.max(1, display.getMode().getPhysicalHeight());
             viewHost.setView(pendingDecor, width, height);
             surface.setChildSurfacePackage(viewHost.getSurfacePackage());
-            Log.i(TAG, "B2_SURFACE_PACKAGE_SHOWN guest=" + activity.getClass().getName() +
+            attached = true;
+            Log.i(TAG, "B2_GUEST_VIEW_ATTACHED guest=" + activity.getClass().getName() +
                     " display=" + display.getDisplayId());
         } catch (Throwable t) {
             Log.e(TAG, "B2_SURFACE_PACKAGE_FAILED guest=" + activity.getClass().getName(), t);
@@ -83,6 +110,7 @@ final class GuestSurfacePresentationHost extends AppLifecycleCallback {
     }
 
     private void release() {
+        attached = false;
         if (viewHost != null) {
             try { viewHost.release(); } catch (Throwable ignored) { }
             viewHost = null;
