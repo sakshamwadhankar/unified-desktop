@@ -6,15 +6,16 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 1 of 13 (hidden Android app) is **CLOSED, GO** (2026-10-16). Path A is NO-GO;
+- **Phase:** 2 of 13 next. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Path A is NO-GO;
   path B (move the guest's window into our Presentation on a private display) works on the
   phone for ordinary apps and for Firefox's web engine.
 - **Last updated:** 2026-10-16, round 9 run by the manager on Windows. Example.com loads on
   our display; Wikipedia scrolls at 22.2 fps; about 695 MB PSS with a browser page open;
   10-minute survival passes. B-007 fixed (engine slot reuse). New: B-008 (black placeholder
   window on the phone screen), B-009 (Play Store/GMS crash loop).
-- **Next action:** the manager switches the adb server back to localhost-only if the owner
-  agrees, then writes the full Phase 2 prompt.
+- **Next action:** Phase 2 (Windows + Linux apps through Box64 + Wine), one prompt. The
+  Windows adb server is localhost-only again (owner approved, 2026-10-16); reopen it with
+  `adb kill-server; adb -a start-server` for phone runs from the OmniRush box.
 
 ## Done (verified on the phone, 2026-10-14)
 

@@ -604,7 +604,7 @@ separate painted frame. The honest product implication is therefore:
 - no claim is made that the PRD's 30-fps moving target or long-session resource budget has
   passed on this Snapdragon 695 phone.
 
-The remaining rows are explicit in `BUGS.md` and `SKIPS.md`; Chrome remains deferred to Phase 7
+The remaining rows are explicit in `BUGS.md` and `SKIPS.md`; Chrome remains deferred to Phase 8 (App Center)
 as B-003. No system-only permission, Accessibility service, developer mode, root, ADB user
 requirement, or VM was added.
 
