@@ -1,0 +1,58 @@
+Phase 1 Round 9 phone results (run by the manager on Windows, phone 2c0f6edc on USB)
+Date: 2026-10-16. Build: commit 35b467f (engine slot-owner guards). mCallState=0 before every run.
+
+=== G6 build gates ===
+:app:testDebugUnitTest :app:lintDebug :app:assembleDebug -> exit 0 (manager, Windows, JBR 21).
+
+=== T1 engine slot fix (B-007) ===
+Run 11:48 (display 95): Firefox gpu process got its OWN slot (bPid=5), tab bPid=4, Play Store
+bPid=3. No "App Died" for Firefox's gpu/tab processes; Play Store no longer crashes the
+Firefox children. Gecko's SurfaceView received its first buffer:
+  11:49:09.971 BLASTBufferQueue [SurfaceView[org.mozilla.firefox]#2] acquireNextBufferLocked
+  size=1280x720 mFrameNumber=1
+(That run's capture had stopped before the page drew; caps=10 was too short.)
+
+=== T2 loaded page (run 11:55, display 96) ===
+  11:55:13.116 B1_INPUT_CONNECTION target=AndroidComposeView commit=true action=deferred
+  11:55:14.166 frame-3 = typed https://example.com before Go  (round9_typed.png
+               c7b81a1cd8539e5999f7d8fd3e2d541a096f84aff2a3208f8f1cc44f1f719d1f)
+  11:55:14.942 B1_INPUT_ACTION action=true
+  11:55:15.295 B1_GUEST_SURFACE_CREATED MagnifiableSurfaceView 1280x720
+  11:55:24.007 frame-8 = example.com page with its body text ("This domain is for use in
+               documentation examples...")  (round9_example_page.png
+               f3d41a356557d804a0755497346397c522c25220504dbf545b7e213ea76a711b)
+Real screen at 11:56 (round9_real_screen.png 5c3a95cba4325c54...): guest NOT visible,
+keyboard NOT visible (dumpsys input_method mInputShown=false). The real screen showed a
+full-screen BLACK window (the engine's ProxyActivity$P0), not the phone's own UI -> B-008.
+Note: a run with reset_guest=true lands on Firefox's first-run onboarding, where the
+harness's fixed taps miss (commit=false); runs without reset pass.
+
+=== T3 moving workload (run 11:56, display 97) ===
+Firefox typed en.wikipedia.org/wiki/Android_(operating_system), then paired drags every
+~0.7 s (B1_INPUT_DRAG moving-up 640,590 -> 640,130) for 60 s.
+  GUEST_MEASURE_DONE frames=1381 elapsed_s=62.156 fps=22.22 first_frame_ms=5178
+  (OWN_CONTENT_ONLY display: a frame is only produced when content changes.)
+CPU% (top, one sample each):
+  t=40s (page load/scroll start): host 88.8, :black 2.7, firefox main 33.3, tab 16.6,
+        gpu 13.8, gms 2.7, vending:quick_launch 191 (crash loop, B-009)
+  t=65s (scrolling):              host 11.7, firefox main 28.5, tab 0.8, gpu 0 (sample),
+        vending 4.2, gms 0.8
+PSS (dumpsys meminfo, KB): host 43,610; :black 37,925; firefox main 195,971;
+  tab_8 137,612; tab_16 58,295; gpu 57,581; crashhelper 27,964; vending 65,377;
+  gms 47,404; engine slot p9 23,378. Total ~695 MB.
+RSS (ps, KB): firefox main 407,376; tab_8 325,336; gpu 233,256; host 165,204.
+Process count under our uid: 12.
+Kills: the only am_kill lines for our uid are the manager's own force-stop before the run
+(11:56:46 "stop dev.unifieddesktop.app due to from pid ..."). No lowmem/Osense kill of ours.
+App Died during the run: com.android.vending:background / :quick_launch repeatedly (B-009),
+one spare Firefox tab process (tab_1) at 11:58:24.
+
+=== T4 survival (same Wikipedia session, 11:58:44 -> 12:08:48) ===
+T0:  firefox 26083 00:00:39 | tab_8 26535 00:00:15 | gpu 26626 00:00:16 | tab_16 26919 00:00:04
+     host 25948 00:00:25 | :black 25982 00:00:11 | crashhelper 26147 | p9 28144
+T+10m: SAME eight PIDs alive; firefox 00:00:41, tab_8 00:00:17 (CPU time advanced; page idle).
+Screen: the phone went to Dozing during the watch (mWakefulness=Dozing at the end), so part of
+the watch ran with the screen off; the guest still survived.
+exit-info in the window: GMS (slot p8, pid 27456) ANR at 12:08:39; Play Store slots
+SIGNALED / INITIALIZATION FAILURE 11:58 (B-009). No Firefox process exit after 11:58:24.
+Cleanup: force-stop, svc power stayon false (mStayOn=false).

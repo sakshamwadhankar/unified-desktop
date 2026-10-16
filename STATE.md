@@ -6,17 +6,15 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 1 of 13 (hidden Android app). **Path A (guest activity launched onto our own
-  virtual display) is NO-GO**, confirmed on the phone and in Android's source. Round 3
-  proved public path B1 and B2 guest rendering on the real phone: Google Tasks frames land
-  on our private display while a same-run real-screen capture shows something else.
-- **Last updated:** 2026-10-16, manager review of round 8 (run by a separate Claude Code
-  session on Windows). Build gates pass; 10-minute idle Firefox watch passed. Its B-007
-  cause was wrong: the manager's re-run shows the web layer is on our display and Gecko's
-  GPU/tab processes are killed by an engine slot-reuse bug triggered by a crashing Play Store
-  (BUGS B-007). A Firefox main-process kill was also seen (B-004).
-- **Next action:** Phase 1 round 9: fix the engine slot reuse and the Play Store crash, then
-  loaded page, moving fps, survival with a loaded page.
+- **Phase:** 1 of 13 (hidden Android app) is **CLOSED, GO** (2026-10-16). Path A is NO-GO;
+  path B (move the guest's window into our Presentation on a private display) works on the
+  phone for ordinary apps and for Firefox's web engine.
+- **Last updated:** 2026-10-16, round 9 run by the manager on Windows. Example.com loads on
+  our display; Wikipedia scrolls at 22.2 fps; about 695 MB PSS with a browser page open;
+  10-minute survival passes. B-007 fixed (engine slot reuse). New: B-008 (black placeholder
+  window on the phone screen), B-009 (Play Store/GMS crash loop).
+- **Next action:** the manager switches the adb server back to localhost-only if the owner
+  agrees, then writes the full Phase 2 prompt.
 
 ## Done (verified on the phone, 2026-10-14)
 
@@ -67,4 +65,3 @@ corrections in `docs/PHASE1_RESULT.md`.
 | Item | Notes |
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6, questions Q1-Q6 |
-| Phase 1 round-8 remaining proof | Firefox body/page-content proof (B-007), valid moving workload metrics, and guest survival (B-004); Round 8 phone execution was blocked by the shell outage, see `SKIPS.md` Round 8 T1-T3 |

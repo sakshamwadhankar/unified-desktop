@@ -736,24 +736,43 @@ advanced 00:00:19 → 00:01:41. No `am_kill` of our guest during the 10-minute w
 proxy `:p3` process churned (repeated `am_proc_died`) — that is B-007's content-process
 instability, not guest-app death. B-004 (guest exit within 60 s) did **not** reproduce.
 
-## Phase 1 verdict (manager, 2026-10-16): NOT closed yet
+## Round 9 (phone) — 2026-10-16
 
-Round 8 was run by a separate Claude Code session on the Windows laptop. Its build gates and
-numbers stand; its B-007 cause and "hard limit" verdict were **wrong** and are withdrawn.
+The coding agent wrote the engine slot-owner fix (commit 35b467f) and ran out of its daily
+quota before the phone run. The manager ran the phone part on Windows at the owner's request.
+Evidence: `evidence/phase1/round9_phone_results.txt`.
 
-- **Works on the phone:** Path B guest rendering on our private 1280x720 display; the real
-  screen does not show the guest; taps; typed text through an InputConnection (visible before
-  Go); Google Play services for guests (Tasks reaches its own Sign in); Firefox's own UI; a
-  10-minute idle watch (rounds 4 and 8); `:app:testDebugUnitTest :app:lintDebug
-  :app:assembleDebug` pass.
-- **B-007 is not a SurfaceView limit.** The Firefox web layer sits under our Presentation
-  window on our display (SurfaceFlinger parent chain, manager re-run). The page is blank
-  because Gecko's GPU and tab processes die: the engine reuses a proxy slot after the Play
-  Store crashed in it, and a stale Play Store bind crashes the new process. That is an engine
-  bug, so it may be fixable.
-- **Not measured yet:** moving fps (round 8 got 0.05 fps on a near-static screen), survival
-  with a loaded page.
-- **Cost so far:** host + engine about 45 MB PSS; GMS about 160 MB PSS; Firefox main
-  137-333 MB RSS.
-- **Product meaning so far:** ordinary apps run hidden. Whether browsers, video, maps and
-  games work hidden depends on the B-007 fix in round 9.
+- Firefox's GPU and tab processes now get their own slots and stay alive; the Play Store no
+  longer kills them.
+- Typed `https://example.com` visible before Go, then the example.com page with its body
+  text on our display (`round9_example_page.png`, sha256 `f3d41a35...`).
+- Same-moment real screen: no guest, no keyboard (`mInputShown=false`). It showed a black
+  placeholder window instead of the phone's UI (B-008).
+- Wikipedia "Android (operating system)" scrolled by injected drags: **22.2 fps** over 62 s
+  (1,381 frames), first guest frame 5.2 s after the launch request.
+- Memory with that page open: about **695 MB PSS** in total (Firefox and its helpers ~478 MB,
+  our host + engine ~105 MB, Play Store + Google Play services ~113 MB).
+- CPU while scrolling: Firefox main ~29%, host ~12%; during page load the host peaked at
+  ~89%. A crash-looping Play Store background process hit 191% in one sample (B-009).
+- 10-minute survival with the page open: the same eight PIDs alive, CPU time advancing; no
+  phone kill of our processes. The screen dozed during part of the watch. Google Play
+  services had one ANR at the end (B-009).
+- Gates: G1 PASS, G2 PASS (with B-008 logged), G3 PASS (round 7/9), G4 PASS, G5 PASS,
+  G6 PASS.
+
+## Phase 1 verdict (manager, 2026-10-16): CLOSED, GO
+
+A Play-installed Android app runs hidden inside our own app and draws on our private
+1280x720 display, while the phone's real screen does not show it. This covers ordinary apps
+and also apps that draw with SurfaceView (Firefox's web engine), which round 8 had wrongly
+called impossible.
+
+- **Works:** rendering, taps, typed text through an InputConnection, Google Play services
+  for guests (Tasks reaches sign-in), a real web page, scrolling at 22 fps, 10-minute
+  survival, no Accessibility, no special permission, no developer mode, no root, no VM.
+- **Cost:** about 105 MB for our host and engine, plus each guest's own memory (a browser
+  with a page: about 480 MB), plus about 110 MB for the Google pieces when a guest needs
+  them.
+- **Open, assigned to later phases:** the black placeholder window on the phone screen
+  (B-008); the Play Store / Google Play services crash loop and its CPU cost (B-009); Chrome
+  launch (B-003); a 30-fps target is not reached yet (22 fps measured).
