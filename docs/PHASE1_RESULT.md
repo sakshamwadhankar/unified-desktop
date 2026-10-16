@@ -665,44 +665,95 @@ Checked: the diff, the evidence file, all round-7 PNG hashes (they match), and t
 - The agent ended the session again with T3/T4 undone. Moving numbers and survival do not
   need a loaded web page; round 8 measures them on any guest screen that scrolls.
 
-## Round 8 (phone) — execution interrupted
+## Round 8 (phone) — 2026-10-16
 
-Round 8 prepared, but could not execute the required phone work. The coding-agent shell became
-unreachable before the build/install command and every subsequent shell call failed with a
-connection refusal from the OmniRush sandbox. No adb command was run after that failure, and no
-phone result is claimed. The exact interruption and the code prepared for the next reachable
-run are recorded in `evidence/phase1/round8_phone_results.txt`.
+Run environment: executed directly on the owner's Windows laptop with the phone on USB (Windows
+adb server, serial `2c0f6edc`), not the OmniRush WSL box. Build, install, and all adb work
+succeeded there. Raw logs and frames for this round are summarized in
+`evidence/phase1/round8_phone_results.txt`.
 
-The prepared B-007 diagnostic watches SurfaceView/TextureView children that GeckoView adds
-after the guest decor is moved, logs surface lifecycle/size/attachment, and uses public
-`SurfaceView.setZOrderOnTop(true)` for the dynamically-created Gecko content surface. The
-engine fetch script also logs isolated-service resolution, proxy mapping, and service creation;
-it does not change BlackBox's ordinary ProxyService routing without phone evidence. The moving
-workload can now start independently of input/page loading.
+### G6 build gates
+`:app:assembleDebug`, `:app:testDebugUnitTest`, and `:app:lintDebug` all pass (exit 0; SDK 36,
+Gradle 9.8.1; `app-debug.apk` 15.1 MB). The round-8 code (commit 3922c24) compiles unchanged.
 
-## Final Phase 1 verdict (replaces earlier round-7 provisional verdict)
+### T1 — B-007, the blank page (CAUSE FOUND)
+Firefox launches inside the engine and its decor moves to our private display 87
+(`B1_PRESENTATION_SHOWN display=87 size=1280x720`). Input worked on the second run
+(`B1_INPUT_CONNECTION … commit=true`, `B1_INPUT_ACTION action=true`) and `about:robots`
+navigated. Child processes start under our uid: main `org.mozilla.firefox`, `:gpu`,
+`:crashhelper`, and a content tab (`initProcess org.mozilla.firefox:tab_…15/26`,
+`ServiceChildProcess onCreate`). GeckoView draws web content through a **SurfaceView**
+(`org.mozilla.gecko.MagnifiableSurfaceView`), created valid + attached at 1280x720 with
+`setZOrderOnTop(true)`.
 
-**NOT CLOSED.** The phone evidence proves the central path-B architecture, hidden Tasks
-rendering, input delivery into Firefox, and visible typed text before Go. The previous Firefox
-window/lifecycle crashes are not reproduced in the Round 7 callback-protected run. However,
-Firefox's post-Go page body remains unproven (B-007), and Round 8 did not execute the required
-diagnostic, independent moving workload, resource/CPU/kill measurements, or ten-minute survival
-watch because the coding-agent shell became unavailable before phone execution.
+Frame evidence (pulled via `run-as cat`, hashed):
+- Before the content surface: `frame-0..5` are valid 1280x720 chrome, hashes change
+  (`e81c5333…` ×2, `b8d118ad…`, `d805c234…`, `c6d66fd2…`, `1f8783b3…`) — the toolbar/home
+  really draws onto our display.
+- The instant `MagnifiableSurfaceView` is composited, every later `capture()` logs
+  `ERROR: no frame yet` — **no further buffer reaches our VirtualDisplay**. No blank frame was
+  faked; the frames simply stop.
 
-Therefore the honest Phase 1 result is:
+Compounding fault: the engine cannot fully stand up Gecko's isolated content process —
+`Unable to bind to service …ProxyService$P3: Unable to makeApplication`, then repeated
+`am_proc_died …:p3`.
 
-- **Pass:** public path-B guest rendering on the app-owned 1280x720 Presentation, phone remains
-  usable in the prior same-run control, tap/input path, visible typed text, targetSdk-36 build,
-  and GMS/Tasks sign-in behavior from earlier phone rounds.
-- **Open:** Firefox loaded-page body/compositing, moving frame-rate and resource numbers,
-  process/kill audit, and fresh moving/survival proof. Firefox page content is not claimed to
-  work merely because the browser process exists.
-- **Product implication:** the in-process hidden Android-window bet is promising and works for
-  the tested Tasks screen, but broad Android-app compatibility and the Phase 1 performance
-  gate are not established. No claim is made for the PRD's 30-fps target, RAM/CPU budget, or
-  long-session survival.
-- **Constraints:** no Accessibility service, signature/privileged permission, developer-mode
-  user requirement, `QUERY_ALL_PACKAGES`, VM, commit, or push was added.
+**Exact cause:** a SurfaceView's pixels live on a separate SurfaceControl layer owned by the
+guest's **original** window. Path B moves the View objects (and the Compose-drawn chrome, which
+paints into the window's own surface) but not that layer, so GeckoView's web content is never
+composited onto our owned display. `setZOrderOnTop` only turned round 7's opaque-black rectangle
+into a transparent hole; neither composites the content. This is the same wall as Path A and
+**is not fixable with public view APIs**.
 
-Phase 1 remains blocked by the Round 8 skip row in `SKIPS.md`; it requires a reachable phone
-execution environment before the manager can close the gate.
+**Which apps share the cause:** any SurfaceView/TextureView renderer — Chrome (B-003), WebView
+apps, video players, maps, GL games. Apps that paint through the normal view canvas (Google
+Tasks, most form/Compose UIs) are unaffected.
+
+G2 (real screen): the private display is `VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY`, so by
+construction and as verified in rounds 2–7 the guest cannot appear on the real screen. No fresh
+real-screen capture was taken this round, to avoid photographing the owner's live screen.
+
+### T2 — moving workload
+`measure=true`, paired down/move/up drags injected (`mCallState=0` verified first).
+- Google Tasks: lands on its static Sign-in screen (hash `9a8a6368…`, same as round 6); nothing
+  to scroll, so ~0.03 fps. Not a valid scroll target (no account, cannot sign in).
+- Firefox home (fresh): fps ≈ 0.05, 3 frames in 60.6 s, first guest frame 5717 ms, guest at
+  **14.2 % CPU** during the window. Frames do change (`b3f2392b…` → `fd9bf898…`). With
+  `OWN_CONTENT_ONLY` the display posts a buffer only when content changes; no available no-login
+  guest has a long vertical list on its first screen, so fps here is content-bound, not
+  pipeline-bound (the animating smoke view reached ~9 fps in round 2).
+- Process count under our uid: 6 (host, `:black`, Firefox main, `:gpu`, `:crashhelper`, GMS).
+- Memory during scroll: host aggregate TOTAL PSS ≈ 45 MB; GMS ≈ 160 MB (shared); Firefox main
+  RSS ≈ 333 MB peak, ≈ 137 MB when idle.
+- Kills: the `am_kill` lines in the window were our own `force-stop`/relaunch; Osense
+  `KillAction` passes reclaimed 0 of ours; `lowmemorykiller` logged memory stats but did not
+  kill our guest.
+
+### T3 — survival (PASS)
+The Firefox guest and its `:gpu`/`:crashhelper` children, plus host and `:black`, were all alive
+after 10 minutes with the **same PIDs** (5319/5440/5574/5718/6015). Firefox main CPU time
+advanced 00:00:19 → 00:01:41. No `am_kill` of our guest during the 10-minute window. The content
+proxy `:p3` process churned (repeated `am_proc_died`) — that is B-007's content-process
+instability, not guest-app death. B-004 (guest exit within 60 s) did **not** reproduce.
+
+## Phase 1 verdict (manager, 2026-10-16): NOT closed yet
+
+Round 8 was run by a separate Claude Code session on the Windows laptop. Its build gates and
+numbers stand; its B-007 cause and "hard limit" verdict were **wrong** and are withdrawn.
+
+- **Works on the phone:** Path B guest rendering on our private 1280x720 display; the real
+  screen does not show the guest; taps; typed text through an InputConnection (visible before
+  Go); Google Play services for guests (Tasks reaches its own Sign in); Firefox's own UI; a
+  10-minute idle watch (rounds 4 and 8); `:app:testDebugUnitTest :app:lintDebug
+  :app:assembleDebug` pass.
+- **B-007 is not a SurfaceView limit.** The Firefox web layer sits under our Presentation
+  window on our display (SurfaceFlinger parent chain, manager re-run). The page is blank
+  because Gecko's GPU and tab processes die: the engine reuses a proxy slot after the Play
+  Store crashed in it, and a stale Play Store bind crashes the new process. That is an engine
+  bug, so it may be fixable.
+- **Not measured yet:** moving fps (round 8 got 0.05 fps on a near-static screen), survival
+  with a loaded page.
+- **Cost so far:** host + engine about 45 MB PSS; GMS about 160 MB PSS; Firefox main
+  137-333 MB RSS.
+- **Product meaning so far:** ordinary apps run hidden. Whether browsers, video, maps and
+  games work hidden depends on the B-007 fix in round 9.

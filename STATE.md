@@ -10,16 +10,13 @@ corrects it after review.
   virtual display) is NO-GO**, confirmed on the phone and in Android's source. Round 3
   proved public path B1 and B2 guest rendering on the real phone: Google Tasks frames land
   on our private display while a same-run real-screen capture shows something else.
-- **Last updated:** 2026-10-16, Round 8 preparation/write-up. The shell became unreachable
-  before the required phone build/install command, so no Round 8 adb, frame, process, metric,
-  or survival result is claimed. Code prepared for the next reachable run watches dynamically
-  created Gecko SurfaceView/TextureView children, places Gecko SurfaceView content on top of
-  the Presentation with a public API, logs isolated-service/proxy mapping, and starts moving
-  independently of browser input. B-007 remains open; B-004 remains unmeasured.
-- **Next action:** restore a reachable coding-agent shell/adb path, run the prepared build on
-  phone `2c0f6edc`, then complete B-007 diagnostics, independent moving metrics, and ten-minute
-  survival. The exact interruption is in `evidence/phase1/round8_phone_results.txt` and the
-  Round 8 skip is in `SKIPS.md`.
+- **Last updated:** 2026-10-16, manager review of round 8 (run by a separate Claude Code
+  session on Windows). Build gates pass; 10-minute idle Firefox watch passed. Its B-007
+  cause was wrong: the manager's re-run shows the web layer is on our display and Gecko's
+  GPU/tab processes are killed by an engine slot-reuse bug triggered by a crashing Play Store
+  (BUGS B-007). A Firefox main-process kill was also seen (B-004).
+- **Next action:** Phase 1 round 9: fix the engine slot reuse and the Play Store crash, then
+  loaded page, moving fps, survival with a loaded page.
 
 ## Done (verified on the phone, 2026-10-14)
 

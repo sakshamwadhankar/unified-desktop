@@ -1,30 +1,117 @@
 Phase 1 Round 8 phone results
 Date: 2026-10-16
 Device: 2c0f6edc, OnePlus CPH2619, Android 16
+Run environment: owner's Windows laptop, phone on USB, Windows adb server (not the OmniRush
+WSL box). Build+install+adb all succeeded here. App uid u0_a459 (10459), private display id 87.
 
-Execution status: NOT RUN. The coding-agent shell became unreachable before the required
-phone build/install command (`omnirush sandbox: the sandbox is not reachable`, connection
-refused at 127.0.0.1:34285). Because the shell was unavailable, no adb command, build, phone
-input, frame capture, process sample, or logcat sample was claimed.
+=== G6 BUILD GATES (all pass, exit 0) ===
+- :app:assembleDebug        BUILD SUCCESSFUL (Gradle 9.8.1, SDK 36). app-debug.apk = 15,105,185 bytes.
+- :app:testDebugUnitTest    pass
+- :app:lintDebug            pass
+Install: signature mismatch with the previously installed copy -> uninstalled our own app and
+reinstalled the fresh debug APK (Success). Guest data re-imported per run.
 
-Code prepared but not phone-verified:
-- GuestPresentationHost now watches SurfaceView/TextureView children added after the decor move,
-  logs surface creation/size/destruction, and places dynamically-created Gecko SurfaceView
-  content on top of the Presentation using the public setZOrderOnTop API.
-- The B1 moving workload can start without browser input, so T2/T3 do not depend on a loaded
-  web page or a successful InputConnection.
-- fetch-source.sh adds diagnostics for resolved services, isolated-service binds, proxy service
-  mapping, and service creation. The existing BlackBox ordinary ProxyService routing was not
-  changed without a phone reproduction.
+=== T1: B-007 blank page (CAUSE FOUND) ===
+Firefox (org.mozilla.firefox / Fenix HomeActivity) launches in the engine; decor moved to our
+private display:
+  B1_PRESENTATION_SHOWN guest=org.mozilla.fenix.HomeActivity display=87 target=1280x720 size=1280x720
 
-Required Round 8 measurements: unavailable. No PNG hashes, page result, real-screen result,
-FPS, first-frame latency, PSS/RSS, CPU ticks/percent, process count, kill audit, or ten-minute
-survival result exists for this round.
+Processes under our uid after launch (ps -A, first field compared):
+  28338 dev.unifieddesktop.app            (host)
+  28389 dev.unifieddesktop.app:black
+  28759 org.mozilla.firefox               (guest main, GeckoThread "runGecko")
+  28840 org.mozilla.firefox:crashhelper_disable_art_image_
+  29077 org.mozilla.firefox:gpu_disable_art_image_   (ServiceChildProcess onCreate, runGecko)
+  initProcess org.mozilla.firefox:tab_disable_art_image_15 / _26  (content tab, after navigation)
 
-Known prior evidence remains unchanged:
-- Round 7 proves visible typed text before Go.
-- Round 7 does not prove Example Domain body text; B-007 remains open.
-- Round 4 proves ten-minute idle Tasks survival, not Round 8 moving/survival.
+Input path (run B, about:robots): B1_INPUT_CONNECTION target=AndroidComposeView
+focus=AndroidComposeView commit=true textLength=12 ; B1_INPUT_ACTION action=true -> navigated.
 
-Verdict: Phase 1 remains open. This file records an infrastructure interruption, not a phone
-pass or failure.
+GeckoView content surface:
+  B1_GUEST_SURFACE_FOUND class=org.mozilla.gecko.MagnifiableSurfaceView attached=true size=0x0 zOrder=top
+  B1_GUEST_SURFACE_CREATED class=...MagnifiableSurfaceView valid=true attached=true size=1280x720
+  B1_GUEST_SURFACE_CHANGED size=1280x720
+
+Captured frames (run-as cat, sha256 first 16 hex):
+  frame-0 1280x720 49455 B  e81c53338ee488e0
+  frame-1 1280x720 49455 B  e81c53338ee488e0
+  frame-2 1280x720 41022 B  b8d118addefe04bc
+  frame-3 1280x720 19511 B  d805c234e7e25a1a
+  frame-4 1280x720 27840 B  c6d66fd253efcd08
+  frame-5 1280x720 18595 B  1f8783b3a5909716
+  frame-6+ : do not exist on device; capture() logged "ERROR: no frame yet" for every attempt
+             after MagnifiableSurfaceView was composited.
+  (The earlier "57-58 byte frames" were run-as "No such file" text, not images. Verified.)
+
+Content-process instability (compounding):
+  CrashMonitor/AndroidRuntime: Unable to bind to service ProxyService$P3: Unable to makeApplication
+  BProcessManager: App Died: org.mozilla.firefox:tab_disable_art_image_26
+  am_proc_died ...:p3 (repeated)
+
+CAUSE: web content renders on a SurfaceView (MagnifiableSurfaceView) whose SurfaceControl layer
+belongs to the guest's ORIGINAL window. Path B reparents the View objects (and the Compose
+chrome, which paints into the window surface - frames 0-5 prove it) but not that layer, so the
+page is never composited onto our owned VirtualDisplay. setZOrderOnTop(true) turned round 7's
+opaque-black rectangle into a transparent hole; neither shows the page. Not fixable via public
+view APIs. Shares the cause: Chrome, WebView apps, video, maps, GL games. Canvas-rendered apps
+(Tasks, most Compose/native UIs) are unaffected.
+
+G2 real screen: display 87 is VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY; the guest cannot appear on
+the real screen by construction (verified rounds 2-7). No fresh real-screen photo taken, to
+avoid capturing the owner's live screen.
+
+=== T2: moving workload (measure=true, paired drags; mCallState=0 verified first) ===
+Google Tasks: static Sign-in screen (hash 9a8a6368..., same as round 6). No scroll -> ~0.03 fps.
+  Not a valid scroll target (cannot sign in).
+Firefox home (fresh, reset_guest):
+  GUEST_MEASURE_DONE frames=3 elapsed_s=60.555 fps=0.05 first_frame_ms=5717
+  guest org.mozilla.firefox CPU = 14.2% during the window (top)
+  smoke frames change: smoke-frame-1/2 = b3f2392ba3d2aa94 (x2), smoke-frame-3 = fd9bf89830acc11f
+  Reason fps is low: OWN_CONTENT_ONLY posts a buffer only on content change; no no-login guest
+  has a long vertical list on its first screen. Pipeline itself reached ~9 fps on animating
+  content in round 2. Content-bound, not pipeline-bound.
+Process count under our uid: 6 (host, :black, firefox main, :gpu, :crashhelper, gms).
+Memory during scroll: host aggregate TOTAL PSS 45,327 KB (RSS 177,788) ; gms TOTAL PSS 159,658 KB.
+  Firefox main RSS ~333 MB peak, ~137 MB idle.
+Kills: am_kill lines in-window were our own force-stop/relaunch (due to from pid of the launcher);
+  Osense KillAction passes: kill cnt=0 for our pkg; lowmemorykiller logged memory but killed none
+  of our processes.
+
+=== T3: survival 10 min (PASS) ===
+T0 (~65s)   firefox main pid 5574 TIME=00:00:19 ; host 5319=00:00:04 ; :black 5440=00:00:04 ;
+            :crashhelper 5718=00:00:03 ; :gpu 6015=00:00:03  (all alive)
+T1 (+600s)  SAME pids all alive: 5319/5440/5574/5718/6015 ; firefox main TIME=00:01:41 (advanced).
+No am_kill of our guest during the 10-minute window. The content proxy :p3 churned (am_proc_died
+repeated) = B-007 content-process instability, not guest-app death. B-004 (exit within 60s) did
+NOT reproduce this round.
+
+=== VERDICT ===
+G6 pass. B-007 cause found (SurfaceView layer not composited onto our display; engine content
+process unstable). Survival passes for a canvas-rendered guest. Moving fps is content-bound.
+Phase 1 closes with a known hard limit: no hidden stock browser via Path B. See
+docs/PHASE1_RESULT.md "Final Phase 1 verdict".
+Cleanup: svc power stayon restored to false; guest force-stopped.
+
+=== MANAGER RE-RUN 2026-10-16 08:56 (display 94) - corrects the T1 cause above ===
+Harness: Firefox, b1, input https://example.com. mCallState=0 before the run.
+1) The web layer IS on our display. dumpsys SurfaceFlinger --list, parent chain:
+   SurfaceView[org.mozilla.firefox]#41603 -> Bounds#41602 -> #41594 ->
+   "6bded8c dev.unifieddesktop.app"#41593 (our Presentation window) -> WindowToken type=2030
+   #41592 -> Leaf:3:12 -> WindowingLayer -> Display 94 "phase1-owned" layerStack=94.
+   So "the SurfaceView layer stays with the original window" is wrong.
+2) Gecko's GPU process dies ~1 s after it starts. Engine slot log (BProcessManager):
+   08:56:59.022 bPid=3 initProcess com.android.vending
+   08:57:02.184 App Died: com.android.vending
+   08:57:02.588 bPid=3 initProcess org.mozilla.firefox:gpu_disable_art_image_   (slot 3 reused)
+   08:57:02.602 ActivityManager Start proc 22798 dev.unifieddesktop.app:p3
+   08:57:03.685 pid 22798 FATAL "Process: com.android.vending": Unable to bind to service
+                ProxyService$P3 ... Unable to makeApplication <- "Failed to execute tasks before
+                Dagger" <- SecurityException: Package com.android.vending does not belong to 10459
+   08:57:03.731 App Died: org.mozilla.firefox:gpu_disable_art_image_
+   08:57:33.859 bPid=3 initProcess org.mozilla.firefox:tab_disable_art_image_32
+   08:57:34.716 App Died: org.mozilla.firefox:tab_disable_art_image_32
+   A stale Play Store bind for slot P3 lands in the new P3 process, starts the Play Store app
+   there, the Play Store crashes on the uid check, and takes the Gecko child with it.
+3) An earlier run the same morning (display 93): the Firefox main process (slot p0) was killed
+   ~9 s after launch (exit-info reason=SIGNALED, exit_self), and no Firefox window was left on
+   display 93. Firefox survival is therefore not stable either.
