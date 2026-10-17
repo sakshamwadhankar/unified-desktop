@@ -40,66 +40,91 @@ object Phase2Wine {
     /** Extra environment for the next wine start (e.g. WINEDEBUG for a traced run). */
     var extraEnv: Map<String, String> = emptyMap()
 
-    // ---- wine data patches (applied on the phone; B-017 / B-019) -----------
+    // ---- wine data patches (applied on the phone; B-017 / B-019 / round 3) --
     //
-    // Two byte-exact, length-preserving patches to the pinned wine-11.19 tree.
-    // Every site is rewritten only when its exact original bytes are found
-    // (unique occurrence); the final sha256 of each file is pinned and verified
-    // on disk, so a wrong/different wine build can never be patched silently.
+    // Two byte-exact, length-preserving patch families. Every site is rewritten
+    // only when its exact bytes are found (unique occurrence); for the default
+    // 11.19 pin the final sha256 of each file is pinned and verified on disk, so
+    // a wrong/different wine build can never be patched silently. Round 3 adds
+    // candidate pins (9.0 / 10.0 / 11.0): their sites were located byte-exactly
+    // in the pinned tarballs on the laptop (2026-10-17) and the tarball itself is
+    // SHA-256 verified at download, so only byte guards are used for them.
     //
-    // 1) ntdll.so — 39-bit host fix (B-017).
-    //    wine >= 9.17 computes the host address-space limit at runtime. On a
-    //    39-bit device (this phone) it is 0x7fffff0000, so virtual_init gets
-    //    pages_vprot_size = 128 slots and calls anon_mmap_alloc(128*8 = 1024).
-    //    1024 is not a multiple of the 4 KiB host page, so the inlined sanity
-    //    assert(!(size & host_page_mask)) (dlls/ntdll/unix/virtual.c:278) fired
-    //    and wineboot SIGABRTed 149 ms in. An mmap length need not be page
-    //    aligned (the kernel rounds it up), so the assert is wrong for this one
-    //    call site: `test $0xff8,%esi` (virtual_init+0x1b6) -> `test $0x0,%esi`,
-    //    the `jne __assert_fail` can never be taken.
-    //      0x82e88: f8 0f 00 00 -> 00 00 00 00
+    // 1) server socket dir under WINEPREFIX (B-017 follow-up, all pins).
+    //    The plain x86-64 builds hardcode "/tmp/.wine-%u[...]" for the wineserver
+    //    socket directory; Android's /tmp is not writable by an app, so the server
+    //    died with "mkdir /tmp/.wine-<uid>: Permission denied". Both sides chdir
+    //    to $WINEPREFIX before building that path (server: server/request.c
+    //    create_server_dir; client: ntdll setup_config_dir -> init_server_dir),
+    //    so dropping the leading "/tmp/" and NUL-padding the tail by the same 5
+    //    bytes makes the path prefix-relative and identical on both sides.
+    //    Strings per pin (from the tarballs, all unique in their files):
+    //      9.0  ntdll     "/tmp/.wine-%u/server-%s"
+    //      9.0  server    "/tmp/.wine-%u"
+    //      10.0/11.0/11.19 ntdll, 10.0/11.0/11.19 server: as below.
     //
-    // 2) ntdll.so + bin/wineserver — server socket dir under WINEPREFIX.
-    //    This Linux build hardcodes /tmp/.wine-%u for the wineserver socket
-    //    directory (upstream's #ifdef __ANDROID__ branch uses $WINEPREFIX, but
-    //    it is compiled out of a plain x86-64 build). Android's /tmp is not
-    //    writable by an app, so wineserver died with
-    //    "mkdir /tmp/.wine-<uid>: Permission denied".
-    //    Both sides chdir($WINEPREFIX) before building/using that path
-    //    (server: server/request.c create_server_dir; client: ntdll
-    //    setup_config_dir -> init_server_dir), and the socket itself is bound
-    //    with the relative name "socket" after chdir(server_dir). Making the
-    //    path prefix-relative therefore resolves identically on both sides
-    //    (verified on x86-64: the server dir appears in $WINEPREFIX and /tmp is
-    //    untouched):
-    //      ntdll.so  : "/tmp/.wine-%u/server-%llx-%llx" -> ".wine-%u/server-%llx-%llx" + 5 NUL pad
-    //      wineserver: "/tmp/.wine-%u"                  -> ".wine-%u" + 5 NUL pad
+    // 2) 39-bit host address-space asserts (B-017, wine >= 9.17 only).
+    //    wine >= 9.17 computes the host address-space limit at runtime. On this
+    //    39-bit device it is 0x7fffff0000, and virtual_init calls
+    //    anon_mmap_alloc with a size that is not a multiple of the host page, so
+    //    the inlined sanity assert `assert(!(size & host_page_mask))` fired and
+    //    wineboot SIGABRTed 149 ms in. An mmap length need not be page aligned
+    //    (the kernel rounds it up), so making the guard test 0 is safe.
+    //    9.0/10.0 have no such assert (checked in their source and binaries);
+    //    11.0 has it in two copies (virtual_init inlined + the out-of-line
+    //    anon_mmap_alloc), both defused; 11.19 keeps the round-2 single site.
     //
-    // sha256 pins (pristine -> patched):
+    // sha256 pins for 11.19 (pristine -> patched):
     //   ntdll.so   26c76dc2.. -> c378cd70..
     //   wineserver d40f733c.. -> d01d4f75..
-    const val NTDLL_REL = "wine-11.19-amd64/lib/wine/x86_64-unix/ntdll.so"
-    const val WINESERVER_REL = "wine-11.19-amd64/bin/wineserver"
-    const val NTDLL_ORIG_SHA = "26c76dc28af8578b4fe127ef03f934e704893fec86a0b693e23480a6cf899c14"
-    const val NTDLL_PATCHED_SHA = "c378cd70685ac1fbf01034aef2b95f3d1bfbb6bf94b4447aa2389a5d867387af"
-    const val WSRV_ORIG_SHA = "d40f733c90aca3f1e8d4bf86b9b2a5c3ec8c5f4fa12f1b061c0adc6422d52e01"
-    const val WSRV_PATCHED_SHA = "d01d4f7516661cc7de0729dae6c3b66ee3b7a2cd0af85cfe7666b217fd7d07ea"
+    private const val NTDLL_ORIG_SHA = "26c76dc28af8578b4fe127ef03f934e704893fec86a0b693e23480a6cf899c14"
+    private const val NTDLL_PATCHED_SHA = "c378cd70685ac1fbf01034aef2b95f3d1bfbb6bf94b4447aa2389a5d867387af"
+    private const val WSRV_ORIG_SHA = "d40f733c90aca3f1e8d4bf86b9b2a5c3ec8c5f4fa12f1b061c0adc6422d52e01"
+    private const val WSRV_PATCHED_SHA = "d01d4f7516661cc7de0729dae6c3b66ee3b7a2cd0af85cfe7666b217fd7d07ea"
 
-    private class Site(val old: ByteArray, val next: ByteArray, val note: String)
+    internal class Site(val old: ByteArray, val next: ByteArray, val note: String)
 
     private fun ascii(s: String, pad: Int = 0) = (s + "\u0000".repeat(pad)).toByteArray(Charsets.UTF_8)
 
-    private val NTDLL_SITES = listOf(
-        Site(
-            byteArrayOf(0xF7.toByte(), 0xC6.toByte(), 0xF8.toByte(), 0x0F, 0, 0, 0x0F, 0x85.toByte()),
-            byteArrayOf(0xF7.toByte(), 0xC6.toByte(), 0, 0, 0, 0, 0x0F, 0x85.toByte()),
-            "39bit assert test 0xff8->0"
-        ),
-        Site(ascii("/tmp/.wine-%u/server-%llx-%llx"), ascii(".wine-%u/server-%llx-%llx", 5), "server dir -> prefix-relative"),
-    )
-    private val WSRV_SITES = listOf(
-        Site(ascii("/tmp/.wine-%u"), ascii(".wine-%u", 5), "server dir -> prefix-relative"),
-    )
+    private fun xb(hex: String): ByteArray {
+        val out = ByteArray(hex.length / 2)
+        for (i in out.indices) out[i] =
+            ((Character.digit(hex[i * 2], 16) shl 4) or Character.digit(hex[i * 2 + 1], 16)).toByte()
+        return out
+    }
+
+    /** "/tmp/.wine-..." -> ".wine-..." with the 5 removed bytes re-added as NUL
+     *  pad: one contiguous literal of equal length, prefixed by the cwd. */
+    internal fun prefixRelSite(s: String, note: String): Site {
+        val core = s.removePrefix("/tmp/")
+        return Site(ascii(s), ascii(core, s.length - core.length), note)
+    }
+
+    internal fun hexSite(oldHex: String, nextHex: String, note: String): Site =
+        Site(xb(oldHex), xb(nextHex), note)
+
+    private const val CLIENT_STR_9 = "/tmp/.wine-%u/server-%s"
+    private const val CLIENT_STR_10PLUS = "/tmp/.wine-%u/server-%llx-%llx"
+    private const val SERVER_STR = "/tmp/.wine-%u"
+
+    /** Exact site list per pin (client ntdll.so, server wineserver). */
+    internal fun wineSitesFor(pinId: String): Pair<List<Site>, List<Site>> = when (pinId) {
+        "9.0" -> listOf(prefixRelSite(CLIENT_STR_9, "server dir -> prefix-relative")) to
+            listOf(prefixRelSite(SERVER_STR, "server dir -> prefix-relative"))
+        "10.0" -> listOf(prefixRelSite(CLIENT_STR_10PLUS, "server dir -> prefix-relative")) to
+            listOf(prefixRelSite(SERVER_STR, "server dir -> prefix-relative"))
+        "11.0" -> listOf(
+            hexSite("f7c6ff0f00000f8589000000", "f7c6000000000f8589000000",
+                "39bit assert virtual_init test 0xfff->0"),
+            hexSite("f7c7ff0f0000751a89f2", "f7c700000000751a89f2",
+                "39bit assert anon_mmap_alloc test 0xfff->0"),
+            prefixRelSite(CLIENT_STR_10PLUS, "server dir -> prefix-relative"),
+        ) to listOf(prefixRelSite(SERVER_STR, "server dir -> prefix-relative"))
+        else -> listOf(
+            hexSite("f7c6f80f00000f85", "f7c6000000000f85", "39bit assert test 0xff8->0"),
+            prefixRelSite(CLIENT_STR_10PLUS, "server dir -> prefix-relative"),
+        ) to listOf(prefixRelSite(SERVER_STR, "server dir -> prefix-relative"))
+    }
 
     private fun sha256Hex(b: ByteArray): String {
         val d = MessageDigest.getInstance("SHA-256").digest(b)
@@ -119,19 +144,22 @@ object Phase2Wine {
         return out
     }
 
-    /** Apply the site list to one file; verify the pinned final sha256 on disk. */
-    private fun patchFile(f: File, origSha: String, finalSha: String, sites: List<Site>, label: String): Boolean {
+    /** Apply the site list to one file; verify the pinned final sha256 on disk
+     *  when the pin has one (11.19). Returns false on any guard failure. */
+    private fun patchFile(f: File, origSha: String?, finalSha: String?, sites: List<Site>, label: String): Boolean {
         if (!f.isFile) { say("WINE_PATCH_FAIL $label missing ${f.path}"); return false }
         var bytes = f.readBytes()
         val before = sha256Hex(bytes)
-        if (before == finalSha) { say("WINE_PATCH $label already-patched sha256=${before.take(16)}e"); return true }
-        if (before != origSha) say("WINE_PATCH $label note: input sha256=$before (not pristine; using byte guards)")
+        if (finalSha != null && before == finalSha) { say("WINE_PATCH $label already-patched sha256=${before.take(16)}e"); return true }
+        if (origSha != null && before != origSha) say("WINE_PATCH $label note: input sha256=$before (not pristine; using byte guards)")
+        var changed = false
         for (site in sites) {
             val hits = occurrences(bytes, site.old)
             if (hits.size == 1) {
                 val copy = bytes.copyOf()
                 for (i in site.next.indices) copy[hits[0] + i] = site.next[i]
                 bytes = copy
+                changed = true
                 say("WINE_PATCH $label ${site.note} @0x${hits[0].toString(16)}")
             } else if (hits.isEmpty()) {
                 if (occurrences(bytes, site.next).isEmpty()) {
@@ -143,20 +171,38 @@ object Phase2Wine {
             }
         }
         val after = sha256Hex(bytes)
-        if (after != finalSha) { say("WINE_PATCH_FAIL $label self-check sha256=$after"); return false }
+        if (finalSha != null && after != finalSha) { say("WINE_PATCH_FAIL $label self-check sha256=$after"); return false }
+        if (!changed) return true // every site already in patched form; nothing to write
         val tmp = File(f.parentFile, f.name + ".new")
         tmp.writeBytes(bytes)
         if (!tmp.renameTo(f)) { say("WINE_PATCH_FAIL $label rename"); tmp.delete(); return false }
         val onDisk = sha256Hex(f.readBytes())
-        if (onDisk != finalSha) { say("WINE_PATCH_FAIL $label on-disk sha256=$onDisk"); return false }
+        if (finalSha != null && onDisk != finalSha) { say("WINE_PATCH_FAIL $label on-disk sha256=$onDisk"); return false }
+        if (finalSha == null) {
+            for (site in sites) if (occurrences(f.readBytes(), site.next).isEmpty()) {
+                say("WINE_PATCH_FAIL $label post-write verify: ${site.note} missing"); return false
+            }
+        }
         say("WINE_PATCH $label patched ${before.take(16)}e -> ${after.take(16)}e")
         return true
     }
 
-    /** Idempotently apply every wine data patch; true when the tree is patched. */
+    /** Idempotently apply every wine data patch for the active pin. */
     fun ensureWinePatched(ctx: Context): Boolean {
-        val ntdll = patchFile(File(wineDir(ctx), NTDLL_REL), NTDLL_ORIG_SHA, NTDLL_PATCHED_SHA, NTDLL_SITES, "ntdll.so")
-        val server = patchFile(File(wineDir(ctx), WINESERVER_REL), WSRV_ORIG_SHA, WSRV_PATCHED_SHA, WSRV_SITES, "wineserver")
+        val pin = Phase2Data.winePin(ctx)
+        val (clientSites, serverSites) = wineSitesFor(pin.id)
+        val root = pinRoot(ctx)
+        val strict = pin.id == "11.19"
+        val ntdll = patchFile(
+            File(root, "lib/wine/x86_64-unix/ntdll.so"),
+            if (strict) NTDLL_ORIG_SHA else null,
+            if (strict) NTDLL_PATCHED_SHA else null,
+            clientSites, "ntdll.so")
+        val server = patchFile(
+            File(root, "bin/wineserver"),
+            if (strict) WSRV_ORIG_SHA else null,
+            if (strict) WSRV_PATCHED_SHA else null,
+            serverSites, "wineserver")
         return ntdll && server
     }
 
@@ -241,7 +287,7 @@ object Phase2Wine {
         srcNames.filter { it !in existing }
 
     fun ensurePrefixBinaries(ctx: Context): Boolean {
-        val wineLib = File(wineDir(ctx), "wine-11.19-amd64/lib/wine")
+        val wineLib = File(pinRoot(ctx), "lib/wine")
         val windows = File(prefixDir(ctx), "drive_c/windows")
         var made = 0
         var failed = 0
@@ -338,21 +384,55 @@ object Phase2Wine {
     }
 
     fun wineDir(ctx: Context): File = File(Phase2Data.rootDir(ctx), "wine")
-    fun wineBin(ctx: Context): File = File(wineDir(ctx), "wine-11.19-amd64/bin/wine")
 
-    /** The direct wine loader: the only working entry under box64 (B-024).
-     *  bin/wine deterministically dies in map_shared_user_data with status
-     *  c0000018 in ~1 s; the loader from lib/wine/x86_64-unix boots the prefix
-     *  and starts apps (proven on the phone). */
+    /** The unpacked tree of the active pin (each candidate has its own dir). */
+    fun pinRoot(ctx: Context): File = File(wineDir(ctx), Phase2Data.winePin(ctx).dir)
+
+    fun wineBin(ctx: Context): File = File(pinRoot(ctx), "bin/wine")
+
+    /** The direct wine loader of the active pin (B-024: 11.x bin/wine dies in
+     *  map_shared_user_data with c0000018; the 64-bit-only loader boots). */
     fun loaderBin(ctx: Context): File =
-        File(wineDir(ctx), "wine-11.19-amd64/lib/wine/x86_64-unix/wine")
+        File(pinRoot(ctx), Phase2Data.winePin(ctx).loaderRel)
 
     /** wineboot's real file: the bare name "wineboot" is not resolved by wine's
      *  builtin fallback here, so boot passes this explicit path. */
     fun winebootExe(ctx: Context): File =
-        File(wineDir(ctx), "wine-11.19-amd64/lib/wine/x86_64-windows/wineboot.exe")
+        File(pinRoot(ctx), "lib/wine/x86_64-windows/wineboot.exe")
 
-    fun prefixDir(ctx: Context): File = File(Phase2Data.rootDir(ctx), "wineprefix")
+    fun wineserverBin(ctx: Context): File = File(pinRoot(ctx), "bin/wineserver")
+
+    /** Per-pin prefix (round 3): candidates must never share a prefix. The
+     *  default pin takes over the round-2 "wineprefix" once, which keeps the
+     *  fast-path .update-timestamp. */
+    fun prefixDir(ctx: Context): File {
+        val pin = Phase2Data.winePin(ctx)
+        val dir = File(Phase2Data.rootDir(ctx), "wineprefix-" + pin.id)
+        if (pin.id == Phase2Data.DEFAULT_WINE_PIN && !dir.exists()) {
+            val legacy = File(Phase2Data.rootDir(ctx), "wineprefix")
+            if (legacy.isDirectory && legacy.renameTo(dir)) say("PREFIX_MIGRATE wineprefix -> ${dir.name}")
+        }
+        return dir
+    }
+
+    /** Harness action `pin:<id>` (broadcast extra) / WINE_PIN env knob. */
+    fun setPin(ctx: Context, id: String) {
+        val f = File(ctx.filesDir, "phase2/pin.txt")
+        if (id.isBlank()) {
+            f.delete()
+            say("PIN cleared -> default ${Phase2Data.DEFAULT_WINE_PIN}")
+        } else {
+            val known = Phase2Data.WINE_PINS.firstOrNull { it.id == id }
+            if (known == null) {
+                say("PIN unknown [$id] known=${Phase2Data.WINE_PINS.joinToString(",") { it.id }}")
+            } else {
+                f.parentFile?.mkdirs()
+                f.writeText(id + "\n")
+                say("PIN set -> $id (url=${known.url.substringAfterLast('/')})")
+            }
+        }
+        writeLog(ctx)
+    }
     fun nppDir(ctx: Context): File = File(Phase2Data.rootDir(ctx), "apps/npp")
     fun nppExe(ctx: Context): File = File(nppDir(ctx), "notepad++.exe")
 
@@ -434,9 +514,17 @@ object Phase2Wine {
             pfx.mkdirs()
             try { android.system.Os.chmod(pfx.path, 448 /* 0700 */) } catch (_: Throwable) { }
         }
-        val bin = File(wineDir(ctx), "wine-11.19-amd64/bin/wineserver")
+        val bin = wineserverBin(ctx)
         if (!bin.isFile) { say("WINESRV_FAIL missing $bin"); return false }
-        val argv = listOf(Phase2Box64.libbox64(ctx).path, bin.absolutePath, "-p", "3600")
+        val dbgFile = File(File(ctx.filesDir, "phase2"), "wsdebug.txt")
+        val argv = mutableListOf(Phase2Box64.libbox64(ctx).path, bin.absolutePath, "-p", "3600")
+        // Dev aid: a marker file files/phase2/wsdebug.txt starts the server with
+        // -f (skip daemonize, stderr stays on our pipe) and -d (request/reply
+        // trace); the drain below captures it as WINESERVER_OUT lines.
+        if (dbgFile.isFile) {
+            argv += listOf("-d", "-f")
+            say("WINESERVER debug-trace on (-d -f)")
+        }
         val r = ProcessBuilder(argv).apply {
             environment().clear()
             environment().putAll(wineEnv(ctx))
@@ -448,7 +536,18 @@ object Phase2Wine {
         say("WINESERVER pid=$wsrvPid -p 3600")
         Phase2X11.g3exe("WINESERVER", ctx, wsrvPid)
         Thread({
-            try { Phase2X11.drain("WINESERVER_OUT", r.inputStream) } catch (_: Throwable) { }
+            if (dbgFile.isFile) {
+                // trace mode: keep every server line in its own uncapped file
+                // (the in-memory phase2 logs keep only the first 6 MB)
+                try {
+                    val f = File(File(ctx.filesDir, "phase2"), "wsrv.log")
+                    java.io.FileWriter(f, false).use { w ->
+                        r.inputStream.bufferedReader().forEachLine { line ->
+                            w.write(line); w.write("\n"); w.flush()
+                        }
+                    }
+                } catch (_: Throwable) { }
+            } else try { Phase2X11.drain("WINESERVER_OUT", r.inputStream) } catch (_: Throwable) { }
             say("WINESERVER_EOF exit=${try { r.waitFor() } catch (_: Throwable) { -1 }}")
             writeLog(ctx)
         }, "wineserver-out").start()
@@ -478,11 +577,12 @@ object Phase2Wine {
     private fun wineEnv(ctx: Context): Map<String, String> {
         val m = Phase2X11.baseEnv(ctx).toMutableMap()
         // wine ships its own libraries inside the tarball; add them for externals
-        val w = wineDir(ctx)
+        val w = pinRoot(ctx)
+        val pin = Phase2Data.winePin(ctx)
         m["DISPLAY"] = "127.0.0.1:0"
         m["WINEPREFIX"] = prefixDir(ctx).path
         m["LD_LIBRARY_PATH"] = listOf(
-            "${w.path}/wine-11.19-amd64/lib64",
+            "${w.path}/lib64",
             m["LD_LIBRARY_PATH"] ?: "",
         ).joinToString(":")
         m["BOX64_LD_LIBRARY_PATH"] = m["LD_LIBRARY_PATH"] ?: ""
@@ -492,8 +592,8 @@ object Phase2Wine {
         // aborted with "could not load kernel32.dll, status c0000135" and the
         // boot never completed. Pin the DLL path and the loader path so every
         // child finds them without guessing.
-        m["WINEDLLPATH"] = "${w.path}/wine-11.19-amd64/lib/wine/x86_64-windows"
-        m["WINELOADER"] = "${w.path}/wine-11.19-amd64/lib/wine/x86_64-unix/wine"
+        m["WINEDLLPATH"] = "${w.path}/lib/wine/x86_64-windows"
+        m["WINELOADER"] = File(w, pin.loaderRel).path
         // box64 reads LD_LIBRARY_PATH itself; keep both in sync
         m.putAll(extraEnv)
         return m
@@ -612,12 +712,13 @@ object Phase2Wine {
 
     /**
      * Diagnostic: run any tree binary under box64 with the wine env.
-     * Example: wineexec:wine-11.19-amd64/bin/wineserver,-d,2,-p,3600
+     * Paths are relative to the active pin's root. Example:
+     * wineexec:bin/wineserver,-d,2,-p,3600
      */
     fun execTree(ctx: Context, spec: String = "") {
         val parts = spec.replace(' ', ',').split(',').filter { it.isNotBlank() }
         if (parts.isEmpty()) { say("WINEEXEC fail: empty path"); return }
-        val bin = File(wineDir(ctx), parts[0])
+        val bin = File(pinRoot(ctx), parts[0])
         say("WINEEXEC ${parts.joinToString(" ")}")
         startBin(ctx, bin, waitForExit = false, *parts.drop(1).toTypedArray())
         writeLog(ctx)

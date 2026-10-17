@@ -7,23 +7,18 @@ corrects it after review.
 ## Now
 
 - **Phase:** 2 of 13. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Phase 2
-  round 2 (the Wine boot) is done except the GUI gate: the app boots WINEPREFIX on the
-  phone end-to-end (`wineboot -i` exit 0 via the app, `.ud-boot-ok` written, `winex11.drv`
-  loads, 1009 modules linked into system32). The remaining blocker is wine's desktop
-  window: under box64 the server cannot create it, so no GUI window can exist (BUGS B-022,
-  updated with the proven cause). Notepad++ window / typed-text PNG / numbers / survival
-  are in SKIPS.md with the exact reason.
-- **Last updated:** 2026-10-17, manager, Phase 2 round 2 review (committed). Verified by the
-  manager: build gates pass (7 unit tests, 0 failures; APK 18,044,798 B); the phone log shows
-  `WINESERVER ready ms=265` and `PREFIX_BOOT_OK wineboot -i exit 0`, with system32 at 1009
-  entries. Round-2 fixes: B-020 (Box64 sigaction patch + app-supervised wineserver), B-021
-  (always fresh hives), B-023 (module symlink farm), B-024 (direct loader). Safety: the app
-  cap (40 processes / 600 MB) tripped at 56 processes and killed the tree, and the phone was
-  unaffected. Phase 2 is about 65% done.
-- **Next action:** Phase 2 round 3 (the GUI gate). Change only the Wine/Box64 pin (D13
-  status note): try candidates one at a time until a Notepad++ window shows, then typed
-  text, numbers and survival. Also fix B-025 (exported test receiver). Hardening (B-019
-  clean install, scratch scripts, docs) stays in SKIPS.md.
+  is about 70% done. Linux x86-64 apps render (xeyes) and Wine 11.19 boots a prefix on the
+  phone, but no Windows GUI window can appear yet (BUGS B-022).
+- **Last updated:** 2026-10-17, manager, after round 3 was cut off (the agent's chat failed
+  to compact at 21:05). Verified by the manager: 13 unit tests pass; B-025 fixed (the release
+  manifest has no test receiver); the Wine pin is switchable (11.19 default, 9.0, 10.0, 11.0)
+  and the Box64 pin can be overridden. Round 3 tried four candidates and none shows a window
+  (B-022 has each result). A wineserver trace shows the real gap: win32u's one-time
+  `init_user()` (window station and desktop set-up) never runs in any Wine process. Phone
+  clean (0 Wine processes) after the run.
+- **Next action:** Phase 2 round 3b. Find why `init_user()` never runs and fix that one thing,
+  then the Notepad++ window, typed text, numbers and survival. Hardening (B-019 clean install,
+  scratch scripts, docs) stays in SKIPS.md.
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y") for the owner, and every phone run
   needs the watchdog plus the app cap (B-022).

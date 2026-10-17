@@ -35,6 +35,9 @@ object Phase2Dispatch {
                     }
                     "wineboot" -> Phase2Wine.boot(ctx, arg.ifEmpty { null })
                     "npp" -> Phase2Wine.startNpp(ctx)
+                    "pin" -> Phase2Wine.setPin(ctx, arg)
+                    "fetchwine" -> Phase2Data.fetchWine(ctx)
+                    "fetchnpp" -> Phase2Data.fetchNpp(ctx)
                     "type" -> Phase2X11.typeViaXtest(ctx, arg)
                     "wineexec" -> Phase2Wine.execTree(ctx, arg)
                     "wsrv" -> Phase2Wine.ensureWineserver(ctx)

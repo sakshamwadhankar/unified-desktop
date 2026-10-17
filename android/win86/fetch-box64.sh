@@ -7,9 +7,16 @@
 # Output: vendor/box64-build/box64 -> android/app/src/main/jniLibs/arm64-v8a/libbox64.so
 set -euo pipefail
 
-REV=v0.4.4
-URL="https://github.com/ptitSeb/box64/archive/refs/tags/${REV}.tar.gz"
-SHA256="99c6de4f509e46ab1de15df740d0e0ea338a7790efa3f67510dfbb975cc24029"
+# Pin (default: v0.4.4). Round 3 candidate D builds a newer revision from main
+# by overriding these three, e.g.:
+#   BOX64_REV=27860e6a BOX64_SHA256=<tarball sha256> \
+#   BOX64_URL=https://github.com/ptitSeb/box64/archive/<full-commit>.tar.gz ./fetch-box64.sh
+# BOX64_ARC (optional) points at an already-downloaded tarball; it is verified
+# against BOX64_SHA256 and copied in place of the network fetch.
+REV="${BOX64_REV:-v0.4.4}"
+URL="${BOX64_URL:-https://github.com/ptitSeb/box64/archive/refs/tags/${REV}.tar.gz}"
+SHA256="${BOX64_SHA256:-99c6de4f509e46ab1de15df740d0e0ea338a7790efa3f67510dfbb975cc24029}"
+ARC_SRC="${BOX64_ARC:-}"
 
 NDK="${ANDROID_NDK_HOME:-$HOME/android-ndk-r27c}"
 SDK="${ANDROID_HOME:-/mnt/c/Users/Asus/AppData/Local/Android/Sdk}"
@@ -35,6 +42,10 @@ fetch() {
   echo "$expected  $out" | sha256sum --check --status
 }
 
+if [[ -n "$ARC_SRC" ]]; then
+  [[ -f "$ARC_SRC" ]] || { echo "ERROR: BOX64_ARC not found: $ARC_SRC"; exit 1; }
+  cp -f "$ARC_SRC" "$ARC2"
+fi
 [[ -f "$ARC2" ]] || fetch "$URL" "$ARC2" "$SHA256"
 echo "$SHA256  $ARC2" | sha256sum --check --status
 # Keep a copy next to the script for the record (not committed; vendor/ is gitignored).
@@ -197,10 +208,28 @@ body = sub1(body, "oldact->sa_mask = old.sa_mask;",
     ["memset(&oldact->sa_mask, 0, sizeof(oldact->sa_mask)); // unified-desktop: zero glibc's 128-byte mask tail",
      "memcpy(&oldact->sa_mask, &old.sa_mask, sizeof(old.sa_mask));"])
 s = s[:a] + body + s[b:]
+
+# box64 main 2026-10-17 (commit 27860e6a) has two more plain mask assignments
+# whose target/source is the glibc-shaped 128-byte field (one fills the guest
+# oldact in fill_emulated_sigaction, one stores the guest mask into the host
+# sigset); neither exists in v0.4.4, so replace only when present and keep the
+# default pin buildable.
+def sub1f(text, needle, newlines):
+    if needle not in text:
+        return text
+    assert text.count(needle) == 1, "anchor not unique: " + needle
+    pat = re.compile(r"^([ \t]*)" + re.escape(needle) + r"[ \t]*$", re.M)
+    assert len(pat.findall(text)) == 1, "anchor not on its own line: " + needle
+    return pat.sub(lambda m: "".join(m.group(1) + n + "\n" for n in newlines), text, count=1)
+s = sub1f(s, "oldact->sa_mask = my_context->sigmask[signum];",
+    ["memcpy(&oldact->sa_mask, &my_context->sigmask[signum], sizeof(my_context->sigmask[signum])); // unified-desktop: struct was zeroed at entry"])
+s = sub1f(s, "my_context->sigmask[signum] = act->sa_mask;",
+    ["memcpy(&my_context->sigmask[signum], &act->sa_mask, sizeof(my_context->sigmask[signum])); // unified-desktop: keep the host-width low signals"])
 open(p, "w").write(s)
 print("patched", p)
 PYEOF
 grep -q "memcpy(&newact.sa_mask, &act->sa_mask, sizeof(newact.sa_mask))" "$SRC/src/libtools/signals.c" || { echo "ERROR: signals.c sigaction patch did not land"; exit 1; }
+if grep -qE "sa_mask = my_context->sigmask|sigmask\[signum\] = act->sa_mask" "$SRC/src/libtools/signals.c"; then echo "ERROR: plain 128-byte mask assignment remains in signals.c"; exit 1; fi
 
 # Box64's wrapped libc binds popen() to the native (Bionic) popen, whose child
 # is exec'd at the literal path /bin/sh - absent on Android - so every guest
@@ -229,7 +258,40 @@ python3 - "$SRC/src/wrapped/wrappedlibc.c" <<'PYEOF'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = """    int ret = mprotect(addr, len, prot);
+
+def helper(ind):
+    L = ind
+    I = ind + "    "
+    code = L + "if(ret) {\n"
+    code += I + "/* unified-desktop: wine insists on PROT_EXEC for its PE .text but this\n"
+    code += I + "   kernel/policy may refuse it; under box64 execution is translation,\n"
+    code += I + "   never host execution of guest pages, so exec protection is optional.\n"
+    code += I + "   Keep both log lines: they are the accepted evidence trail. */\n"
+    code += I + "int e = errno;\n"
+    code += I + 'printf_log(LOG_NONE, "mprotect(%p, 0x%lx, 0x%x) FAILED errno=%d\\n", addr, len, prot, e);\n'
+    code += I + "if(prot & PROT_EXEC) {\n"
+    code += I + "    /* diagnostic: the VMAs covering the refused range (evidence trail) */\n"
+    code += I + '    FILE *mf = fopen("/proc/self/maps", "r");\n'
+    code += I + "    if(mf) {\n"
+    code += I + "        char mline[512];\n"
+    code += I + "        unsigned long a0 = (unsigned long)addr, a1 = (unsigned long)addr + len;\n"
+    code += I + "        while(fgets(mline, sizeof(mline), mf)) {\n"
+    code += I + "            unsigned long s, e2;\n"
+    code += I + '            if(sscanf(mline, "%lx-%lx", &s, &e2) == 2 && s < a1 && e2 > a0)\n'
+    code += I + '                printf_log(LOG_NONE, "  map: %s", mline);\n'
+    code += I + "        }\n"
+    code += I + "        fclose(mf);\n"
+    code += I + "    }\n"
+    code += I + "    int ret2 = mprotect(addr, len, prot & ~PROT_EXEC);\n"
+    code += I + '    printf_log(LOG_NONE, "mprotect(%p, 0x%lx, 0x%x) retry-no-exec -> %d errno=%d\\n",\n'
+    code += I + "               addr, len, prot & ~PROT_EXEC, ret2, ret2 ? errno : 0);\n"
+    code += I + "    if(!ret2) ret = 0;\n"
+    code += I + "}\n"
+    code += L + "}\n"
+    return code
+
+# anchor A: box64 v0.4.4 (the default pin)
+old_a = """    int ret = mprotect(addr, len, prot);
     if(!ret && len) {
         updateProtection((uintptr_t)addr, len, prot);
     }
@@ -237,45 +299,48 @@ old = """    int ret = mprotect(addr, len, prot);
 }
 
 typedef struct mallinfo (*mallinfo_fnc)(void);"""
-new = """    int ret = mprotect(addr, len, prot);
-    if(ret) {
-        /* unified-desktop: wine insists on PROT_EXEC for its PE .text but this
-           kernel/policy may refuse it; under box64 execution is translation,
-           never host execution of guest pages, so exec protection is optional.
-           Keep both log lines: they are the accepted evidence trail. */
-        int e = errno;
-        printf_log(LOG_NONE, "mprotect(%p, 0x%lx, 0x%x) FAILED errno=%d\\n", addr, len, prot, e);
-        if(prot & PROT_EXEC) {
-            /* diagnostic: the VMAs covering the refused range (evidence trail) */
-            FILE *mf = fopen("/proc/self/maps", "r");
-            if(mf) {
-                char mline[512];
-                unsigned long a0 = (unsigned long)addr, a1 = (unsigned long)addr + len;
-                while(fgets(mline, sizeof(mline), mf)) {
-                    unsigned long s, e2;
-                    if(sscanf(mline, "%lx-%lx", &s, &e2) == 2 && s < a1 && e2 > a0)
-                        printf_log(LOG_NONE, "  map: %s", mline);
-                }
-                fclose(mf);
-            }
-            int ret2 = mprotect(addr, len, prot & ~PROT_EXEC);
-            printf_log(LOG_NONE, "mprotect(%p, 0x%lx, 0x%x) retry-no-exec -> %d errno=%d\\n",
-                       addr, len, prot & ~PROT_EXEC, ret2, ret2 ? errno : 0);
-            if(!ret2) ret = 0;
+new_a = ("    int ret = mprotect(addr, len, prot);\n"
+         + helper("    ") +
+         """    if(!ret && len) {
+        updateProtection((uintptr_t)addr, len, prot);
+    }
+    return ret;
+}
+
+typedef struct mallinfo (*mallinfo_fnc)(void);""")
+
+# anchor B: box64 main 2026-10-17 (commit 27860e6a): my_mprotect rewritten
+# with a 4K-page fast path; this device (box64_pagesize == 4096 == X86_PAGE_SIZE)
+# takes that path.
+old_b = """    if(box64_pagesize == X86_PAGE_SIZE) {
+        int ret = mprotect(addr, len, prot);
+        if(!ret && len) {
+            updateProtection(start, len, prot);
+            setGuestProtection(start, len, prot, 0);
         }
+        return ret;
     }
-    if(!ret && len) {
-        updateProtection((uintptr_t)addr, len, prot);
+"""
+new_b = ("    if(box64_pagesize == X86_PAGE_SIZE) {\n"
+         "        int ret = mprotect(addr, len, prot);\n"
+         + helper("        ") +
+         """        if(!ret && len) {
+            updateProtection(start, len, prot);
+            setGuestProtection(start, len, prot, 0);
+        }
+        return ret;
     }
-    return ret;
-}
+""")
 
-typedef struct mallinfo (*mallinfo_fnc)(void);"""
-assert old in s, "mprotect anchor not found"
-assert s.count(old) == 1, "mprotect anchor not unique"
-s = s.replace(old, new)
+if s.count(old_a) == 1:
+    s = s.replace(old_a, new_a)
+    print("patched my_mprotect (v0.4.4 shape) in", p)
+elif s.count(old_b) == 1:
+    s = s.replace(old_b, new_b)
+    print("patched my_mprotect (main-2026-10-17 shape) in", p)
+else:
+    raise AssertionError("mprotect anchor not found (neither v0.4.4 nor main shape)")
 open(p, "w").write(s)
-print("patched my_mprotect in", p)
 PYEOF
 grep -q "retry-no-exec" "$SRC/src/wrapped/wrappedlibc.c" || { echo "ERROR: mprotect patch did not land"; exit 1; }
 

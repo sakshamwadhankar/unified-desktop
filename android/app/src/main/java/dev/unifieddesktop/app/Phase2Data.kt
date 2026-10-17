@@ -25,8 +25,66 @@ object Phase2Data {
 
     // Pinned pieces: asset digests verified by the uploader's sha256sums + local
     // verification at download time.
-    const val WINE_URL = "https://github.com/Kron4ek/Wine-Builds/releases/download/11.19/wine-11.19-amd64.tar.xz"
-    const val WINE_SHA256 = "40068b3825887224d4b95364e3f49342d4bf7efac5486614b8bc4e7173bbef3e"
+    //
+    // Round 3 (D13 status note): the Wine pin is switchable. Each candidate is a
+    // Kron4ek amd64 build with its own tarball, its own unpack dir and its own
+    // WINEPREFIX (see Phase2Wine.prefixDir). SHA-256 sources: the GitHub release
+    // asset digest for 11.x, the release's sha256sums.txt for 9.0/10.0 (both
+    // verified locally on the laptop 2026-10-17). loaderRel is the entry that is
+    // the 64-bit-only loader of that wine era (B-024: 11.x bin/wine dies in
+    // map_shared_user_data with c0000018; 9.x/10.x use bin/wine64).
+    data class WinePin(
+        val id: String,
+        val url: String,
+        val sha256: String,
+        val dir: String,
+        val loaderRel: String,
+    )
+
+    val WINE_PINS: List<WinePin> = listOf(
+        WinePin("11.19",
+            "https://github.com/Kron4ek/Wine-Builds/releases/download/11.19/wine-11.19-amd64.tar.xz",
+            "40068b3825887224d4b95364e3f49342d4bf7efac5486614b8bc4e7173bbef3e",
+            "wine-11.19-amd64", "lib/wine/x86_64-unix/wine"),
+        WinePin("9.0",
+            "https://github.com/Kron4ek/Wine-Builds/releases/download/9.0/wine-9.0-amd64.tar.xz",
+            "cf0c09d4346dc10bc92ab674936292cff47eeb71ca7604b8e6303b7bdb97e2f6",
+            "wine-9.0-amd64", "bin/wine64"),
+        WinePin("10.0",
+            "https://github.com/Kron4ek/Wine-Builds/releases/download/10.0/wine-10.0-amd64.tar.xz",
+            "a2b6ae3253736a13162c7c505f69b1c6076432c3ba64b54e1b923613ebdab698",
+            "wine-10.0-amd64", "bin/wine64"),
+        WinePin("11.0",
+            "https://github.com/Kron4ek/Wine-Builds/releases/download/11.0/wine-11.0-amd64.tar.xz",
+            "632f2c8e9150841c26d277000e76b82c425cd4564bfb050780705b9d37b2567f",
+            "wine-11.0-amd64", "lib/wine/x86_64-unix/wine"),
+    )
+    const val DEFAULT_WINE_PIN = "11.19"
+
+    /** Pure pin selection (unit-tested): the harness `pin:<id>` file, the
+     *  WINE_PIN env.txt knob, then the default; unknown ids fall back. */
+    fun pickPin(want: String?): WinePin {
+        val id = want?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_WINE_PIN
+        return WINE_PINS.firstOrNull { it.id == id } ?: run {
+            say("WINE_PIN unknown [$id] known=${WINE_PINS.joinToString(",") { it.id }} -> default $DEFAULT_WINE_PIN")
+            WINE_PINS.first { it.id == DEFAULT_WINE_PIN }
+        }
+    }
+
+    /** The active Wine pin: files/phase2/pin.txt (harness action `pin:<id>`)
+     *  wins, then the WINE_PIN line of files/phase2/env.txt, then the default. */
+    fun winePin(ctx: Context): WinePin {
+        val fromFile = try {
+            File(ctx.filesDir, "phase2/pin.txt").takeIf { it.isFile }?.readText()?.trim()
+        } catch (_: Throwable) { null }
+        val fromEnv = try {
+            File(ctx.filesDir, "phase2/env.txt").takeIf { it.isFile }?.readLines()
+                ?.map { it.trim() }?.firstOrNull { it.startsWith("WINE_PIN=") }
+                ?.substringAfter('=')?.trim()
+        } catch (_: Throwable) { null }
+        return pickPin(fromFile ?: fromEnv)
+    }
+
     const val BUNDLE_URL = "https://github.com/ptitSeb/box64/releases/download/v0.4.4/box64-bundle-x86-libs-v0.4.4.tar.gz"
     const val BUNDLE_SHA256 = "1d4a8787a8a92267c1be673ec194c69e3bb33d14c800575d94131084142fcff0" // verified locally at download
     const val NPP_URL = "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.8.1/npp.8.9.8.1.portable.x64.zip"
@@ -305,13 +363,21 @@ object Phase2Data {
 
     fun fetchWine(ctx: Context) {
         val t0 = System.currentTimeMillis()
-        val tar = download(ctx, WINE_URL, WINE_SHA256, "wine.tar.xz")
+        val pin = winePin(ctx)   // round 3: switchable pin (default stays 11.19)
+        val tar = download(ctx, pin.url, pin.sha256, pin.url.substringAfterLast('/'))
         val wineRoot = File(rootDir(ctx), "wine"); wineRoot.mkdirs()
-        XZInputStream(BufferedInputStream(FileInputStream(tar))).use { readTar(it, wineRoot, "wine.tar") }
-        val bin = File(wineRoot, "wine-11.19-amd64/bin/wine")
+        // every pin unpacks to its own top-level dir, so candidates coexist
+        // (unpack output goes to <wineRoot>/<pin.dir>)
+        val target = File(wineRoot, pin.dir)
+        if (target.isDirectory && File(target, "bin/wineserver").isFile) {
+            say("WINE pin=${pin.id} already-unpacked dir=${pin.dir}")
+        } else {
+            XZInputStream(BufferedInputStream(FileInputStream(tar))).use { readTar(it, wineRoot, "wine.tar") }
+        }
+        val bin = File(target, pin.loaderRel)
         val t1 = System.currentTimeMillis()
-        val size = wineRoot.walkBottomUp().fold(0L) { a, f -> a + if (f.isFile) f.length() else 0 }
-        say("WINE unpacked ms=${t1 - t0} bin=${bin.exists()} bytes=$size")
+        val size = target.walkBottomUp().fold(0L) { a, f -> a + if (f.isFile) f.length() else 0 }
+        say("WINE pin=${pin.id} unpacked ms=${t1 - t0} bin=${bin.exists()} bytes=$size")
         writeLog(ctx)
     }
 

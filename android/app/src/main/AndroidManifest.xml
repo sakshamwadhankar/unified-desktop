@@ -14,7 +14,6 @@
   <activity android:name=".HarnessActivity" android:screenOrientation="landscape" android:exported="true">
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
   </activity>
-  <receiver android:name=".HarnessReceiver" android:exported="true"/>
   <activity android:name=".SelfTestActivity" android:exported="false"/>
  </application>
 </manifest>

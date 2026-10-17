@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+ <!-- Test-only action channel (B-025): debug builds only, guarded by
+      android.permission.DUMP so only adb's shell (and root) can send it.
+      Third-party apps cannot hold DUMP. The release build has no receiver. -->
+ <application>
+  <receiver
+      android:name=".HarnessReceiver"
+      android:exported="true"
+      android:permission="android.permission.DUMP"/>
+ </application>
+</manifest>
