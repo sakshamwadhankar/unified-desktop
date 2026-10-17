@@ -7,18 +7,25 @@ corrects it after review.
 ## Now
 
 - **Phase:** 2 of 13. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Phase 2
-  is about 70% done. Linux x86-64 apps render (xeyes) and Wine 11.19 boots a prefix on the
-  phone, but no Windows GUI window can appear yet (BUGS B-022).
-- **Last updated:** 2026-10-17, manager, after round 3 was cut off (the agent's chat failed
-  to compact at 21:05). Verified by the manager: 13 unit tests pass; B-025 fixed (the release
-  manifest has no test receiver); the Wine pin is switchable (11.19 default, 9.0, 10.0, 11.0)
-  and the Box64 pin can be overridden. Round 3 tried four candidates and none shows a window
-  (B-022 has each result). A wineserver trace shows the real gap: win32u's one-time
-  `init_user()` (window station and desktop set-up) never runs in any Wine process. Phone
-  clean (0 Wine processes) after the run.
-- **Next action:** Phase 2 round 3b. Find why `init_user()` never runs and fix that one thing,
-  then the Notepad++ window, typed text, numbers and survival. Hardening (B-019 clean install,
-  scratch scripts, docs) stays in SKIPS.md.
+  is close to done for the runtime: Linux x86-64 apps render (xeyes); Wine 11.19 boots a
+  prefix in ~8 s, `create_winstation`/`create_desktop` succeed and the B-022 explorer chain
+  is gone (functional no-op fontconfig stub in the rootfs). The one remaining GUI blocker is
+  **B-026**: no wine window ever maps under Xvfb (`NtUserShowWindow` -> c0000005 inside
+  wine's syscall dispatcher while win-proc callbacks run; xeyes on the same server renders).
+- **Last updated:** 2026-10-18, agent, round 3b (hard stop 01:38). Phone-verified: B-022
+  FIXED (fresh boot 8.1 s; `PREFIX_BOOT_OK`; `NtUserInitializeClientPfnArrays
+  retval=00000000`; 0 NULL-calls; 6 procs at rest, no explorer chain). NPP launches and
+  stays alive (9.9 s to visible in `ps`) but shows no window (B-026) - window PNG and typed
+  text stayed SKIPPED (SKIPS.md T6). 10-minute survival passed (same 8 PIDs, CPU
+  advancing). Gates pass on a forced rerun (13 tests, 0 failures; APK 23,477,499 B).
+  `fetch-box64.sh` default pin is now main `27860e6a` (was v0.4.4; overrides documented,
+  all anchors dry-run-validated); `fontconfig-stub/build.sh` reproduces the stub
+  bit-identical. Details: docs/PHASE2_RESULT.md round 3b.
+- **Next action:** decide B-026 (another box64/wine pin or upstream: dispatcher fault under
+  nested win-proc calls) - then the window PNG + typed text gate. For a clean install the
+  fontconfig stub must also be wired into the in-app rootfs fetch (Phase2Data): this round
+  deployed it phone-side only. Hardening (B-019 clean install, scratch scripts, docs) stays
+  in SKIPS.md.
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y") for the owner, and every phone run
   needs the watchdog plus the app cap (B-022).

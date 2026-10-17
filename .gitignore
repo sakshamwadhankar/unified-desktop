@@ -128,3 +128,5 @@ android/win86/xrepro.sh
 android/win86/xss.sh
 android/win86/xstatus.sh
 android/win86/xvfbstrings.py
+# Built by android/win86/fontconfig-stub/build.sh (x86-64 binary: never committed)
+android/win86/fontconfig-stub/libfontconfig.so.1

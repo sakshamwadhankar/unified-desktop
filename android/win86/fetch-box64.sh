@@ -4,18 +4,23 @@
 # linux-x86_64 prebuilts. The Windows-side NDK cannot be used from WSL (its
 # toolchains are windows-x86_64 only, checked 2026-10-16). Never run as root
 # (LESSONS.md); output lands on the Windows tree via /mnt/c.
-# Output: vendor/box64-build/box64 -> android/app/src/main/jniLibs/arm64-v8a/libbox64.so
+# Output: $BOX64_BUILD_DIR (default ~/box64-work/box64-build)/box64 -> android/app/src/main/jniLibs/arm64-v8a/libbox64.so
 set -euo pipefail
 
-# Pin (default: v0.4.4). Round 3 candidate D builds a newer revision from main
-# by overriding these three, e.g.:
-#   BOX64_REV=27860e6a BOX64_SHA256=<tarball sha256> \
-#   BOX64_URL=https://github.com/ptitSeb/box64/archive/<full-commit>.tar.gz ./fetch-box64.sh
+# Pin (default: upstream main @ 27860e6aee72dd33c2588d081652d6e9becc1089, 2026-10-17).
+# That revision is what the verified artifact is built from: jniLibs libbox64.so
+# sha256 006841b5f01a59bae2b10db95a5d5d707087db487ab7d740a734caba3abc604e boots
+# wine on the phone (docs/PHASE2_RESULT.md round 3b, fixes for B-020/B-022). The
+# patch section below keeps the older v0.4.4 tag buildable; to build another
+# revision, override all three, e.g.:
+#   BOX64_REV=v0.4.4 \
+#   BOX64_SHA256=99c6de4f509e46ab1de15df740d0e0ea338a7790efa3f67510dfbb975cc24029 \
+#   BOX64_URL=https://github.com/ptitSeb/box64/archive/refs/tags/v0.4.4.tar.gz ./fetch-box64.sh
 # BOX64_ARC (optional) points at an already-downloaded tarball; it is verified
 # against BOX64_SHA256 and copied in place of the network fetch.
-REV="${BOX64_REV:-v0.4.4}"
-URL="${BOX64_URL:-https://github.com/ptitSeb/box64/archive/refs/tags/${REV}.tar.gz}"
-SHA256="${BOX64_SHA256:-99c6de4f509e46ab1de15df740d0e0ea338a7790efa3f67510dfbb975cc24029}"
+REV="${BOX64_REV:-27860e6a}"
+URL="${BOX64_URL:-https://github.com/ptitSeb/box64/archive/27860e6aee72dd33c2588d081652d6e9becc1089.tar.gz}"
+SHA256="${BOX64_SHA256:-80f836b4c306418bf75a11e92d1cc498698e84372c72ca437e59487df6cf646b}"
 ARC_SRC="${BOX64_ARC:-}"
 
 NDK="${ANDROID_NDK_HOME:-$HOME/android-ndk-r27c}"
@@ -44,7 +49,8 @@ fetch() {
 
 if [[ -n "$ARC_SRC" ]]; then
   [[ -f "$ARC_SRC" ]] || { echo "ERROR: BOX64_ARC not found: $ARC_SRC"; exit 1; }
-  cp -f "$ARC_SRC" "$ARC2"
+  # BOX64_ARC may already be the cache file itself - cp onto self fails.
+  [[ "$ARC_SRC" -ef "$ARC2" ]] || cp -f "$ARC_SRC" "$ARC2"
 fi
 [[ -f "$ARC2" ]] || fetch "$URL" "$ARC2" "$SHA256"
 echo "$SHA256  $ARC2" | sha256sum --check --status
@@ -213,7 +219,7 @@ s = s[:a] + body + s[b:]
 # whose target/source is the glibc-shaped 128-byte field (one fills the guest
 # oldact in fill_emulated_sigaction, one stores the guest mask into the host
 # sigset); neither exists in v0.4.4, so replace only when present and keep the
-# default pin buildable.
+# v0.4.4 build reachable.
 def sub1f(text, needle, newlines):
     if needle not in text:
         return text
@@ -290,7 +296,7 @@ def helper(ind):
     code += L + "}\n"
     return code
 
-# anchor A: box64 v0.4.4 (the default pin)
+# anchor A: box64 v0.4.4 (kept reachable via the BOX64_REV/URL/SHA256 overrides)
 old_a = """    int ret = mprotect(addr, len, prot);
     if(!ret && len) {
         updateProtection((uintptr_t)addr, len, prot);
