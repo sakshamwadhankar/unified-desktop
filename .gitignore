@@ -48,3 +48,5 @@ android/app/src/main/jniLibs/
 android/win86/vendor/
 android/win86/guestsh/*
 !android/win86/guestsh/*.c
+# Built from android/win86/guestsh/udsh.c by android/win86/build-guestsh.sh (binary: never committed)
+android/app/src/main/assets/win86/udsh

@@ -12,6 +12,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import android.system.Os
 import java.nio.file.Files
+import java.security.MessageDigest
 
 /**
  * Phase 2 (T4/T5/T6): run the X server (Xvfb, x86-64 Debian data) through libbox64
@@ -91,10 +92,118 @@ object Phase2X11 {
 
     fun xvfbBin(ctx: Context): File = File(Phase2Data.rootfsDir(ctx), "usr/bin/Xvfb")
 
+    // ---- Xvfb data patches (clean-install path, B-019) ---------------------
+    //
+    // The Debian Xvfb binary must be patched before it can run under box64 as
+    // an app-uid process. Round 1 applied these with win86/patchxvfb*.py by
+    // hand on a staged rootfs; the app now applies the exact same byte sites
+    // itself from data (B-019: nothing may rely on manual adb staging). Every
+    // site is length-preserving and checked per offset before any byte is
+    // written; the final sha256 is pinned, so a different Xvfb build can never
+    // be patched silently.
+    //
+    //  - guest-absolute paths become cwd-relative (the server runs with
+    //    cwd=rootfs): the "/tmp" lock dir (tail of the merged "/var/tmp"
+    //    literal) -> "tmp"; the leading '/' of "/usr/bin", "/usr/share/X11/xkb",
+    //    "/var/lib/xkb/", "/usr/share/fonts/..." (x7), "/usr/lib/xorg/..." (x3)
+    //    -> '.'; and Popen's exec target "/bin/sh" -> "bin/sh" (rootfs dash).
+    //    The ".usr"/".var" dot-symlinks are created next to it; nothing needs
+    //    /tmp or /usr at run time. Accepted side effect (measured in round 1):
+    //    the MIT-SHM fallback "/var/tmp" becomes "/vartmp" - unused, SHM works
+    //    via memfd-style shared memory.
+    //  - Popen()'s forked child does setgid(getgid())/setuid(getuid()) to drop
+    //    privileges; an app uid can never succeed there. Redirect the two call
+    //    targets to getgid/getuid again: the result is a valid gid/uid, so the
+    //    "cmp $-1" error path is never taken and the child proceeds as-is.
+    //  - input_mutex (glibc PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP static):
+    //    bionic reads the mutex type from bits 15-14 of a 4-byte word that
+    //    glibc leaves 0, so it looks NORMAL; a nested input_lock() parked in
+    //    FUTEX_WAIT forever (measured on the phone: main thread slept on futex
+    //    uaddr 0x1001f5960, server alive, never accepting). Set the state word
+    //    to 0x4000 (bionic RECURSIVE, unlocked).
+    //  - InputThreadEnable := FALSE: single-threaded input (devices register on
+    //    the main ospoll via SetNotifyFd), as with a native -dumbSched run.
+    //    Needed because box64 cannot deliver SIGALRM to this guest (its guest
+    //    handler slot resolved to unmapped 0x2000 -> SIGSEGV at boot, measured
+    //    2026-10-17).
+    private const val XVFB_ORIG_SHA =
+        "c50687113cd5232844b8fa3a49276a48a022fa7fc4275b983ae8f88158efed72"
+    private const val XVFB_PATCHED_SHA =
+        "ee77d0a419ca738e82a24713b81c66cff22f0e54461be2a6e9803edd3d69e1f6"
+
+    private class XSite(val off: Int, val old: ByteArray, val next: ByteArray)
+
+    private fun xb(hex: String): ByteArray {
+        val out = ByteArray(hex.length / 2)
+        for (i in out.indices) out[i] =
+            ((Character.digit(hex[i * 2], 16) shl 4) or Character.digit(hex[i * 2 + 1], 16)).toByte()
+        return out
+    }
+    private fun sl(off: Int) = XSite(off, byteArrayOf(0x2f), byteArrayOf(0x2e)) // '/' -> '.'
+
+    private val XVFB_SITES: List<XSite> = listOf(
+        XSite(0x184929, xb("23eb"), xb("33dc")),                    // Popen child: getgid not setgid
+        XSite(0x18493a, xb("32ed"), xb("22d0")),                    // Popen child: getuid not setuid
+        XSite(0x1907c1, xb("2f746d70"), xb("746d7000")),            // "/tmp" -> "tmp"
+        sl(0x198e74),                                               // /usr/bin
+        sl(0x198e7d),                                               // /usr/share/X11/xkb
+        sl(0x199fc4),                                               // /var/lib/xkb/
+        sl(0x19cfc8), sl(0x19cfe2), sl(0x19d000), sl(0x19d026),     // /usr/share/fonts (1-4)
+        sl(0x19d04b), sl(0x19d066), sl(0x19d082),                   // /usr/share/fonts (5-7)
+        sl(0x19e0d4), sl(0x19e143), sl(0x19e170),                   // /usr/lib/xorg/protocol.txt (1-3)
+        XSite(0x1a2bd8, xb("2f62696e2f7368"), xb("62696e2f736800")), // "/bin/sh" -> "bin/sh"
+        XSite(0x1f5961, xb("00"), xb("40")),                        // input_mutex state := 0x4000
+        XSite(0x1f5990, xb("01"), xb("00")),                        // InputThreadEnable := FALSE
+    )
+
+    private fun sha256Hex(b: ByteArray): String {
+        val d = MessageDigest.getInstance("SHA-256").digest(b)
+        val sb = StringBuilder(64)
+        for (x in d) sb.append(String.format("%02x", x))
+        return sb.toString()
+    }
+
+    /** Idempotently apply the proven Xvfb patch set; true when it is on disk. */
+    fun ensureXvfbPatched(ctx: Context): Boolean {
+        val f = xvfbBin(ctx)
+        if (!f.isFile) { say("XVFB_PATCH_FAIL missing ${f.path}"); return false }
+        var b = f.readBytes()
+        val before = sha256Hex(b)
+        if (before == XVFB_PATCHED_SHA) { say("XVFB_PATCH already-patched sha256=${before.take(16)}e"); return true }
+        if (before != XVFB_ORIG_SHA) say("XVFB_PATCH note: input sha256=$before (not pristine; using byte guards)")
+        var applied = 0
+        for ((i, s) in XVFB_SITES.withIndex()) {
+            val cur = b.copyOfRange(s.off, s.off + s.old.size)
+            when {
+                cur.contentEquals(s.old) -> {
+                    for (j in s.next.indices) b[s.off + j] = s.next[j]
+                    applied++
+                }
+                cur.contentEquals(s.next) -> { /* already applied by an earlier run */ }
+                else -> {
+                    say("XVFB_PATCH_FAIL site[$i] @0x${s.off.toString(16)} got=${cur.joinToString("") { "%02x".format(it) }}")
+                    return false
+                }
+            }
+        }
+        val after = sha256Hex(b)
+        if (after != XVFB_PATCHED_SHA) {
+            say("XVFB_PATCH_FAIL self-check sha256=$after applied=$applied/${XVFB_SITES.size}")
+            return false
+        }
+        val tmp = File(f.parentFile, f.name + ".new")
+        tmp.writeBytes(b)
+        if (!tmp.renameTo(f)) { say("XVFB_PATCH_FAIL rename"); tmp.delete(); return false }
+        val onDisk = sha256Hex(f.readBytes())
+        if (onDisk != XVFB_PATCHED_SHA) { say("XVFB_PATCH_FAIL on-disk sha256=$onDisk"); return false }
+        say("XVFB_PATCH Xvfb patched ${before.take(16)}e -> ${after.take(16)}e sites=$applied/${XVFB_SITES.size}")
+        return true
+    }
+
     /** Base env for every box64 launch (emulated libs + writable tmp/home). */
     fun baseEnv(ctx: Context): Map<String, String> {
         val r = Phase2Data.rootfsDir(ctx)
-        return mapOf(
+        val m = mutableMapOf(
             "LD_LIBRARY_PATH" to Phase2Data.ldPaths(ctx),
             "BOX64_LD_LIBRARY_PATH" to Phase2Data.ldPaths(ctx),
             "BOX64_PREFER_EMULATED" to "1",
@@ -107,6 +216,20 @@ object Phase2X11 {
             "HOME" to homeDir(ctx).path,
             "PATH" to "${r}/usr/bin:${r}/bin:/system/bin",
         )
+        // Harness diagnostic knob: KEY=VALUE lines in files/phase2/env.txt are
+        // merged into the environment of every box64 process we launch (wine,
+        // wineserver, Xvfb, clients). Used to flip box64/wine debug flags (e.g.
+        // BOX64_SHOWSEGV=1) without rebuilding the app.
+        val f = File(ctx.filesDir, "phase2/env.txt")
+        if (f.isFile) try {
+            f.readLines().forEach { line ->
+                val t = line.trim()
+                val i = t.indexOf('=')
+                if (t.isNotEmpty() && !t.startsWith("#") && i > 0)
+                    m[t.substring(0, i).trim()] = t.substring(i + 1).trim()
+            }
+        } catch (_: Exception) {}
+        return m
     }
 
     /**
@@ -123,19 +246,43 @@ object Phase2X11 {
     fun startXvfb(ctx: Context) {
         val bin = xvfbBin(ctx)
         if (!bin.isFile) { say("XVFB_FAIL missing $bin"); writeLog(ctx); return }
+        if (!ensureXvfbPatched(ctx)) { say("XVFB_FAIL patch failed"); writeLog(ctx); return }
+        // The keymap child (fork+execl("bin/sh")) must be our udsh, not Debian
+        // dash: dash dies at startup under box64 (B-016: "Illegal number: 1"),
+        // which killed the keymap compile and the server at keyboard init on
+        // every attempt.
+        if (!Phase2Data.ensureGuestSh(ctx)) { say("XVFB_FAIL guest sh not installed"); writeLog(ctx); return }
+        say("XVFB_GUESTSH ok")
         killXvfb(false)
-        // The guest Xvfb's lock dir is patched to the relative "tmp/" path (see
-        // win86/patchxvfb.py), so the lock file is created inside our extracted
+        // The patched lock dir is the cwd-relative "tmp/" (see
+        // ensureXvfbPatched), so the lock file is created inside our extracted
         // rootfs (app-writable) instead of /tmp, which the app uid cannot write.
         val rootfs = Phase2Data.rootfsDir(ctx)
         val tmpDir = File(rootfs, "tmp")
         if (!tmpDir.isDirectory) tmpDir.mkdirs()
-        // The guest Xvfb uses cwd-relative ".usr/..." and ".var/..." paths (see
-        // win86/patchxvfb.py); make sure the dot-symlinks and the xkm dir exist
-        // even if the rootfs was re-extracted after our manual staging.
+        // The patched Xvfb uses cwd-relative ".usr/..." and ".var/..." paths;
+        // make sure the dot-symlinks and the xkm dir exist (the rootfs may have
+        // been re-extracted).
         try { if (!Files.exists(java.nio.file.Paths.get(rootfs.path, ".usr"))) Os.symlink("usr", File(rootfs, ".usr").path) } catch (_: Throwable) {}
         try { if (!Files.exists(java.nio.file.Paths.get(rootfs.path, ".var"))) Os.symlink("var", File(rootfs, ".var").path) } catch (_: Throwable) {}
         File(rootfs, "var/lib/xkb").mkdirs()
+        // xkbcomp chdirs to its "-R<dir>" argument before opening the output
+        // file (xkbcomp.c: if (chdir(rootDir) == 0)), and the patched Xvfb
+        // passes both -R and the xkm output path as cwd-relative strings. So
+        // the server's ".var/lib/xkb/server-0.xkm" must ALSO resolve from
+        // inside ".usr/share/X11/xkb": one nested .var symlink back to the
+        // real var/ dir (B-016: without it every keymap child died with
+        // "Cannot open .var/lib/xkb/server-0.xkm to write keyboard
+        // description" and the server never got past keyboard init).
+        val xkbDataDir = File(rootfs, "usr/share/X11/xkb")
+        if (xkbDataDir.isDirectory) {
+            val nestedDotVar = File(xkbDataDir, ".var")
+            try {
+                if (!Files.exists(nestedDotVar.toPath())) Os.symlink("../../../../var", nestedDotVar.path)
+            } catch (_: Throwable) {
+                try { nestedDotVar.delete(); Os.symlink("../../../../var", nestedDotVar.path) } catch (_: Throwable) {}
+            }
+        }
         // Clear stale X-server lock files from previous (crashed) launches so a
         // rerun never trips over "server already active" on an old pid record.
         tmpDir.listFiles()?.forEach { it.delete() }
@@ -146,14 +293,14 @@ object Phase2X11 {
             // name here, not a hostname — "localhost" was rejected on the phone.
             "-nolisten", "unix",
             "-listen", "tcp",
-            // Xvfb locks are created at <LOCK_DIR>/.tX<screen>-lock with LOCK_DIR
-            // compiled to /tmp (Xorg os/utils.c). The app uid cannot write /tmp
-            // (ProveNoTmp), so skip the lock file. Unix sockets are disabled
-            // above, so no other /tmp access remains.
+            // Xvfb locks are created at <LOCK_DIR>/.tX<screen>-lock; the patched
+            // LOCK_DIR is the cwd-relative "tmp/" (see ensureXvfbPatched), which
+            // is app-writable. -nolock is rejected for non-root uids (warning
+            // only) and kept for parity with a hypothetical root run.
             "-nolock",
             "-noreset",
-            // box64/bionic: InputThreadEnable .data patch (patchxvfb7.py) makes the
-            // threaded-input facility inert, but the SmartScheduler also relies on
+            // box64/bionic: the InputThreadEnable patch (ensureXvfbPatched) makes
+            // the threaded-input facility inert, but the SmartScheduler also relies on
             // SIGALRM, and box64 cannot deliver SIG14 to this guest safely (the
             // handler slot resolved to unmapped 0x2000 -> SIGSEGV at boot, measured
             // 2026-10-17). -dumbSched is xorg's own switch to disable it

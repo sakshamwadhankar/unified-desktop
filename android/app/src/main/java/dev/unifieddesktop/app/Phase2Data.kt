@@ -32,6 +32,15 @@ object Phase2Data {
     const val NPP_URL = "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.8.1/npp.8.9.8.1.portable.x64.zip"
     const val NPP_SHA256 = "beddf5548e75c97930d1575ba1c7d113e6e2b33d0a200310e734ca08e225f414"
 
+    // Our guest bin/sh: see android/win86/guestsh/udsh.c (built by
+    // android/win86/build-guestsh.sh). Debian dash dies at its own startup
+    // under box64 on this phone (B-016: its INIT runs setvareq("OPTIND=1") ->
+    // getoptsreset -> number("1") -> "sh: 0: Illegal number: 1", exit 2), so
+    // the shell Xorg's Popen fork+execl("bin/sh") uses for the keymap compile
+    // is udsh instead. Shipped as this APK asset (data - never exec'd by
+    // Android, only read by box64) and installed over rootfs bin/sh/usr/bin/sh.
+    const val UDSH_SHA256 = "35a6fc02421f4cc863caa26396ecac293c7c4dceee79f96706c7e2bb0f3be767"
+
     private val log = StringBuilder()
     fun say(s: String) { android.util.Log.i(TAG, s); log.append(s).append('\n') }
     fun logText(): String = log.toString()
@@ -51,8 +60,10 @@ object Phase2Data {
         ).joinToString(":")
     }
 
-    private fun sha256(f: File): String {
-        val md = MessageDigest.getInstance("SHA-256").digest(f.readBytes())
+    private fun sha256(f: File): String = sha256(f.readBytes())
+
+    private fun sha256(b: ByteArray): String {
+        val md = MessageDigest.getInstance("SHA-256").digest(b)
         return md.joinToString("") { "%02x".format(it) }
     }
 
@@ -245,21 +256,51 @@ object Phase2Data {
         }
         val t1 = System.currentTimeMillis()
         val soCount = rootfs.walkTopDown().filter { it.isFile && it.name.contains(".so") }.count()
-        // Debian 12 is usr-merged: /bin is just a symlink to /usr/bin on real
-        // systems, and dash installs to /bin/dash. Our minimal tar reader keeps
-        // plain files, so make the popen targets real file copies instead of the
-        // missing symlink (/bin/sh is what popen() launches - Xvfb's keymap
-        // compile depends on it; no +x is ever set: everything goes through box64).
-        val dash = File(rootfs, "bin/dash")
-        if (dash.isFile) {
-            File(rootfs, "bin/sh").takeIf { !it.isFile }?.let { sh -> FileInputStream(dash).copyTo(sh.outputStream()) }
-            val ubin = File(rootfs, "usr/bin").apply { mkdirs() }
-            val ush = File(ubin, "sh")
-            if (!ush.isFile) FileInputStream(dash).copyTo(ush.outputStream())
-            say("SHELL bin/sh+usr/bin/sh created from dash")
-        } else say("SHELL dash missing in rootfs/bin")
+        // Debian 12 is usr-merged: the dash deb's bin/sh is a symlink to
+        // bin/dash - which is exactly what Xorg's fork+execl("bin/sh") runs for
+        // the keymap compile. Debian dash cannot run under box64 here (B-016),
+        // so the guest bin/sh (and usr/bin/sh) is our udsh instead (asset
+        // win86/udsh, built from android/win86/guestsh/udsh.c by
+        // build-guestsh.sh). Real dash stays at bin/dash; no +x is ever set -
+        // box64 reads everything as data.
+        say("SHELL bin/sh+usr/bin/sh = udsh ${if (ensureGuestSh(ctx)) "ok" else "FAILED"}")
         say("ROOTFS pkgs=$ok debBytes=$totalBytes soFiles=$soCount ms=${t1 - t0}")
         writeLog(ctx)
+    }
+
+    /**
+     * Install the guest bin/sh (udsh) from the APK assets over rootfs bin/sh
+     * and usr/bin/sh, verifying the pinned digest. Idempotent; a symlink (the
+     * tar reader's bin/sh -> bin/dash) is deleted before writing so the write
+     * can never follow it into dash. Called from fetchRuntime and from
+     * Phase2X11.startXvfb, so installs provisioned before udsh existed heal on
+     * the next run: nothing depends on a manual staging step (B-019).
+     */
+    fun ensureGuestSh(ctx: Context): Boolean {
+        val rootfs = rootfsDir(ctx)
+        return try {
+            val bytes = ctx.assets.open("win86/udsh").use { it.readBytes() }
+            val got = sha256(bytes)
+            if (got != UDSH_SHA256) { say("UDSH_FAIL asset sha=$got want=$UDSH_SHA256"); return false }
+            var replaced = 0
+            for (rel in listOf("bin/sh", "usr/bin/sh")) {
+                val f = File(rootfs, rel)
+                val already = java.nio.file.Files.isRegularFile(
+                    f.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS
+                ) && sha256(f) == UDSH_SHA256
+                if (!already) {
+                    f.parentFile?.mkdirs()
+                    if (!f.delete() && f.exists()) { say("UDSH_FAIL cannot replace $rel"); return false }
+                    f.writeBytes(bytes)
+                    replaced++
+                }
+            }
+            say("UDSH_INSTALL replaced=$replaced sha=${UDSH_SHA256.take(16)}e")
+            true
+        } catch (t: Throwable) {
+            say("UDSH_FAIL $t")
+            false
+        }
     }
 
     fun fetchWine(ctx: Context) {

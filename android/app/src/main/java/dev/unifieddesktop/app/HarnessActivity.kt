@@ -129,42 +129,7 @@ class HarnessActivity : Activity() {
         }
         // Phase 2 T4/T5/T6 actions: tmp proof, Xvfb, captures, xeyes, wine, typing.
         if (i?.getStringExtra("phase2x") != null) {
-            val what = i!!.getStringExtra("phase2x")!!
-            Thread({
-                try {
-                    val arg = what.substringAfter(':', "")
-                    when (what.substringBefore(':')) {
-                        "tmp" -> Phase2X11.proveNoTmp()
-                        "xvfb" -> { Phase2X11.proveNoTmp(); Phase2X11.startXvfb(this) }
-                        "capture" -> if (Phase2X11.captureX11(this, arg.ifEmpty { "x11.png" }) == null) return@Thread
-                        "pattern" -> if (Phase2X11.capturePattern(this, arg.ifEmpty { "pattern.png" }) == null) return@Thread
-                        "xeyes" -> {
-                            Phase2X11.ensureXvfb(this)
-                            val xb = File(Phase2Data.rootfsDir(this), "usr/bin/xeyes")
-                            val pb = ProcessBuilder(
-                                Phase2Box64.libbox64(this).path, xb.absolutePath,
-                            ).apply { environment().clear(); environment().putAll(Phase2X11.clientEnv(this@HarnessActivity)) }
-                            val pp = pb.start()
-                            Phase2X11.say("XEYES pid=${Phase2X11.pidOf(pp)}")
-                            Phase2X11.g3exe("XEYES", this, Phase2X11.pidOf(pp))
-                            Thread { Phase2X11.drain("XEYES_ERR", pp.errorStream) }.apply {
-                                name = "phase2-xeyes-err"
-                            }.start()
-                            Thread.sleep(3000)
-                            Phase2X11.captureX11(this@HarnessActivity, arg.ifEmpty { "xeyes.png" })
-                        }
-                        "wineboot" -> Phase2Wine.boot(this)
-                        "npp" -> Phase2Wine.startNpp(this)
-                        "type" -> Phase2X11.typeViaXtest(this, arg)
-                        "killall" -> { Phase2Wine.killWine(); Phase2X11.killXvfb() }
-                        "runbin" -> Phase2X11.runGuestShell(this, arg)
-                        else -> Phase2X11.say("PHASE2X unknown [$what] codes=${what.map{it.code}.take(12)}")
-                    }
-                } catch (t: Throwable) {
-                    Phase2X11.say("PHASE2X_FAIL $what $t")
-                }
-                Phase2X11.writeLog(this)
-            }, "phase2-x").start()
+            Phase2Dispatch.runX(this, i!!.getStringExtra("phase2x")!!)
             return
         }
         if (i?.getBooleanExtra("selftest", false) == true) {

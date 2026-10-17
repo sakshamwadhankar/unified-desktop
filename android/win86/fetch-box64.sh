@@ -144,6 +144,64 @@ print("patched", p)
 PYEOF
 grep -n "unified-desktop: glibc guests need" "$SRC/src/emu/entrypoint.c" >/dev/null || { echo "ERROR: entrypoint.c patch did not land"; exit 1; }
 
+# unified-desktop patch (2026-10-17, BUGS B-020): guests are glibc x86-64
+# binaries, so x64_sigaction_t must model glibc's struct sigaction. Upstream's
+# #ifdef ANDROID branch uses a bionic-shaped layout (int sa_flags first), which
+# made my_sigaction() read the guest handler out of sa_mask: the wineserver
+# stored a garbage handler and died at the first SIGCHLD (jump to 0x110016007
+# -> SIGSEGV livelock -> exit 139). Give the ANDROID branch glibc's layout
+# {handler, 1024-bit mask, 32-bit flags, restorer}; the two mask copies in
+# my_sigaction() then become size-aware. Upstream main still has the buggy
+# layout (checked 2026-10-17); not submitted upstream.
+python3 - "$SRC/src/include/signals.h" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+i = s.index("#ifdef ANDROID")
+j = s.index("#else", i)
+assert "x64_sigaction_s" in s[i:j] and "int sa_flags;" in s[i:j], "patch anchor not found (signals.h)"
+new = ("#ifdef ANDROID\n"
+"// unified-desktop patch: guests are glibc x86-64 binaries, so this must\n"
+"// model glibc's struct sigaction {handler, 1024-bit mask, 32-bit flags,\n"
+"// restorer}. The former bionic-shaped layout made my_sigaction() read the\n"
+"// handler out of sa_mask and killed the guest at the first signal (BUGS B-020).\n"
+"typedef struct x64_sigaction_s {\n"
+"\tunion {\n"
+"\t  sighandler_t _sa_handler;\n"
+"\t  void (*_sa_sigaction)(int, siginfo_t *, void *);\n"
+"\t} _u;\n"
+"\tuint64_t sa_mask[16];\n"
+"\tuint32_t sa_flags;\n"
+"\tvoid (*sa_restorer)(void);\n"
+"} x64_sigaction_t;\n")
+s = s[:i] + new + s[j:]
+open(p, "w").write(s)
+print("patched", p)
+PYEOF
+grep -q "sa_mask\[16\]" "$SRC/src/include/signals.h" || { echo "ERROR: signals.h sigaction patch did not land"; exit 1; }
+
+python3 - "$SRC/src/libtools/signals.c" <<'PYEOF'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+a = s.index("int EXPORT my_sigaction(")
+b = s.index("int EXPORT my___sigaction(", a)
+body = s[a:b]
+def sub1(text, needle, newlines):
+    pat = re.compile(r"^([ \t]*)" + re.escape(needle) + r"[ \t]*$", re.M)
+    assert len(pat.findall(text)) == 1, "anchor not unique: " + needle
+    return pat.sub(lambda m: "".join(m.group(1) + n + "\n" for n in newlines), text, count=1)
+body = sub1(body, "newact.sa_mask = act->sa_mask;",
+    ["memcpy(&newact.sa_mask, &act->sa_mask, sizeof(newact.sa_mask)); // unified-desktop: glibc guest mask is 128 bytes"])
+body = sub1(body, "oldact->sa_mask = old.sa_mask;",
+    ["memset(&oldact->sa_mask, 0, sizeof(oldact->sa_mask)); // unified-desktop: zero glibc's 128-byte mask tail",
+     "memcpy(&oldact->sa_mask, &old.sa_mask, sizeof(old.sa_mask));"])
+s = s[:a] + body + s[b:]
+open(p, "w").write(s)
+print("patched", p)
+PYEOF
+grep -q "memcpy(&newact.sa_mask, &act->sa_mask, sizeof(newact.sa_mask))" "$SRC/src/libtools/signals.c" || { echo "ERROR: signals.c sigaction patch did not land"; exit 1; }
+
 # Box64's wrapped libc binds popen() to the native (Bionic) popen, whose child
 # is exec'd at the literal path /bin/sh - absent on Android - so every guest
 # spawn through popen (Xvfb's xkbcomp keymap compile) fails with no child ever
@@ -160,6 +218,66 @@ open(p, "w").write(s)
 print("patched popen->GOM in", p)
 PYEOF
 grep -q "GOM(popen, SFpp)" "$SRC/src/wrapped/wrappedlibc_private.h" || { echo "ERROR: popen GOM patch did not land"; exit 1; }
+
+# Android's policy can refuse mprotect(PROT_EXEC) on guest mappings (wine:
+# "map_image_into_view failed to set 60000020 protection on ... section .text,
+# noexec filesystem?"). box64 never executes guest code from those mappings -
+# it reads the bytes as data and translates them - so on failure retry without
+# PROT_EXEC and report success if that works. Always log the failing call and
+# its errno; this line is the evidence used to root-cause wine load failures.
+python3 - "$SRC/src/wrapped/wrappedlibc.c" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = """    int ret = mprotect(addr, len, prot);
+    if(!ret && len) {
+        updateProtection((uintptr_t)addr, len, prot);
+    }
+    return ret;
+}
+
+typedef struct mallinfo (*mallinfo_fnc)(void);"""
+new = """    int ret = mprotect(addr, len, prot);
+    if(ret) {
+        /* unified-desktop: wine insists on PROT_EXEC for its PE .text but this
+           kernel/policy may refuse it; under box64 execution is translation,
+           never host execution of guest pages, so exec protection is optional.
+           Keep both log lines: they are the accepted evidence trail. */
+        int e = errno;
+        printf_log(LOG_NONE, "mprotect(%p, 0x%lx, 0x%x) FAILED errno=%d\\n", addr, len, prot, e);
+        if(prot & PROT_EXEC) {
+            /* diagnostic: the VMAs covering the refused range (evidence trail) */
+            FILE *mf = fopen("/proc/self/maps", "r");
+            if(mf) {
+                char mline[512];
+                unsigned long a0 = (unsigned long)addr, a1 = (unsigned long)addr + len;
+                while(fgets(mline, sizeof(mline), mf)) {
+                    unsigned long s, e2;
+                    if(sscanf(mline, "%lx-%lx", &s, &e2) == 2 && s < a1 && e2 > a0)
+                        printf_log(LOG_NONE, "  map: %s", mline);
+                }
+                fclose(mf);
+            }
+            int ret2 = mprotect(addr, len, prot & ~PROT_EXEC);
+            printf_log(LOG_NONE, "mprotect(%p, 0x%lx, 0x%x) retry-no-exec -> %d errno=%d\\n",
+                       addr, len, prot & ~PROT_EXEC, ret2, ret2 ? errno : 0);
+            if(!ret2) ret = 0;
+        }
+    }
+    if(!ret && len) {
+        updateProtection((uintptr_t)addr, len, prot);
+    }
+    return ret;
+}
+
+typedef struct mallinfo (*mallinfo_fnc)(void);"""
+assert old in s, "mprotect anchor not found"
+assert s.count(old) == 1, "mprotect anchor not unique"
+s = s.replace(old, new)
+open(p, "w").write(s)
+print("patched my_mprotect in", p)
+PYEOF
+grep -q "retry-no-exec" "$SRC/src/wrapped/wrappedlibc.c" || { echo "ERROR: mprotect patch did not land"; exit 1; }
 
 rm -rf "$BUILD"
 mkdir -p "$BUILD"

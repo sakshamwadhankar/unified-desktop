@@ -115,6 +115,14 @@ phase's gate passes.
     extra bet for Phase 2's Xvfb-satisfied need.
 - **Revisit:** if Box64+Xvfb+Kron4ek-Wine is unworkable on the test phone (Phase 2 gate
   fails on core mechanics, not app-specific quirks).
+- **Status after Phase 2 round 2 (manager, 2026-10-17):** the base holds for Linux apps
+  (xeyes renders) and Wine now boots a prefix. But the current pin, **Wine 11.19 (a dev
+  release) + Box64 v0.4.4**, needed four workarounds (B-020/21/23/24) and still cannot
+  create a desktop window (B-022), so no Windows GUI app can show. Round 3 keeps the base
+  and changes only the pin. It tries other Kron4ek amd64 builds (stable 10.x and 9.x first,
+  then a wow64 build) and a newer Box64, one at a time, and stops at the first that shows a
+  Notepad++ window. Public docs and settings of other Box64+Wine projects may be read as
+  facts; their code is never copied (D2, GPL lineage).
 
 ### D14: Open-source (incl. GPL) programs are fetched by the user's phone from upstream, never shipped by us (PROVISIONAL)
 - **Decided:** 2026-10-17, by the manager; the owner may overrule.

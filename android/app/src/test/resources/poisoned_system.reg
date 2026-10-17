@@ -1,0 +1,15 @@
+WINE REGISTRY Version 2
+;; All keys relative to REGISTRY\\Machine
+
+#arch=win64
+
+[Software\\Classes\\Wow6432Node] 1792218730
+#time=1dd5e013d4af102
+
+[Software\\Microsoft\\Windows NT\\CurrentVersion\\Perflib\\009] 1792218730
+#time=1dd5e013d4af102
+
+[System\\CurrentControlSet] 1792218730
+#time=1dd5e013d4af102
+#link
+"SymbolicLinkValue"=hex(0):
