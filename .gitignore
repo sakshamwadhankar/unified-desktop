@@ -42,3 +42,9 @@ evidence/**/*_logcat.txt
 evidence/**/*_activities.txt
 evidence/**/*_windows.txt
 evidence/**/*_display.txt
+
+# Phase 2: built and downloaded pieces (rebuilt by android/win86/fetch-box64.sh; runtime data is fetched by the app)
+android/app/src/main/jniLibs/
+android/win86/vendor/
+android/win86/guestsh/*
+!android/win86/guestsh/*.c

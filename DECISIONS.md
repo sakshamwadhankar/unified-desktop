@@ -75,6 +75,56 @@ phase's gate passes.
 - **Why:** it does not depend on Android's freeform-window support, and each app draws only
   its own window's pixels.
 
+### D13: Phase-2 base: upstream Box64 + data-only x86-64 runtime + Xvfb as the X server (PROVISIONAL; settled if Phase 2 passes)
+- **Decided:** 2026-10-16, by the coding agent under the Phase-2 prompt (T1). Should be
+  numbered D9 by that prompt, but D9 exists (the phone stays usable); recorded here as the
+  next free entry.
+- **Decision:**
+  - **Translator:** upstream **Box64** built from pinned release source with NDK 26
+    (`-DANDROID=ON -DARM_DYNAREC=ON`), shipped in the APK as `lib*.so`
+    (`libbox64.so`) and executed only from `nativeLibraryDir`. Not a Winlator fork
+    build.
+  - **x86-64 runtime (Wine, libs, Xvfb, downloaded apps): DATA.** Pinned + SHA-256,
+    fetched over the network into app storage on first run. Nothing there is ever
+    executed by the Android exec path; it is read and translated by `libbox64.so`.
+    Specifically: **Kron4ek Wine amd64 build** (x86-64, LGPL-2.1), **Xvfb** + x86-64
+    libraries (Debian/Ubuntu, MIT/X11-family and per-package licences), and user apps
+    such as **Notepad++ portable** (GPL-2.0, see D14 note).
+  - **X11 server:** **Xvfb run through Box64** (TCP-localhost transport,
+    `-nolisten unix`). Not a bionic-built in-process server.
+- **Why:** Play-compliance (targetSdk 36; only `lib*.so` executes; everything else is
+  data). Xvfb+Box64+Wine is the classic headless combination, battle-tested together,
+  with battle-tested licences. Version comparison done:
+  - **Winlator Bionic (Pipetto lineage)/Ludashi: rejected.** Apps target SDK 28 and exec
+    from app storage (Play-noncompliant model for us); repos carry an MIT badge while
+    the inherited Winlator project is GPL-3.0, which would need a manager GPL decision;
+    the original Winlator Bionic repo under FexEmu has also disappeared (404, checked
+    2026-10-16).
+  - **Bannerlator: rejected.** GPL-3.0 (needs manager decision), personal-build
+    disclaimer, targets SDK 28 exec-from-storage, and needs the developer-options
+    child-process restriction toggle for some paths.
+  - **Upstream Box64: adopted** for the translator because it is MIT, very actively
+    maintained (5.7k stars, CMake `ANDROID` and `TERMUX` targets exist), and has an
+    upstream `androidshmem` wrapper for Wine's SysV-shm use on Android.
+  - **X server:** the alternatives all fail a hard rule or a license rule: glibc Xvfb
+    cannot use its default filesystem Unix socket on Android (apps cannot write `/tmp`),
+    so Xvfb runs with `-nolisten unix` and everything talks over TCP `127.0.0.1:6000`
+    inside the phone; the Winlator-family X11 server in Java is inherited GPL-3.0 code
+    (its MIT badge on forks is unsupported by the lineage), which would need a manager
+    GPL decision — it is NOT used; writing our own X protocol server is a phase-sized
+    extra bet for Phase 2's Xvfb-satisfied need.
+- **Revisit:** if Box64+Xvfb+Kron4ek-Wine is unworkable on the test phone (Phase 2 gate
+  fails on core mechanics, not app-specific quirks).
+
+### D14 (pending, for the manager): GPL software as runtime-downloaded data
+- **Context:** Phase 2 runs Notepad++ (GPL-2.0) through the Box64+Wine stack, and
+  an Ubuntu/Debian x86-64 library set that includes GPL packages (bash, coreutils,
+  libc...). None of it ships inside the APK and none of it is executed by our own
+  exec path; it is translated by libbox64 after runtime download.
+- **Question for the manager:** is "user-chosen GPL apps at runtime as data files,
+  never shipped or committed by us" acceptable policy for the Play build?
+  Precedent: Winlator/Box64-family apps on foreign stores behave this way.
+
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never
   invent a name; `unified-desktop` is a codename.

@@ -6,16 +6,25 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 2 of 13 next. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Path A is NO-GO;
+- **Phase:** 2 of 13. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Path A is NO-GO;
   path B (move the guest's window into our Presentation on a private display) works on the
   phone for ordinary apps and for Firefox's web engine.
-- **Last updated:** 2026-10-16, round 9 run by the manager on Windows. Example.com loads on
-  our display; Wikipedia scrolls at 22.2 fps; about 695 MB PSS with a browser page open;
-  10-minute survival passes. B-007 fixed (engine slot reuse). New: B-008 (black placeholder
-  window on the phone screen), B-009 (Play Store/GMS crash loop).
-- **Next action:** Phase 2 (Windows + Linux apps through Box64 + Wine), one prompt. The
-  Windows adb server is localhost-only again (owner approved, 2026-10-16); reopen it with
-  `adb kill-server; adb -a start-server` for phone runs from the OmniRush box.
+- **Last updated:** 2026-10-17, coding agent, Phase-2 phone session. NEW in T5: the Java
+  X11 client and the real guest Xlib client both work against our Box64 Xvfb. New root
+  cause+fix: bionic/glibc `struct addrinfo` layout mismatch (B-015) — Box64's passthrough
+  `getaddrinfo` handed guests a chain with ai_addr==NULL, killing every guest Xlib
+  program with "Can't open display"; fixed in the glibcshim (`getaddrinfo`/`freeaddrinfo`
+  converters inside libbox64, real Bionic functions reached via `dlopen("libc.so")`).
+- **Gate evidence (phone, 2026-10-17):** `evidence/phase2/bars.png` (Java client pattern,
+  1280x720) and `evidence/phase2/xeyes.png` (real Debian xeyes through guest glibc libX11
+  -> Box64 -> our patched Xvfb); G3_EXE lines for Xvfb and xeyes readlink to libbox64.so
+  inside nativeLibraryDir. New crash-blocker: wine 11.19 `wineboot -i` SIGABRTs in the
+  preloader under Box64 v0.4.4 (BUGS B-017) — T6 not started beyond data placement.
+- **Next action:** manager decision on B-017 (Box64 pin bump or different Wine build),
+  then T6: `wineboot`, Notepad++ window with typed text (PNG), measured numbers; then
+  T7/T8 gates, doc cleanup rows, and the Phase-2 report. License rows for dash/xkbcomp
+  recorded in THIRD_PARTY.md; xprobe and forktest are our own code (clean-room, no
+  third-party row needed).
 
 ## Done (verified on the phone, 2026-10-14)
 
