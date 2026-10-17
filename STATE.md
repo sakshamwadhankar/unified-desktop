@@ -9,22 +9,13 @@ corrects it after review.
 - **Phase:** 2 of 13. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Path A is NO-GO;
   path B (move the guest's window into our Presentation on a private display) works on the
   phone for ordinary apps and for Firefox's web engine.
-- **Last updated:** 2026-10-17, coding agent, Phase-2 phone session. NEW in T5: the Java
-  X11 client and the real guest Xlib client both work against our Box64 Xvfb. New root
-  cause+fix: bionic/glibc `struct addrinfo` layout mismatch (B-015) — Box64's passthrough
-  `getaddrinfo` handed guests a chain with ai_addr==NULL, killing every guest Xlib
-  program with "Can't open display"; fixed in the glibcshim (`getaddrinfo`/`freeaddrinfo`
-  converters inside libbox64, real Bionic functions reached via `dlopen("libc.so")`).
-- **Gate evidence (phone, 2026-10-17):** `evidence/phase2/bars.png` (Java client pattern,
-  1280x720) and `evidence/phase2/xeyes.png` (real Debian xeyes through guest glibc libX11
-  -> Box64 -> our patched Xvfb); G3_EXE lines for Xvfb and xeyes readlink to libbox64.so
-  inside nativeLibraryDir. New crash-blocker: wine 11.19 `wineboot -i` SIGABRTs in the
-  preloader under Box64 v0.4.4 (BUGS B-017) — T6 not started beyond data placement.
-- **Next action:** manager decision on B-017 (Box64 pin bump or different Wine build),
-  then T6: `wineboot`, Notepad++ window with typed text (PNG), measured numbers; then
-  T7/T8 gates, doc cleanup rows, and the Phase-2 report. License rows for dash/xkbcomp
-  recorded in THIRD_PARTY.md; xprobe and forktest are our own code (clean-room, no
-  third-party row needed).
+- **Last updated:** 2026-10-17, manager review of Phase 2 round 1 (commit f6b4a06). Box64
+  runs from our APK; Debian xeyes renders on Xvfb (through Box64) inside our app on the
+  phone. Not yet product-grade: it relied on manual adb staging (B-019) and Xvfb starts 1 in
+  5 (B-018). Wine's first boot aborts at 149 ms (B-017). Notepad++, numbers and survival
+  not done.
+- **Next action:** Phase 2 round 2 (one prompt, the whole remainder): B-017 (Box64/Wine
+  pins), B-018, B-019, B-016, B-010, then Notepad++ with typed text, numbers, survival.
 
 ## Done (verified on the phone, 2026-10-14)
 

@@ -116,14 +116,16 @@ phase's gate passes.
 - **Revisit:** if Box64+Xvfb+Kron4ek-Wine is unworkable on the test phone (Phase 2 gate
   fails on core mechanics, not app-specific quirks).
 
-### D14 (pending, for the manager): GPL software as runtime-downloaded data
-- **Context:** Phase 2 runs Notepad++ (GPL-2.0) through the Box64+Wine stack, and
-  an Ubuntu/Debian x86-64 library set that includes GPL packages (bash, coreutils,
-  libc...). None of it ships inside the APK and none of it is executed by our own
-  exec path; it is translated by libbox64 after runtime download.
-- **Question for the manager:** is "user-chosen GPL apps at runtime as data files,
-  never shipped or committed by us" acceptable policy for the Play build?
-  Precedent: Winlator/Box64-family apps on foreign stores behave this way.
+### D14: Open-source (incl. GPL) programs are fetched by the user's phone from upstream, never shipped by us (PROVISIONAL)
+- **Decided:** 2026-10-17, by the manager; the owner may overrule.
+- **Decision:** Wine, Debian packages, Notepad++ and similar programs are downloaded on the
+  phone from their official upstream URLs (pinned + SHA-256) as data. We do not put them in
+  the APK and do not re-host them. The app shows each component's name, license and source
+  link (Phase 8 App Center / About screen).
+- **Why:** GPL duties fall on whoever distributes the program; here the user's phone fetches
+  it from upstream. If we ever bundle or re-host GPL code, we must ship its license and
+  offer the matching source: decide that then, with a new entry.
+- **Revisit:** before the first Google Play release (legal check), or if we start re-hosting.
 
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never
