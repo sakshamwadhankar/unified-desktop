@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The accessory the PC switches the phone into (AOA control 52/53 with these
+     strings). Android only offers "Open with [our app]?" for accessories matching
+     this filter; no developer mode is involved (USER_WORKFLOW 2.3). -->
+<resources>
+    <usb-accessory manufacturer="unified-desktop" model="desktop" />
+</resources>

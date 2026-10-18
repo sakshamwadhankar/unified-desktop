@@ -1,6 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
  <uses-permission android:name="android.permission.INTERNET"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+ <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+ <!-- The phone can also be the USB accessory side (Phase 4 AOA); host UI not required. -->
+ <uses-feature android:name="android.hardware.usb.accessory" android:required="false"/>
  <queries>
   <package android:name="com.google.android.gms" />
   <package android:name="com.google.android.gsf" />
@@ -18,5 +24,18 @@
   <activity android:name=".SelfTestActivity" android:exported="false"/>
   <activity android:name=".Phase3CodeActivity" android:exported="false" android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"/>
+  <!-- Phase 4 link: the foreground service owning the PC session (B-027/B-033/B-035). -->
+  <service android:name=".Phase4LinkService"
+           android:exported="false"
+           android:foregroundServiceType="connectedDevice|dataSync"/>
+  <!-- AOA attachment entry: Android shows the "Open with [our app]?" dialog once and
+       always stays with the ticked box (USER_WORKFLOW 2.3; developer mode never needed). -->
+  <activity android:name=".Phase4AccessoryActivity" android:exported="true" android:label="Unified Desktop">
+   <intent-filter>
+    <action android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"/>
+   </intent-filter>
+   <meta-data android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
+              android:resource="@xml/usb_accessory_filter"/>
+  </activity>
  </application>
 </manifest>

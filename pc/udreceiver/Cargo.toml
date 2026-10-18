@@ -1,0 +1,14 @@
+[package]
+name = "udreceiver"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+ring = "0.17"
+rcgen = "0.14"
+
+[profile.release]
+panic = "abort"
+strip = true
+lto = "thin"

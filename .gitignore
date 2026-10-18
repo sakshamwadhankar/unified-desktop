@@ -14,6 +14,7 @@ captures/
 
 # Rust
 target/
+pc/target/
 
 # Python
 __pycache__/
