@@ -1,0 +1,128 @@
+# Wi-Fi, phone 2c0f6edc, 2026-10-19 ~02:14. End-to-end typing latency (PC key press -> flash visible on the PC screen, 50 samples) + per-stage reports (phone LAT joined with PC frame times).
+run wifilat addr=192.168.1.16:47600 started 2026-10-19 02:14:43
+--- step wait:3 at 02:14:43
+waited 3 s
+
+--- step lat:50 at 02:14:46
+sample 1: 122.7 ms
+sample 2: 183.0 ms
+sample 3: 118.9 ms
+sample 4: 110.3 ms
+sample 5: 125.6 ms
+sample 6: 118.9 ms
+sample 7: 105.0 ms
+sample 8: 126.9 ms
+sample 9: 132.5 ms
+sample 10: 128.4 ms
+sample 11: 123.5 ms
+sample 12: 112.9 ms
+sample 13: 123.7 ms
+sample 14: 153.2 ms
+sample 15: 190.3 ms
+sample 16: 119.9 ms
+sample 17: 172.9 ms
+sample 18: 117.1 ms
+sample 19: 126.5 ms
+sample 20: 120.5 ms
+sample 21: 135.2 ms
+sample 22: 108.3 ms
+sample 23: 102.8 ms
+sample 24: 134.2 ms
+sample 25: 120.7 ms
+sample 26: 110.2 ms
+sample 27: 123.2 ms
+sample 28: 133.3 ms
+sample 29: 146.9 ms
+sample 30: 129.5 ms
+sample 31: 97.1 ms
+sample 32: 139.7 ms
+sample 33: 143.6 ms
+sample 34: 124.5 ms
+sample 35: 121.3 ms
+sample 36: 167.0 ms
+sample 37: 159.3 ms
+sample 38: 105.6 ms
+sample 39: 113.5 ms
+sample 40: 119.8 ms
+sample 41: 108.5 ms
+sample 42: 117.0 ms
+sample 43: 113.6 ms
+sample 44: 134.7 ms
+sample 45: 126.0 ms
+sample 46: 93.9 ms
+sample 47: 149.5 ms
+sample 48: 118.6 ms
+sample 49: 116.7 ms
+sample 50: 109.9 ms
+LATENCY n=50 p50=122.7 p95=172.9 min=93.9 max=190.3 ms timeouts=0 skipped=0
+
+
+
+## per-stage medians
+n=50 (first report skipped)
+total            median  105.1 ms  p95  147.2
+pc>phone         median   21.7 ms  p95   67.4
+recv>dispatch    median    1.0 ms  p95    4.4
+dispatch>drawn   median    6.1 ms  p95    8.5
+drawn>encoded    median   46.1 ms  p95   55.0
+encoded>pc_rx    median   21.7 ms  p95   30.6
+pc_rx>presented  median    3.7 ms  p95    4.5
+
+## receiver log (decode path + LATSTAGE)
+[p5pc] reconnected silently to pinned phone B20B88AFAB081BF1 (192.168.1.16:47600)
+[p5pc] adapter: Intel(R) UHD Graphics (video processor: yes)
+[p5pc] swap chain: FLIP_DISCARD BGRA8 bufs=2 max-frame-latency=1
+[p5pc] CODECAPI_AVLowLatencyMode = 1 (VT_UI4)
+[p5pc] decoder: MS H.264 MFT d3d11=true provides_samples=true NV12 1920x1080
+[p5pc] DECODE hardware=true path=D3D11 NV12 surface
+[p5pc] LATSTAGE seq=1 total=355.3ms pc>phone=146.8 recv>dispatch=20.1 dispatch>drawn=3.5 drawn>encoded=121.5 encoded>pc_rx=54.4 pc_rx>presented=9.0 (clock rtt 97985 us)
+[p5pc] LATSTAGE seq=377 total=106.3ms pc>phone=19.8 recv>dispatch=1.7 dispatch>drawn=8.5 drawn>encoded=49.5 encoded>pc_rx=22.9 pc_rx>presented=3.8 (clock rtt 15447 us)
+[p5pc] LATSTAGE seq=412 total=153.7ms pc>phone=70.1 recv>dispatch=3.3 dispatch>drawn=4.8 drawn>encoded=42.0 encoded>pc_rx=29.8 pc_rx>presented=3.8 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=444 total=89.3ms pc>phone=21.6 recv>dispatch=0.5 dispatch>drawn=4.8 drawn>encoded=37.4 encoded>pc_rx=21.4 pc_rx>presented=3.7 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=483 total=98.2ms pc>phone=20.7 recv>dispatch=1.4 dispatch>drawn=6.7 drawn>encoded=57.9 encoded>pc_rx=8.1 pc_rx>presented=3.5 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=519 total=105.0ms pc>phone=22.3 recv>dispatch=3.5 dispatch>drawn=5.9 drawn>encoded=42.5 encoded>pc_rx=27.1 pc_rx>presented=3.6 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=562 total=98.0ms pc>phone=20.6 recv>dispatch=0.6 dispatch>drawn=5.0 drawn>encoded=40.1 encoded>pc_rx=28.2 pc_rx>presented=3.4 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=593 total=96.6ms pc>phone=19.5 recv>dispatch=0.5 dispatch>drawn=5.7 drawn>encoded=46.3 encoded>pc_rx=21.0 pc_rx>presented=3.7 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=635 total=94.1ms pc>phone=20.9 recv>dispatch=0.4 dispatch>drawn=3.7 drawn>encoded=42.3 encoded>pc_rx=23.2 pc_rx>presented=3.6 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=674 total=93.4ms pc>phone=29.6 recv>dispatch=1.6 dispatch>drawn=5.8 drawn>encoded=43.7 encoded>pc_rx=8.8 pc_rx>presented=4.0 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=705 total=109.6ms pc>phone=21.8 recv>dispatch=1.9 dispatch>drawn=7.4 drawn>encoded=51.6 encoded>pc_rx=22.5 pc_rx>presented=4.5 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=748 total=110.2ms pc>phone=21.4 recv>dispatch=1.8 dispatch>drawn=7.0 drawn>encoded=48.3 encoded>pc_rx=27.9 pc_rx>presented=3.8 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=782 total=105.7ms pc>phone=22.2 recv>dispatch=1.2 dispatch>drawn=5.2 drawn>encoded=51.0 encoded>pc_rx=22.5 pc_rx>presented=3.6 (clock rtt 15424 us)
+[p5pc] LATSTAGE seq=813 total=114.4ms pc>phone=33.2 recv>dispatch=0.3 dispatch>drawn=7.8 drawn>encoded=47.8 encoded>pc_rx=21.6 pc_rx>presented=3.7 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=843 total=121.7ms pc>phone=36.7 recv>dispatch=1.7 dispatch>drawn=7.4 drawn>encoded=49.7 encoded>pc_rx=21.6 pc_rx>presented=4.5 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=882 total=164.2ms pc>phone=96.8 recv>dispatch=0.6 dispatch>drawn=5.3 drawn>encoded=41.7 encoded>pc_rx=16.2 pc_rx>presented=3.7 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=912 total=92.6ms pc>phone=20.0 recv>dispatch=0.3 dispatch>drawn=5.8 drawn>encoded=39.8 encoded>pc_rx=22.4 pc_rx>presented=4.2 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=957 total=147.2ms pc>phone=67.4 recv>dispatch=2.4 dispatch>drawn=6.1 drawn>encoded=46.8 encoded>pc_rx=21.1 pc_rx>presented=3.5 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=987 total=100.9ms pc>phone=23.4 recv>dispatch=1.5 dispatch>drawn=8.0 drawn>encoded=37.6 encoded>pc_rx=26.8 pc_rx>presented=3.5 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1027 total=117.1ms pc>phone=19.6 recv>dispatch=0.6 dispatch>drawn=6.0 drawn>encoded=48.3 encoded>pc_rx=38.9 pc_rx>presented=3.6 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1060 total=97.2ms pc>phone=26.8 recv>dispatch=1.3 dispatch>drawn=6.1 drawn>encoded=41.6 encoded>pc_rx=17.7 pc_rx>presented=3.8 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1098 total=123.1ms pc>phone=42.2 recv>dispatch=0.7 dispatch>drawn=7.7 drawn>encoded=45.9 encoded>pc_rx=22.6 pc_rx>presented=3.9 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1128 total=100.1ms pc>phone=35.8 recv>dispatch=0.6 dispatch>drawn=5.9 drawn>encoded=45.3 encoded>pc_rx=9.0 pc_rx>presented=3.6 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1169 total=85.8ms pc>phone=34.1 recv>dispatch=0.2 dispatch>drawn=6.0 drawn>encoded=31.7 encoded>pc_rx=10.6 pc_rx>presented=3.2 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1209 total=101.1ms pc>phone=22.4 recv>dispatch=1.0 dispatch>drawn=6.6 drawn>encoded=49.3 encoded>pc_rx=18.3 pc_rx>presented=3.5 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1240 total=92.0ms pc>phone=19.4 recv>dispatch=0.6 dispatch>drawn=4.4 drawn>encoded=39.1 encoded>pc_rx=24.4 pc_rx>presented=4.1 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1280 total=72.5ms pc>phone=21.0 recv>dispatch=1.0 dispatch>drawn=7.1 drawn>encoded=27.6 encoded>pc_rx=12.2 pc_rx>presented=3.7 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1314 total=105.2ms pc>phone=20.8 recv>dispatch=0.4 dispatch>drawn=5.6 drawn>encoded=46.8 encoded>pc_rx=28.1 pc_rx>presented=3.5 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1354 total=114.4ms pc>phone=20.6 recv>dispatch=4.5 dispatch>drawn=5.8 drawn>encoded=42.4 encoded>pc_rx=37.6 pc_rx>presented=3.6 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1398 total=115.5ms pc>phone=52.6 recv>dispatch=5.2 dispatch>drawn=6.0 drawn>encoded=40.9 encoded>pc_rx=7.1 pc_rx>presented=3.7 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1429 total=114.1ms pc>phone=27.2 recv>dispatch=1.0 dispatch>drawn=4.9 drawn>encoded=51.8 encoded>pc_rx=25.6 pc_rx>presented=3.8 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1459 total=84.5ms pc>phone=18.6 recv>dispatch=4.4 dispatch>drawn=6.8 drawn>encoded=42.4 encoded>pc_rx=8.5 pc_rx>presented=3.8 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1498 total=103.7ms pc>phone=20.2 recv>dispatch=0.8 dispatch>drawn=8.2 drawn>encoded=48.3 encoded>pc_rx=22.9 pc_rx>presented=3.3 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1532 total=130.8ms pc>phone=41.6 recv>dispatch=1.0 dispatch>drawn=8.5 drawn>encoded=68.3 encoded>pc_rx=7.6 pc_rx>presented=3.8 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1562 total=102.6ms pc>phone=35.2 recv>dispatch=1.1 dispatch>drawn=4.8 drawn>encoded=43.5 encoded>pc_rx=14.7 pc_rx>presented=3.4 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1596 total=109.2ms pc>phone=19.9 recv>dispatch=0.2 dispatch>drawn=6.5 drawn>encoded=47.9 encoded>pc_rx=30.6 pc_rx>presented=4.1 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1641 total=124.8ms pc>phone=50.7 recv>dispatch=1.9 dispatch>drawn=7.9 drawn>encoded=51.4 encoded>pc_rx=9.2 pc_rx>presented=3.7 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1673 total=134.4ms pc>phone=50.7 recv>dispatch=3.3 dispatch>drawn=5.9 drawn>encoded=48.4 encoded>pc_rx=21.8 pc_rx>presented=4.3 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1713 total=72.7ms pc>phone=19.6 recv>dispatch=0.9 dispatch>drawn=5.4 drawn>encoded=33.4 encoded>pc_rx=9.5 pc_rx>presented=3.8 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1745 total=106.2ms pc>phone=19.7 recv>dispatch=0.9 dispatch>drawn=6.2 drawn>encoded=52.4 encoded>pc_rx=22.9 pc_rx>presented=4.1 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1785 total=107.1ms pc>phone=18.6 recv>dispatch=1.4 dispatch>drawn=8.4 drawn>encoded=55.0 encoded>pc_rx=19.9 pc_rx>presented=3.8 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1817 total=91.4ms pc>phone=19.8 recv>dispatch=0.3 dispatch>drawn=7.4 drawn>encoded=49.1 encoded>pc_rx=9.5 pc_rx>presented=5.4 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1848 total=92.3ms pc>phone=28.5 recv>dispatch=0.2 dispatch>drawn=7.4 drawn>encoded=38.8 encoded>pc_rx=13.4 pc_rx>presented=3.9 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1890 total=99.6ms pc>phone=21.0 recv>dispatch=1.7 dispatch>drawn=6.4 drawn>encoded=37.1 encoded>pc_rx=29.8 pc_rx>presented=3.7 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1931 total=125.1ms pc>phone=35.0 recv>dispatch=0.7 dispatch>drawn=7.5 drawn>encoded=48.9 encoded>pc_rx=29.1 pc_rx>presented=3.8 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1967 total=108.3ms pc>phone=19.4 recv>dispatch=0.7 dispatch>drawn=8.6 drawn>encoded=50.8 encoded>pc_rx=25.4 pc_rx>presented=3.5 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=1999 total=81.5ms pc>phone=18.3 recv>dispatch=2.0 dispatch>drawn=6.1 drawn>encoded=41.8 encoded>pc_rx=9.9 pc_rx>presented=3.5 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=2030 total=140.1ms pc>phone=50.6 recv>dispatch=0.4 dispatch>drawn=6.0 drawn>encoded=52.1 encoded>pc_rx=27.5 pc_rx>presented=3.6 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=2066 total=110.7ms pc>phone=36.0 recv>dispatch=0.5 dispatch>drawn=5.7 drawn>encoded=45.3 encoded>pc_rx=19.0 pc_rx>presented=4.2 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=2104 total=94.8ms pc>phone=20.0 recv>dispatch=1.6 dispatch>drawn=8.4 drawn>encoded=39.8 encoded>pc_rx=21.5 pc_rx>presented=3.5 (clock rtt 15059 us)
+[p5pc] LATSTAGE seq=2146 total=100.2ms pc>phone=18.2 recv>dispatch=0.5 dispatch>drawn=8.0 drawn>encoded=46.7 encoded>pc_rx=23.2 pc_rx>presented=3.6 (clock rtt 15059 us)

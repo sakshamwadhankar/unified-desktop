@@ -39,13 +39,19 @@ object Phase4Protocol {
         else -> "unknown"
     }
 
-    class Message internal constructor(val channel: Byte, val payload: ByteArray, internal var offset: Int = 0) {
+    class Message internal constructor(
+        val channel: Byte,
+        val payload: ByteArray,
+        /** Base flags for every frame of this message (Phase-5 keep-alive echo). */
+        val flags: Byte = 0,
+        internal var offset: Int = 0,
+    ) {
         val isFinished: Boolean get() = offset >= payload.size
 
         companion object {
-            fun create(channel: Byte, payload: ByteArray): Message {
+            fun create(channel: Byte, payload: ByteArray, flags: Byte = 0): Message {
                 require(isValidChannel(channel)) { "unknown channel $channel" }
-                return Message(channel, payload)
+                return Message(channel, payload, flags)
             }
         }
     }
@@ -129,7 +135,7 @@ object Phase4Protocol {
                 if (bytes.size - pos < HEADER_LEN + plen) break
                 val plenInt = plen.toInt()
                 val payload = bytes.copyOfRange(pos + HEADER_LEN, pos + HEADER_LEN + plenInt)
-                out.add(Message(channel, payload))
+                out.add(Message(channel, payload, flags))
                 pos += HEADER_LEN + plenInt
             }
             if (pos == bytes.size) {
@@ -149,36 +155,52 @@ object Phase4Protocol {
     /**
      * Chunked priority writer mirroring protocol.rs: in-progress messages stay at their
      * queue front; the priority decision is re-taken before every chunk.
+     *
+     * Phase 5 made it thread-safe and non-blocking for producers: queue access happens
+     * under [qLock] (a short critical section) while the socket write happens OUTSIDE it,
+     * so a stalled link can never block an encoder/input thread pushing a message.
      */
     class PriorityWriter<W : java.io.OutputStream>(val out: W) {
         private val queues = HashMap<Byte, ArrayDeque<Message>>()
+        private val qLock = Object()
 
         init { for (ch in CHANNEL_PRIORITY) queues[ch] = ArrayDeque() }
 
         fun push(msg: Message): Boolean {
             require(isValidChannel(msg.channel)) { "unknown channel ${msg.channel}" }
             require(msg.payload.size <= MAX_MESSAGE_LEN) { "message too large" }
-            queues[msg.channel]!!.addLast(msg)
+            synchronized(qLock) { queues[msg.channel]!!.addLast(msg) }
             return true
         }
 
-        val isEmpty: Boolean get() = queues.values.all { it.isEmpty() }
+        val isEmpty: Boolean
+            get() = synchronized(qLock) { queues.values.all { it.isEmpty() } }
 
-        /** Emit one frame: the highest-priority channel, one chunk per call. */
+        /** How many whole messages are waiting on [ch] (Phase-5 video drop policy). */
+        fun pendingCount(ch: Byte): Int = synchronized(qLock) { queues[ch]?.size ?: 0 }
+
+        /**
+         * Emit one frame: the highest-priority channel, one chunk per call. Call it from ONE
+         * thread only (Phase 5: the session's drain loop): the socket write happens outside
+         * the queue lock, so two emitters could put a message's chunks out of order.
+         */
         fun emitOne(): Int? {
-            for (ch in CHANNEL_PRIORITY) {
-                val q = queues[ch]!!
-                val head = q.peekFirst() ?: continue
-                val start = head.offset
-                val end = (head.offset + MAX_FRAME_PAYLOAD).coerceAtMost(head.payload.size)
-                val flags = if (end < head.payload.size) FLAG_MORE_FOLLOWS else 0
-                val frame = encodeFrame(ch, flags, head.payload.copyOfRange(start, end))
-                out.write(frame)
-                head.offset += end - start
-                if (head.isFinished) q.removeFirst()
-                return frame.size
-            }
-            return null
+            val frame = synchronized(qLock) {
+                for (ch in CHANNEL_PRIORITY) {
+                    val q = queues[ch]!!
+                    val head = q.peekFirst() ?: continue
+                    val start = head.offset
+                    val end = (head.offset + MAX_FRAME_PAYLOAD).coerceAtMost(head.payload.size)
+                    val more = if (end < head.payload.size) FLAG_MORE_FOLLOWS else 0.toByte()
+                    val f = encodeFrame(ch, (head.flags.toInt() or more.toInt()).toByte(), head.payload.copyOfRange(start, end))
+                    head.offset += end - start
+                    if (head.isFinished) q.removeFirst()
+                    return@synchronized f
+                }
+                null
+            } ?: return null
+            out.write(frame)
+            return frame.size
         }
 
         fun emitAll() {

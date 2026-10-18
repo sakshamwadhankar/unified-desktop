@@ -1,0 +1,6 @@
+
+  UsbHwStatus: 0
+  BatteryHwStatus: 0
+  BatteryIcStatus: 0
+
+

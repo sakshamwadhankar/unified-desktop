@@ -51,6 +51,12 @@ class Phase4LinkService : Service() {
         const val ACTION_FORGET = "dev.unifieddesktop.app.p4.FORGET"
         const val ACTION_ACCESSORY = "dev.unifieddesktop.app.p4.ACCESSORY"
 
+        /**
+         * Phase-5 dev probe: run the desktop+encoder pipeline with a discarding sink, so
+         * the video chain can be verified on the phone without a PC attached.
+         */
+        const val ACTION_P5TEST = "dev.unifieddesktop.app.p5.TEST"
+
         private val running = AtomicBoolean(false)
         private val lastState = AtomicReference("idle")
         private var serverThread: Thread? = null
@@ -107,8 +113,15 @@ class Phase4LinkService : Service() {
             ACTION_START -> startAll()
             ACTION_STOP -> stopAll()
             ACTION_STATUS -> say("status running=${running.get()} live=${liveSessions.size} last=$lastState pair=${pendingPairing.get() != null} acc=${accessoryPfd != null}")
-            ACTION_PAIR_YES -> pendingPairing.get()?.resolve(true)
-            ACTION_PAIR_NO -> pendingPairing.get()?.resolve(false)
+            ACTION_PAIR_YES -> {
+                // B-044: make the delivery path visible in p4.log
+                say("PAIR_YES action received (pending=${pendingPairing.get() != null})")
+                pendingPairing.get()?.resolve(true)
+            }
+            ACTION_PAIR_NO -> {
+                say("PAIR_NO action received (pending=${pendingPairing.get() != null})")
+                pendingPairing.get()?.resolve(false)
+            }
             ACTION_FORGET -> {
                 val fpr = intent.getStringExtra("fpr") ?: ""
                 val n = if (fpr.isEmpty()) {
@@ -120,6 +133,7 @@ class Phase4LinkService : Service() {
                 say("FORGET count=$n prefixOrEmpty=${fpr.take(6)} pins=${Phase4Crypto.trustedList(this).size}")
             }
             ACTION_ACCESSORY -> adoptAccessory(intent)
+            ACTION_P5TEST -> Thread({ p5SelfTest(intent.getIntExtra("seconds", 10)) }, "p5-selftest").start()
             else -> say("onStartCommand unknown action=${intent?.action}")
         }
         return START_NOT_STICKY
@@ -145,6 +159,30 @@ class Phase4LinkService : Service() {
         try { accessoryPfd?.close() } catch (_: Throwable) {}
         accessoryPfd = ParcelFileDescriptor.adoptFd(fd)
         say("ACC adopted fd=$fd m=${intent.getStringExtra("m")} model=${intent.getStringExtra("model")}")
+    }
+
+    /**
+     * Phase-5 dev probe (ACTION_P5TEST): runs the whole desktop+compositor+encoder path
+     * against a discarding sink and reports the counters, so the video chain is verifiable
+     * on the real phone without a PC. It never touches the network.
+     */
+    private fun p5SelfTest(seconds: Int) {
+        try {
+            say("P5TEST begin seconds=$seconds")
+            val sink = object : java.io.OutputStream() {
+                override fun write(b: Int) {}
+                override fun write(b: ByteArray, off: Int, len: Int) {}
+            }
+            val s = Phase5Session(this, sink, { line -> say(line) })
+            val ok = s.start(true)
+            say("P5TEST start ok=$ok")
+            Thread.sleep((seconds.coerceIn(1, 120) * 1000).toLong())
+            say("P5TEST ${s.statsLine()}")
+            s.stop("self-test done")
+            say("P5TEST end")
+        } catch (t: Throwable) {
+            say("P5TEST fail ${t.javaClass.simpleName}: ${t.message}")
+        }
     }
 
     private fun channels() {
@@ -373,6 +411,9 @@ class Phase4LinkService : Service() {
         val output = sock.outputStream
         val dec = Phase4Protocol.Decoder()
         val buf = ByteArray(16384)
+        // Phase 5: video + input ride the same session, over the same priority writer.
+        val p5 = Phase5Session(this, output, { line -> say(line) })
+        if (paired) p5.start(true)
         try {
             while (running.get()) {
                 val n: Int
@@ -387,8 +428,11 @@ class Phase4LinkService : Service() {
                         when (p.decision.get()) {
                             true -> {
                                 Phase4Crypto.trustedRemember(applicationContext, clientFpr, "PC")
-                                output.write(Phase4Protocol.encodeFrame(Phase4Protocol.CH_CONTROL, 0, "pair-ok".toByteArray()))
-                                output.flush()
+                                p5.writer.push(
+                                    Phase4Protocol.Message.create(
+                                        Phase4Protocol.CH_CONTROL, "pair-ok".toByteArray()
+                                    )
+                                )
                                 say(
                                     "PAIR_YES stored fpr=${clientFpr.take(16)} pins=" +
                                         Phase4Crypto.trustedList(applicationContext).size
@@ -399,10 +443,15 @@ class Phase4LinkService : Service() {
                                 pendingPairing.compareAndSet(p, null)
                                 cancelPairingNotification()
                                 sock.soTimeout = Phase4Protocol.DEAD_TIMEOUT_MS.toInt()
+                                // Phase 5: video + input may start now that the gate is open
+                                p5.start(true)
                             }
                             false -> {
-                                output.write(Phase4Protocol.encodeFrame(Phase4Protocol.CH_CONTROL, 0, "pair-no".toByteArray()))
-                                output.flush()
+                                p5.writer.push(
+                                    Phase4Protocol.Message.create(
+                                        Phase4Protocol.CH_CONTROL, "pair-no".toByteArray()
+                                    )
+                                )
                                 say("PAIR_NO cut")
                                 pendingPairing.compareAndSet(p, null)
                                 cancelPairingNotification()
@@ -431,24 +480,32 @@ class Phase4LinkService : Service() {
                     when {
                         m.channel == Phase4Protocol.CH_BENCH && m.payload.isNotEmpty() -> {
                             // bench echo: verbatim, same channel, no flags
-                            output.write(Phase4Protocol.encodeFrame(Phase4Protocol.CH_BENCH, 0, m.payload))
+                            p5.writer.push(Phase4Protocol.Message.create(Phase4Protocol.CH_BENCH, m.payload))
                         }
                         m.channel == Phase4Protocol.CH_CONTROL && m.payload.isEmpty() -> {
                             // keep-alive echo request -> echo with the flag
-                            output.write(
-                                Phase4Protocol.encodeFrame(
-                                    Phase4Protocol.CH_CONTROL, Phase4Protocol.FLAG_KEEPALIVE_ECHO, m.payload
+                            p5.writer.push(
+                                Phase4Protocol.Message.create(
+                                    Phase4Protocol.CH_CONTROL, m.payload, Phase4Protocol.FLAG_KEEPALIVE_ECHO
                                 )
                             )
+                        }
+                        m.channel == Phase4Protocol.CH_INPUT && m.payload.isNotEmpty() -> {
+                            // Phase 5: mouse + keyboard from the PC
+                            p5.onInputMessage(m.payload)
+                        }
+                        m.channel == Phase4Protocol.CH_CONTROL && m.payload.isNotEmpty() -> {
+                            // Phase 5: need-keyframe / clock sync / release-all
+                            p5.onControlMessage(String(m.payload, Charsets.UTF_8))
                         }
                         else -> say("SKIP ${Phase4Protocol.channelName(m.channel)} len=${m.payload.size}")
                     }
                 }
-                output.flush()
             }
         } catch (t: Throwable) {
             say("SESSION io ${t.javaClass.simpleName}: ${t.message?.take(60)}")
         } finally {
+            p5.stop("session end")
             liveSessions.remove(live)
             say("SESSION_END peer=${clientFpr.take(16)}")
             val p = decisionPending

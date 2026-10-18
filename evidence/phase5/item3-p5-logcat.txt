@@ -1,0 +1,184 @@
+
+I/DisplayDeviceRepository( 2200): Display device added: DisplayDeviceInfo{"phase5-desktop": 
+uniqueId="virtual:dev.unifieddesktop.app,10476,phase5-desktop,3", 1920 x 1080, modeId 6, renderFrameRate 60.0, 
+hasArrSupport false, frameRateCategoryRate null, supportedRefreshRates [], defaultModeId 6, userPreferredModeId -1, 
+supportedModes [{id=6, width=1920, height=1080, fps=60.0, vsync=60.0, synthetic=false, alternativeRefreshRates=[], 
+supportedHdrTypes=[]}], colorMode 0, supportedColorModes [0], hdrCapabilities null, isForceSdr false, allmSupported 
+false, gameContentTypeSupported false, density 240, 240.0 x 240.0 dpi, appVsyncOff 0, presDeadline 16666666, touch 
+NONE, rotation 0, type VIRTUAL, deviceProductInfo null, state UNKNOWN, committedState UNKNOWN, owner 
+dev.unifieddesktop.app (uid 10476), frameRateOverride , brightnessMinimum 0.0, brightnessMaximum 1.0, 
+brightnessDefault 0.0, brightnessDim -1.0, hdrSdrRatio NaN, FLAG_OWN_CONTENT_ONLY, installOrientation 0, displayShape 
+DisplayShape{ spec=729782573 displayWidth=1920 displayHeight=1080 physicalPixelDisplaySizeRatio=1.0 rotation=0 
+offsetX=0 offsetY=0 scale=1.0}}
+D/OplusMirageDisplaySecureSurfaceManager( 2200): createNewLogicalDisplay recordDisplayIdForDisplay device: 
+phase5-desktop displayId: 6
+D/DisplayPowerController[display=6]( 2200): DPC construct virtual:dev.unifieddesktop.app,10476,phase5-desktop,3 
+mIsPrimaryDisplay:false
+D/DisplayManagerServiceExtImpl( 2200): handle logical display added logicalDisplay=id=6,stack=6,content=false,displayIn
+fo{stack=6,type=5,id=6,uId=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3,state=UNKNOWN,pkg=dev.unifieddesktop.a
+pp}
+I/DisplayManagerServiceExtImpl( 2200): handle logical display changed logicalDisplay=id=6,stack=6,content=false,display
+Info{stack=6,type=5,id=6,uId=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3,state=UNKNOWN,pkg=dev.unifieddesktop
+.app}
+D/DisplayManagerServiceExtImpl( 2200): request size(4,2),dpc=com.android.server.display.DisplayPowerController@b0672a8 
+size(1,2),flags=0X80,id(0,6,virtual:dev.unifieddesktop.app,10476,phase5-desktop,3),enable=true,ready=false,waitForNegat
+iveProximity=false policy=BRIGHT,useProximitySensor=false,dozeState=UNKNOWN,screenBrightnessOverride=-1.000000,useAuto=
+false,lowPower=false,lowPowerFactor=1.000000
+D/DisplayDevice( 2200): setLayerStackLocked id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3 
+token=android.os.BinderProxy@5357687 stack=-2->6
+I/DisplayDevice( 2200): [6] Layerstack set to 6 for virtual:dev.unifieddesktop.app,10476,phase5-desktop,3
+D/OplusMirageDisplaySecureSurfaceManager( 2200): 
+device:[id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3,stack=6] 
+surface:Surface(name=android.graphics.SurfaceTexture@349f0b2 mNativeObject=-5476376665144802304)/@0x54ac9b4
+D/DisplayContentExtImpl( 2200):  initOplusRefreshRatePolicy DEFAULT_DISPLAY support refresh switch dc=Display{#6 
+state=UNKNOWN size=1920x1080 ROTATION_0},displayinfo=DisplayInfo{"phase5-desktop", displayId 6, displayGroupId 0, real 
+1920 x 1080, largest app 1920 x 1080, smallest app 1920 x 1080, appVsyncOff 0, presDeadline 16666666, mode 6, 
+renderFrameRate 60.0, hasArrSupport false, frameRateCategoryRate null, supportedRefreshRates [], defaultMode 6, 
+userPreferredModeId -1, supportedModes [{id=6, width=1920, height=1080, fps=60.0, vsync=60.0, synthetic=false, 
+alternativeRefreshRates=[], supportedHdrTypes=[]}], appsSupportedModes [{id=6, width=1920, height=1080, fps=60.0, 
+vsync=60.0, synthetic=false, alternativeRefreshRates=[], supportedHdrTypes=[]}], hdrCapabilities null, isForceSdr 
+false, userDisabledHdrTypes [], minimalPostProcessingSupported false, rotation 0, state UNKNOWN, committedState 
+UNKNOWN, type VIRTUAL, uniqueId "virtual:dev.unifieddesktop.app,10476,phase5-desktop,3", app 1920 x 1080, density 240 
+(240.0 x 240.0) dpi, layerStack 6, colorMode 0, supportedColorModes [0], deviceProductInfo null, owner 
+dev.unifieddesktop.app (uid 10476), removeMode 0, refreshRateOverride 60.0, brightnessMinimum 0.0, brightnessMaximum 
+1.0, brightnessDefault 0.0, brightnessDim -1.0, installOrientation ROTATION_0, layoutLimitedRefreshRate null, 
+hdrSdrRatio not_available, backlightType 0, thermalRefreshRateThrottling {}, thermalBrightnessThrottlingDataId 
+default, canHostTasks false}
+D/DisplayContentExtImpl( 2200):  initOplusRefreshRatePolicy DEFAULT_DISPLAY support refresh switch dc=Display{#6 
+state=UNKNOWN size=1920x1080 ROTATION_0},displayinfo=DisplayInfo{"phase5-desktop", displayId 6, displayGroupId 0, real 
+1920 x 1080, largest app 1920 x 1080, smallest app 1920 x 1080, appVsyncOff 0, presDeadline 16666666, mode 6, 
+renderFrameRate 60.0, hasArrSupport false, frameRateCategoryRate null, supportedRefreshRates [], defaultMode 6, 
+userPreferredModeId -1, supportedModes [{id=6, width=1920, height=1080, fps=60.0, vsync=60.0, synthetic=false, 
+alternativeRefreshRates=[], supportedHdrTypes=[]}], appsSupportedModes [{id=6, width=1920, height=1080, fps=60.0, 
+vsync=60.0, synthetic=false, alternativeRefreshRates=[], supportedHdrTypes=[]}], hdrCapabilities null, isForceSdr 
+false, userDisabledHdrTypes [], minimalPostProcessingSupported false, rotation 0, state UNKNOWN, committedState 
+UNKNOWN, type VIRTUAL, uniqueId "virtual:dev.unifieddesktop.app,10476,phase5-desktop,3", app 1920 x 1080, density 240 
+(240.0 x 240.0) dpi, layerStack 6, colorMode 0, supportedColorModes [0], deviceProductInfo null, owner 
+dev.unifieddesktop.app (uid 10476), removeMode 0, refreshRateOverride 60.0, brightnessMinimum 0.0, brightnessMaximum 
+1.0, brightnessDefault 0.0, brightnessDim -1.0, installOrientation ROTATION_0, layoutLimitedRefreshRate null, 
+hdrSdrRatio not_available, backlightType 0, thermalRefreshRateThrottling {}, thermalBrightnessThrottlingDataId 
+default, canHostTasks false}
+I/DisplayManagerServiceExtImpl( 2200): handle logical display changed logicalDisplay=id=6,stack=6,content=false,display
+Info{stack=6,type=5,id=6,uId=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3,state=UNKNOWN,pkg=dev.unifieddesktop
+.app}
+I/DisplayManagerServiceExtImpl( 2200): handle logical display changed logicalDisplay=id=6,stack=6,content=false,display
+Info{stack=6,type=5,id=6,uId=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3,state=UNKNOWN,pkg=dev.unifieddesktop
+.app}
+D/DisplayDevice( 2200): setLayerStackLocked id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3 
+token=android.os.BinderProxy@5357687 stack=6->6
+I/MultiDisplayRefreshRateManagerExtImpl( 2200): onDisplayAdded, mDecreaseRefreshRate = false, displayId: 6, uniquedId: 
+virtual:dev.unifieddesktop.app,10476,phase5-desktop,3, currentMode:-1
+D/VirtualDisplayAdapter( 2200): Changing state of virtual display phase5-desktop from UNKNOWN to ON
+I/DisplayDeviceRepository( 2200): Display device changed state: "phase5-desktop", ON
+I/DisplayManagerServiceExtImpl( 2200): handle logical display changed logicalDisplay=id=6,stack=6,content=false,display
+Info{stack=6,type=5,id=6,uId=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3,state=ON,pkg=dev.unifieddesktop.app}
+D/VirtualDisplayAdapter( 2200): Requesting power mode for display phase5-desktop to 2
+D/DisplayDevice( 2200): setLayerStackLocked id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3 
+token=android.os.BinderProxy@5357687 stack=6->6
+V/VirtualDisplayAdapter( 2200): Release VirtualDisplay phase5-desktop
+I/DisplayDeviceRepository( 2200): Display device removed: DisplayDeviceInfo{"phase5-desktop": 
+uniqueId="virtual:dev.unifieddesktop.app,10476,phase5-desktop,3", 1920 x 1080, modeId 6, renderFrameRate 60.0, 
+hasArrSupport false, frameRateCategoryRate null, supportedRefreshRates [], defaultModeId 6, userPreferredModeId -1, 
+supportedModes [{id=6, width=1920, height=1080, fps=60.0, vsync=60.0, synthetic=false, alternativeRefreshRates=[], 
+supportedHdrTypes=[]}], colorMode 0, supportedColorModes [0], hdrCapabilities null, isForceSdr false, allmSupported 
+false, gameContentTypeSupported false, density 240, 240.0 x 240.0 dpi, appVsyncOff 0, presDeadline 16666666, touch 
+NONE, rotation 0, type VIRTUAL, deviceProductInfo null, state ON, committedState UNKNOWN, owner dev.unifieddesktop.app 
+(uid 10476), frameRateOverride , brightnessMinimum 0.0, brightnessMaximum 1.0, brightnessDefault 0.0, brightnessDim 
+-1.0, hdrSdrRatio NaN, FLAG_OWN_CONTENT_ONLY, installOrientation 0, displayShape DisplayShape{ spec=729782573 
+displayWidth=1920 displayHeight=1080 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}}
+W/LogicalDisplay( 2200): setPrimaryDisplayDeviceLocked device 
+changed:[id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,3,stack=6]->null
+I/Phase5  (14682): encoder name=c2.qti.avc.encoder size=1920x1080 bitrate=12000000 fps=30
+I/Phase5  (14682): gl ready tex=1 program=3
+D/SurfaceFlinger( 1717): Creating virtual display: phase5-desktop
+I/DisplayDeviceRepository( 2200): Display device added: DisplayDeviceInfo{"phase5-desktop": 
+uniqueId="virtual:dev.unifieddesktop.app,10476,phase5-desktop,4", 1920 x 1080, modeId 7, renderFrameRate 60.0, 
+hasArrSupport false, frameRateCategoryRate null, supportedRefreshRates [], defaultModeId 7, userPreferredModeId -1, 
+supportedModes [{id=7, width=1920, height=1080, fps=60.0, vsync=60.0, synthetic=false, alternativeRefreshRates=[], 
+supportedHdrTypes=[]}], colorMode 0, supportedColorModes [0], hdrCapabilities null, isForceSdr false, allmSupported 
+false, gameContentTypeSupported false, density 240, 240.0 x 240.0 dpi, appVsyncOff 0, presDeadline 16666666, touch 
+NONE, rotation 0, type VIRTUAL, deviceProductInfo null, state ON, committedState UNKNOWN, owner dev.unifieddesktop.app 
+(uid 10476), frameRateOverride , brightnessMinimum 0.0, brightnessMaximum 1.0, brightnessDefault 0.0, brightnessDim 
+-1.0, hdrSdrRatio NaN, FLAG_PRIVATE, FLAG_NEVER_BLANK, FLAG_OWN_CONTENT_ONLY, installOrientation 0, displayShape 
+DisplayShape{ spec=729782573 displayWidth=1920 displayHeight=1080 physicalPixelDisplaySizeRatio=1.0 rotation=0 
+offsetX=0 offsetY=0 scale=1.0}}
+D/OplusMirageDisplaySecureSurfaceManager( 2200): createNewLogicalDisplay recordDisplayIdForDisplay device: 
+phase5-desktop displayId: 7
+D/DisplayPowerController[display=7]( 2200): DPC construct virtual:dev.unifieddesktop.app,10476,phase5-desktop,4 
+mIsPrimaryDisplay:false
+D/DisplayManagerServiceExtImpl( 2200): handle logical display added logicalDisplay=id=7,stack=7,content=false,displayIn
+fo{stack=7,type=5,id=7,uId=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4,state=ON,pkg=dev.unifieddesktop.app}
+I/DisplayManagerServiceExtImpl( 2200): handle logical display changed logicalDisplay=id=7,stack=7,content=false,display
+Info{stack=7,type=5,id=7,uId=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4,state=ON,pkg=dev.unifieddesktop.app}
+I/Phase5  (14682): virtual display id=7 state=2
+D/DisplayDevice( 2200): setLayerStackLocked id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4 
+token=android.os.BinderProxy@eedded5 stack=-2->7
+I/DisplayDevice( 2200): [7] Layerstack set to 7 for virtual:dev.unifieddesktop.app,10476,phase5-desktop,4
+D/OplusMirageDisplaySecureSurfaceManager( 2200): 
+device:[id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4,stack=7] 
+surface:Surface(name=android.graphics.SurfaceTexture@53902bd mNativeObject=-5476376667189555200)/@0x2eaf6ea
+I/MultiDisplayRefreshRateManagerExtImpl( 2200): onDisplayAdded, mDecreaseRefreshRate = false, displayId: 7, uniquedId: 
+virtual:dev.unifieddesktop.app,10476,phase5-desktop,4, currentMode:-1
+D/DisplayContentExtImpl( 2200):  initOplusRefreshRatePolicy DEFAULT_DISPLAY support refresh switch dc=Display{#7 
+state=ON size=1920x1080 ROTATION_0},displayinfo=DisplayInfo{"phase5-desktop", displayId 7, displayGroupId 0, 
+FLAG_PRIVATE, real 1920 x 1080, largest app 1920 x 1080, smallest app 1920 x 1080, appVsyncOff 0, presDeadline 
+16666666, mode 7, renderFrameRate 60.0, hasArrSupport false, frameRateCategoryRate null, supportedRefreshRates [], 
+defaultMode 7, userPreferredModeId -1, supportedModes [{id=7, width=1920, height=1080, fps=60.0, vsync=60.0, 
+synthetic=false, alternativeRefreshRates=[], supportedHdrTypes=[]}], appsSupportedModes [{id=7, width=1920, 
+height=1080, fps=60.0, vsync=60.0, synthetic=false, alternativeRefreshRates=[], supportedHdrTypes=[]}], 
+hdrCapabilities null, isForceSdr false, userDisabledHdrTypes [], minimalPostProcessingSupported false, rotation 0, 
+state ON, committedState UNKNOWN, type VIRTUAL, uniqueId "virtual:dev.unifieddesktop.app,10476,phase5-desktop,4", app 
+1920 x 1080, density 240 (240.0 x 240.0) dpi, layerStack 7, colorMode 0, supportedColorModes [0], deviceProductInfo 
+null, owner dev.unifieddesktop.app (uid 10476), removeMode 1, refreshRateOverride 60.0, brightnessMinimum 0.0, 
+brightnessMaximum 1.0, brightnessDefault 0.0, brightnessDim -1.0, installOrientation ROTATION_0, 
+layoutLimitedRefreshRate null, hdrSdrRatio not_available, backlightType 0, thermalRefreshRateThrottling {}, 
+thermalBrightnessThrottlingDataId default, canHostTasks false}
+D/DisplayContentExtImpl( 2200):  initOplusRefreshRatePolicy DEFAULT_DISPLAY support refresh switch dc=Display{#7 
+state=ON size=1920x1080 ROTATION_0},displayinfo=DisplayInfo{"phase5-desktop", displayId 7, displayGroupId 0, 
+FLAG_PRIVATE, real 1920 x 1080, largest app 1920 x 1080, smallest app 1920 x 1080, appVsyncOff 0, presDeadline 
+16666666, mode 7, renderFrameRate 60.0, hasArrSupport false, frameRateCategoryRate null, supportedRefreshRates [], 
+defaultMode 7, userPreferredModeId -1, supportedModes [{id=7, width=1920, height=1080, fps=60.0, vsync=60.0, 
+synthetic=false, alternativeRefreshRates=[], supportedHdrTypes=[]}], appsSupportedModes [{id=7, width=1920, 
+height=1080, fps=60.0, vsync=60.0, synthetic=false, alternativeRefreshRates=[], supportedHdrTypes=[]}], 
+hdrCapabilities null, isForceSdr false, userDisabledHdrTypes [], minimalPostProcessingSupported false, rotation 0, 
+state ON, committedState UNKNOWN, type VIRTUAL, uniqueId "virtual:dev.unifieddesktop.app,10476,phase5-desktop,4", app 
+1920 x 1080, density 240 (240.0 x 240.0) dpi, layerStack 7, colorMode 0, supportedColorModes [0], deviceProductInfo 
+null, owner dev.unifieddesktop.app (uid 10476), removeMode 1, refreshRateOverride 60.0, brightnessMinimum 0.0, 
+brightnessMaximum 1.0, brightnessDefault 0.0, brightnessDim -1.0, installOrientation ROTATION_0, 
+layoutLimitedRefreshRate null, hdrSdrRatio not_available, backlightType 0, thermalRefreshRateThrottling {}, 
+thermalBrightnessThrottlingDataId default, canHostTasks false}
+I/DisplayManagerServiceExtImpl( 2200): handle logical display changed logicalDisplay=id=7,stack=7,content=false,display
+Info{stack=7,type=5,id=7,uId=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4,state=ON,pkg=dev.unifieddesktop.app}
+I/DisplayManagerServiceExtImpl( 2200): handle logical display changed logicalDisplay=id=7,stack=7,content=false,display
+Info{stack=7,type=5,id=7,uId=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4,state=ON,pkg=dev.unifieddesktop.app}
+D/DisplayDevice( 2200): setLayerStackLocked id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4 
+token=android.os.BinderProxy@eedded5 stack=7->7
+D/BufferQueueProducer( 1717): [VDS: phase5-desktop](id:6b500000005,api:1,p:1717,c:1717) connect: api=1 
+producerControlledByApp=false
+I/Phase5  (14682): presentation shown on display 7
+D/DisplayDevice( 2200): setLayerStackLocked id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4 
+token=android.os.BinderProxy@eedded5 stack=7->7
+D/SurfaceFlinger( 1717): VDS-phase5-desktop: dequeueBuffer cpid=14682
+I/Phase5  (14682): output format changed csd=30 B
+D/DisplayDevice( 2200): setLayerStackLocked id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4 
+token=android.os.BinderProxy@eedded5 stack=7->7
+V/VirtualDisplayAdapter( 2200): Release VirtualDisplay phase5-desktop
+D/SurfaceFlinger( 1717): Destroying virtual display: phase5-desktop
+I/DisplayDeviceRepository( 2200): Display device removed: DisplayDeviceInfo{"phase5-desktop": 
+uniqueId="virtual:dev.unifieddesktop.app,10476,phase5-desktop,4", 1920 x 1080, modeId 7, renderFrameRate 60.0, 
+hasArrSupport false, frameRateCategoryRate null, supportedRefreshRates [], defaultModeId 7, userPreferredModeId -1, 
+supportedModes [{id=7, width=1920, height=1080, fps=60.0, vsync=60.0, synthetic=false, alternativeRefreshRates=[], 
+supportedHdrTypes=[]}], colorMode 0, supportedColorModes [0], hdrCapabilities null, isForceSdr false, allmSupported 
+false, gameContentTypeSupported false, density 240, 240.0 x 240.0 dpi, appVsyncOff 0, presDeadline 16666666, touch 
+NONE, rotation 0, type VIRTUAL, deviceProductInfo null, state ON, committedState UNKNOWN, owner dev.unifieddesktop.app 
+(uid 10476), frameRateOverride , brightnessMinimum 0.0, brightnessMaximum 1.0, brightnessDefault 0.0, brightnessDim 
+-1.0, hdrSdrRatio NaN, FLAG_PRIVATE, FLAG_NEVER_BLANK, FLAG_OWN_CONTENT_ONLY, installOrientation 0, displayShape 
+DisplayShape{ spec=729782573 displayWidth=1920 displayHeight=1080 physicalPixelDisplaySizeRatio=1.0 rotation=0 
+offsetX=0 offsetY=0 scale=1.0}}
+W/LogicalDisplay( 2200): setPrimaryDisplayDeviceLocked device 
+changed:[id=virtual:dev.unifieddesktop.app,10476,phase5-desktop,4,stack=7]->null
+W/Phase5  (14682): eglSwapBuffers failed 0x300d
+D/BufferQueueConsumer( 1717): [VDS: phase5-desktop](id:6b500000005,api:1,p:1717,c:1717) disconnect
+D/BufferQueueProducer( 1717): [VDS: phase5-desktop](id:6b500000005,api:1,p:1717,c:1717) disconnect: api 1
+
+

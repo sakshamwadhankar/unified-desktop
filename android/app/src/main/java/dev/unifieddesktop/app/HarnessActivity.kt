@@ -59,6 +59,11 @@ class HarnessActivity : Activity() {
 
     override fun onNewIntent(i: Intent?) { super.onNewIntent(i); maybeRunGuestFromIntent(i) }
 
+    // Phase 5: the video surface is a Presentation, which needs a real UI Context.
+    override fun onResume() { super.onResume(); Phase5Host.attach(this) }
+
+    override fun onPause() { Phase5Host.detach(this); super.onPause() }
+
     private fun buildUi() {
         val box = LinearLayout(this); box.orientation = LinearLayout.VERTICAL; box.setPadding(24,24,24,24)
         status = TextView(this); status.text = "Phase 1 harness"; box.addView(status)

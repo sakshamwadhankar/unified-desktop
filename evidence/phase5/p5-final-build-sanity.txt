@@ -1,0 +1,23 @@
+# Final committed build, Wi-Fi, 2026-10-19 02:23: 10 samples + held-key check.
+run final addr=192.168.1.16:47600 started 2026-10-19 02:22:50
+--- step wait:3 at 02:22:50
+waited 3 s
+
+--- step lat:10 at 02:22:53
+sample 1: 140.1 ms
+sample 2: 132.4 ms
+sample 3: 142.5 ms
+sample 4: 157.4 ms
+sample 5: 124.4 ms
+sample 6: 116.9 ms
+sample 7: 117.3 ms
+sample 8: 135.2 ms
+sample 9: 122.7 ms
+sample 10: 113.1 ms
+LATENCY n=10 p50=124.4 p95=157.4 min=113.1 max=157.4 ms timeouts=0 skipped=0
+
+
+--- step p5text at 02:23:00
+1792356783839 P5TEXT P5 text=(typed text omitted) keysDown=0 buttonsDown=0 keysAllTime=12 buttonsAllTime=0 keysReleasedByReleaseAll=0 buttonsReleasedByReleaseAll=0 sent=713 dropped=0 inApplied=25
+
+

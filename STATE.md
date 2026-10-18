@@ -6,46 +6,23 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 4 of 13 **CLOSED, PASS** (manager verified 2026-10-19 00:55; D17: Wi-Fi + USB
-  tethering on the real phone, AOA moved to its own round). Next: Phase 5 (Video + input).
-  Phases 1-3 CLOSED, PASS (records:
-  `docs/PHASE1_RESULT.md`, `PHASE2_RESULT.md`, `PHASE3_RESULT.md`). **Phase 4 (Connection),
-  every row labelled by where it ran:**
-  - item 6 emulator dev path PASS (adb forward): RTT p50 0.96 / p95 1.68 / p99 2.73 ms,
-    32.10 MB/s over 5 s.
-  - item 7 phone Wi-Fi PASS: real POST_NOTIFICATIONS dialog + user-path start; discovery from
-    scratch works (`mdns: answer via 192.168.1.13`; root cause: unbound multicast left via
-    WARP - fixed by probing each local IPv4 as the socket source); fresh pairing 038762 (a
-    person pressed Yes, B-044); silent reconnect; bench 8.68 MB/s, p50 14.88 ms.
-  - item 8 phone USB AOA **NOT PROVEN tonight** (not a NO-GO): the probe covered only the
-    debugging-ON state and WinUSB-bound interfaces; 51/52/53 are endpoint-0 device requests
-    (any handle suffices) and UsbDk is an untested signed detach route; next round =
-    SKIPS.md "AOA round" (one owner UAC); B-043.
-  - item 9 phone USB tethering PASS: 8.92 MB/s, p50 4.06 ms, silent reconnect; the routing
-    rule needed ONE owner UAC (RNDIS metric 25 < Wi-Fi 30 stole the default route; pinned
-    9999 in the active store only, nothing installed); tethering OFF at the end, no residue.
-  - item 10 phone failover PASS: PC-side pull (elevated helper, one UAC) - the PC noticed the
-    dead link in 0.7 s; the phone closed it ~23.5 s after the last frame (watchdog missed the
-    15 s rule; B-046); Wi-Fi hop 11.46 MB/s; back over the re-enabled tether 12.08 MB/s.
-  - item 11 no-adb / no-developer-mode proof: code-only, SKIPS.md "No-adb proof".
-  - item 12 build gates green (2026-10-18 22:04): `:app:testDebugUnitTest :app:lintDebug
-    :app:assembleDebug` OK (lint 0 errors); `cargo test --release` green then, 25/25 after
-    the B-045 fix + AOA-triple tests, clippy clean.
-  - item 13 close-out: docs updated (`PHASE4_RESULT.md` 7/9/10/11, ARCHITECTURE H2/P4/Q5/Q6,
-    BUGS B-043/B-046, SKIPS "AOA round", THIRD_PARTY UsbDk row); cleanup verified (tethering
-    off, no routes/driver residue, gradle daemon stopped, `svc power stayon false`, WARP +
-    firewall + Wi-Fi profile untouched, 47600 listeners 0, link service stopped via the
-    app's own Stop link button).
-  Numbers table + method: `docs/PHASE4_RESULT.md` §11. Fastest link on this pair: USB
-  tethering (~4x lower RTT than Wi-Fi; 8.9-12.1 vs 8.7-11.5 MB/s).
-- **Last updated:** 2026-10-19 00:47, agent, Phase-4 close-out round (items 7-10 + 13 on
-  2c0f6edc). New this round: the PC pair-wait read tick (B-045, fixed), AOA ADB-triple
-  hardening, the mdns multi-adapter discovery fix; B-043 rewritten to NOT PROVEN + Q5
-  evidence, B-046 added (dead-link watchdog), B-044 (Yes-press forensics). All of it is committed by the manager
-  (Phase 4 close-out commit).
-- **Next action:** Phase 5 (Video + input). Manager decisions on the Phase-4 bugs are in
-  BUGS.md (B-043 AOA round later; B-044 fix in Phase 5; B-027/B-033/B-035/B-046 Phase 10).
-  Owner check still open: the 5-step no-developer-mode check (SKIPS.md "No-adb proof").
+- **Phase:** 5 of 13 **CLOSED, PASS** (2026-10-19 02:28, real phone 2c0f6edc). Phases 1-4
+  CLOSED, PASS (records: `docs/PHASE1_RESULT.md` ... `PHASE4_RESULT.md`; Phase 4 = Wi-Fi +
+  USB tethering, AOA moved to its own round, D17). Next: Phase 6 (Desktop shell), not started.
+- **Phase 5 (Video + input), phone:** the phone's 1920x1080 desktop surface shows full screen
+  on the PC; hardware encode `c2.qti.avc.encoder` and hardware decode (MF H.264 MFT on D3D11,
+  Intel UHD); mouse, drag and keyboard (incl. Shift) work on real Android views. ~57 fps
+  moving and dragging (paced at 60). Typing latency p50/p95: Wi-Fi 122.7/172.9 ms, USB
+  tethering 106.5/148.8 ms (n=50 each; target 80 ms -> Phase 12, B-051). Stuck keys: 0 after
+  300 fast keys + 30 drags. Our CPU 130-151 %, PSS ~186 MB. Record: `docs/PHASE5_RESULT.md`.
+  The agent built the pipeline (to 01:51); every free model then hit its usage limit and the
+  manager finished the phase overnight on the owner's instruction (fixes B-052..B-055).
+- **Last updated:** 2026-10-19 02:28, manager (Phase 5 close). Phone settings restored
+  (stayon 0, brightness 2047), link stopped by the app's button, tethering off, laptop routes
+  on Wi-Fi only, WARP untouched.
+- **Next action:** owner review of Phase 5; Phase 6 prompt only when the owner asks. Open
+  owner items: the AOA round (SKIPS, one UAC click + USB debugging off) and the 5-step
+  no-developer-mode check (SKIPS "No-adb proof"). Phase 6 carry-overs are in SKIPS.
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app

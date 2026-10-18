@@ -46,11 +46,17 @@ pub fn channel_name(ch: u8) -> &'static str {
 pub struct Message {
     pub channel: u8,
     pub payload: Vec<u8>,
+    /// Frame flags this message carries (Phase 5: MORE_FOLLOWS reassembly, keep-alive).
+    pub flags: u8,
     pub offset: usize,
 }
 
 impl Message {
     pub fn new(channel: u8, payload: Vec<u8>) -> Result<Self, &'static str> {
+        Message::with_flags(channel, payload, 0)
+    }
+
+    pub fn with_flags(channel: u8, payload: Vec<u8>, flags: u8) -> Result<Self, &'static str> {
         if !matches!(channel, CH_CONTROL | CH_INPUT | CH_VIDEO | CH_BENCH) {
             return Err("unknown channel");
         }
@@ -60,6 +66,7 @@ impl Message {
         Ok(Message {
             channel,
             payload,
+            flags,
             offset: 0,
         })
     }
@@ -107,7 +114,7 @@ impl FrameDecoder {
             }
             let version = self.buf[0];
             let channel = self.buf[1];
-            let _flags = self.buf[2];
+            let flags = self.buf[2];
             let len = u32::from_be_bytes([self.buf[4], self.buf[5], self.buf[6], self.buf[7]])
                 as usize;
             if version != PROTOCOL_VERSION {
@@ -121,7 +128,7 @@ impl FrameDecoder {
             }
             let payload = self.buf[HEADER_LEN..HEADER_LEN + len].to_vec();
             self.buf.drain(..HEADER_LEN + len);
-            match Message::new(channel, payload) {
+            match Message::with_flags(channel, payload, flags) {
                 Ok(m) => out.push(m),
                 Err(e) => return Err(e.to_string()),
             }
@@ -181,11 +188,12 @@ impl<W: Write> PriorityWriter<W> {
                 let Some(m) = queue.front() else { continue };
                 let start = m.offset;
                 let end = (m.offset + MAX_FRAME_PAYLOAD).min(m.payload.len());
-                let flags = if end < m.payload.len() {
-                    FLAG_MORE_FOLLOWS
-                } else {
-                    0
-                };
+                let flags = m.flags
+                    | if end < m.payload.len() {
+                        FLAG_MORE_FOLLOWS
+                    } else {
+                        0
+                    };
                 encode_frame(ch, flags, &m.payload[start..end]).map_err(io::Error::other)?
             };
             let n = self.inner.write(&frame)?;

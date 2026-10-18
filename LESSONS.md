@@ -9,6 +9,13 @@ these facts.** Re-verify anything critical: Android changes.
   7.5 GB RAM, Android 16 (SDK 36), OEM skin based on ColorOS, 4 KB pages, adb serial
   `2c0f6edc`. USB 2.0, no video output over USB-C.
 - Lower-end than most target phones: its numbers are a floor.
+- **After every `adb install`, the OEM "phone manager" (`com.oplus.phonemanager`) shows a
+  security-scan dialog for our debug app** ("This app may lead to serious risks...", buttons
+  Ignore / Fix now), often 3-10 s after the install. It covers our app until dismissed.
+  Tap **Ignore**; "Fix now" may remove the app. Poll for it after installs (2026-10-19).
+- The test phone has a PIN. If its screen turns off, it locks and adb cannot use the UI.
+  Overnight runs keep `svc power stayon usb` on (restore it after) and never send
+  KEYCODE_POWER or KEYCODE_SLEEP.
 
 ## 2. Android rules that shape the design
 
@@ -69,12 +76,29 @@ these facts.** Re-verify anything critical: Android changes.
   never isolated the cause. Measure each stage separately from day one: input send, app
   reaction, encode, transport, decode.
 - Window screenshots on Windows that include GPU content: `PrintWindow` with flag 2.
+- **Never feed the hardware encoder faster than it drains (Phase 5, measured).** A GL
+  compositor that drew on every virtual-display frame plus a forced redraw per input event
+  (~84 fps) kept the encoder's input queue full: ~200 ms from draw to encoder output, typing
+  latency 290 ms. Pacing to 60 fps, latching every queued SurfaceTexture buffer per draw
+  (`updateTexImage` takes the OLDEST queued buffer) and no redraw on input gave 143 ms.
+- `c2.qti.avc.encoder` lists `vendor.qti-ext-enc-low-latency.enable` in
+  `supportedVendorParameters` (API 31+); setting it to 1 took the encoder stage from ~65 to
+  ~45 ms (typing latency 143 -> ~120 ms).
+- A control message that reports on a video frame arrives BEFORE that frame (control outranks
+  video on the link). Match it to the frame when the frame arrives.
 
 ## 4. Measurement methods that worked
 
 - **Input latency:** the app flashes the screen white on each key; the test presses a key on
   the PC and polls the receiver window's brightness (PrintWindow) until it flips. Make sure
   the receiver window keeps focus during the test (validate it first).
+  Phase 5 version that worked: press the key with `keybd_event` only while the receiver owns
+  the foreground window (check before every press: a stray key would go to another app), and
+  poll a small patch of the flash area with `CopyFromScreen` from a per-monitor-DPI-aware
+  thread (physical pixels) every 1-3 ms. PrintWindow can serve a stale flip-model frame.
+  Per stage: the phone reports receive / dispatch / drawn / encoded for the frame that first
+  shows the flash; the PC joins it with that frame's receive and present times through the
+  control-channel clock sync.
 - **A/V offset:** a flash and a beep at the same moment; record the receiver window's
   brightness and the PC's speaker loopback on one clock (`time.perf_counter`); offset =
   flash time - beep time. Measure on a **moving** screen: an idle screen sends few frames and

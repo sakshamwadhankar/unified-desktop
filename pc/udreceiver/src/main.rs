@@ -1,17 +1,19 @@
 //! unified-desktop Phase-4 PC receiver skeleton (D16: Rust).
 //! Usage:
-//!   udrxcb discover [--seconds <s>] [--to <ip[:port]>]  mDNS browse for the phone (item 7)
-//!   udrxcb pair --addr <ip:port|auto> [--label <label>]  first pair (6-digit code compare)
-//!   udrxcb bench --addr <ip:port|auto> [--seconds <s>]   RTT + throughput against a paired phone
-//!   udrxcb trust list | trust forget <fpr-prefix>       the trusted-phone store
+//!   udreceiver discover [--seconds <s>] [--to <ip[:port]>]  mDNS browse for the phone (item 7)
+//!   udreceiver pair --addr <ip:port|auto> [--label <label>]  first pair (6-digit code compare)
+//!   udreceiver bench --addr <ip:port|auto> [--seconds <s>]   RTT + throughput against a paired phone
+//!   udreceiver trust list | trust forget <fpr-prefix>       the trusted-phone store
 //! The phone side runs the same protocol (Phase4LinkService in the Android app).
 
 #[cfg(windows)]
 mod aoa;
 mod crypto;
 mod mdns;
+mod phase5;
 mod protocol;
 mod session;
+mod view;
 
 use std::process::ExitCode;
 
@@ -29,6 +31,7 @@ fn main() -> ExitCode {
         "aoa" => cmd_aoa(&args[2..]),
         "pair" => cmd_pair(&args[2..]),
         "bench" => cmd_bench(&args[2..]),
+        "view" => cmd_view(&args[2..]),
         "trust" => cmd_trust(&args[2..]),
         "--help" | "-h" | "help" => {
             print_usage();
@@ -53,11 +56,13 @@ fn flag(args: &[String], name: &str, default: &str) -> String {
 
 fn print_usage() {
     println!(
-        "usage:\n  udrxcb discover [--seconds <s>] [--to <ip[:port]>]\n  \
-         udrxcb aoa list | probe | start [--vid <hex>]      (Windows host, item 8)\n  \
-         udrxcb pair --addr <ip:port|auto> [--label <label>]\n  \
-         udrxcb bench --addr <ip:port|auto> [--seconds <s>] [--window-kib <n>]\n  \
-         udrxcb trust list\n  udrxcb trust forget <fpr-prefix>"
+        "usage:\n  udreceiver discover [--seconds <s>] [--to <ip[:port]>]\n  \
+         udreceiver aoa list | probe | start [--vid <hex>]      (Windows host, item 8)\n  \
+         udreceiver pair --addr <ip:port|auto> [--label <label>]\n  \
+         udreceiver bench --addr <ip:port|auto> [--seconds <s>] [--window-kib <n>]\n  \
+         udreceiver view --addr <ip:port|auto> [--seconds <s>] [--soft]   full-screen desktop \
+         (Esc quits, F11 windowed)\n  \
+         udreceiver trust list\n  udreceiver trust forget <fpr-prefix>"
     );
 }
 
@@ -83,7 +88,7 @@ fn cmd_aoa(rest: &[String]) -> ExitCode {
         "probe" => ExitCode::from(u8::from(!aoa::cmd_probe(&vid))),
         "start" => ExitCode::from(u8::from(!aoa::cmd_start(&vid))),
         _ => {
-            eprintln!("usage: udrxcb aoa list | probe | start [--vid <hex>]");
+            eprintln!("usage: udreceiver aoa list | probe | start [--vid <hex>]");
             ExitCode::from(2)
         }
     }
@@ -227,8 +232,30 @@ fn cmd_bench(rest: &[String]) -> ExitCode {
     }
 }
 
-fn cmd_trust(rest: &[String]) -> ExitCode {
+/// `view`: the Phase-5 full-screen desktop session (hardware H.264 decode + input capture).
+fn cmd_view(rest: &[String]) -> ExitCode {
+    let addr = match resolve_addr(rest) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("--addr: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let seconds: u64 = flag(rest, "--seconds", "0").parse().unwrap_or(0);
+    let soft = rest.iter().any(|a| a == "--soft");
+    let id = ident();
     let store = TrustedPhoneStore::open();
+    crypto::ensure_ring_default();
+    match view::run(&addr, seconds, soft, &id, &store) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("VIEW FAILED: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_trust(rest: &[String]) -> ExitCode {    let store = TrustedPhoneStore::open();
     match rest.first().map(|s| s.as_str()) {
         Some("list") => {
             let rows = store.entries();

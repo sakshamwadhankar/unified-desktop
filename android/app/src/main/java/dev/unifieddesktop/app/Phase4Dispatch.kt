@@ -75,6 +75,15 @@ object Phase4Dispatch {
                     )
                     "aoa-check" -> Phase4Aoa.check(ctx)
                     "aoa-open" -> Phase4Aoa.openFirst(ctx)
+                    "p5test" -> ctx.startService(
+                        Intent(ctx, Phase4LinkService::class.java)
+                            .setAction(Phase4LinkService.ACTION_P5TEST)
+                            .putExtra("seconds", arg.toIntOrNull() ?: 12)
+                    )
+                    "p5text" -> Phase4Log.say(
+                        ctx,
+                        "P5TEXT ${Phase5Dispatch.lastText()}"
+                    )
                     else -> Phase4Log.say(ctx, "PHASE4X unknown [$what]")
                 }
             } catch (t: Throwable) {

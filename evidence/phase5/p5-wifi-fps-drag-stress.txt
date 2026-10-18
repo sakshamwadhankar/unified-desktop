@@ -1,0 +1,192 @@
+# Wi-Fi, phone 2c0f6edc, 2026-10-19 02:11-02:14. Steps: 30 s moving (fps), 50 latency samples (that block was lost to an output filter; re-run in p5-wifi-latency.txt), 30 s drag, stuck-key stress (300 fast keys incl. Shift + 30 fast drags), phone held-key check.
+Step output (from the manager console at run time): "drag: 1948 moves in 30 s"; "stress: 300 key presses, 30 drags".
+Phone held-key check after the stress, copied from the phone's own p4.log:
+1792356193717 P5TEXT P5 text=(typed text omitted) keysDown=0 buttonsDown=0 keysAllTime=418 buttonsAllTime=31 keysReleasedByReleaseAll=0 buttonsReleasedByReleaseAll=0 sent=6275 dropped=0 inApplied=2267
+## receiver VSTAT (one line per second) and decode path
+[p5pc] reconnected silently to pinned phone B20B88AFAB081BF1 (192.168.1.16:47600)
+[p5pc] adapter: Intel(R) UHD Graphics (video processor: yes)
+[p5pc] swap chain: FLIP_DISCARD BGRA8 bufs=2 max-frame-latency=1
+[p5pc] CODECAPI_AVLowLatencyMode = 1 (VT_UI4)
+[p5pc] decoder: MS H.264 MFT d3d11=true provides_samples=true NV12 1920x1080
+[p5pc] DECODE hardware=true path=D3D11 NV12 surface
+[p5pc] VSTAT fps=32.0 presented=32 decoded=32 dropped=3 rx=3074kbit/s decode=5.89ms seq=41 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=90 decoded=90 dropped=3 rx=2474kbit/s decode=3.74ms seq=99 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=147 decoded=147 dropped=3 rx=1800kbit/s decode=3.68ms seq=156 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=204 decoded=204 dropped=3 rx=2298kbit/s decode=3.76ms seq=213 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=260 decoded=260 dropped=3 rx=2684kbit/s decode=3.90ms seq=269 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=318 decoded=318 dropped=3 rx=2668kbit/s decode=3.81ms seq=327 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=375 decoded=375 dropped=3 rx=1713kbit/s decode=3.64ms seq=384 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=432 decoded=432 dropped=3 rx=2109kbit/s decode=3.87ms seq=441 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=489 decoded=489 dropped=3 rx=2598kbit/s decode=3.75ms seq=498 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=546 decoded=546 dropped=3 rx=2633kbit/s decode=3.78ms seq=555 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=603 decoded=603 dropped=3 rx=2095kbit/s decode=3.76ms seq=612 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=661 decoded=661 dropped=3 rx=2201kbit/s decode=3.78ms seq=670 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=718 decoded=718 dropped=3 rx=2512kbit/s decode=3.76ms seq=727 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=775 decoded=775 dropped=3 rx=2641kbit/s decode=3.82ms seq=784 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=832 decoded=832 dropped=3 rx=2451kbit/s decode=3.73ms seq=841 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=889 decoded=889 dropped=3 rx=1732kbit/s decode=3.73ms seq=898 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=946 decoded=946 dropped=3 rx=2270kbit/s decode=3.85ms seq=955 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=1004 decoded=1004 dropped=3 rx=2606kbit/s decode=3.85ms seq=1013 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=1061 decoded=1061 dropped=3 rx=2550kbit/s decode=3.74ms seq=1070 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=1118 decoded=1118 dropped=3 rx=1885kbit/s decode=3.76ms seq=1127 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=1175 decoded=1175 dropped=3 rx=2027kbit/s decode=3.75ms seq=1184 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=1233 decoded=1233 dropped=3 rx=2887kbit/s decode=3.84ms seq=1242 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=1290 decoded=1290 dropped=3 rx=2721kbit/s decode=3.71ms seq=1299 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=1347 decoded=1347 dropped=3 rx=2273kbit/s decode=3.71ms seq=1356 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=1404 decoded=1404 dropped=3 rx=1917kbit/s decode=3.66ms seq=1413 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=1462 decoded=1462 dropped=3 rx=2319kbit/s decode=3.82ms seq=1471 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=1519 decoded=1519 dropped=3 rx=2597kbit/s decode=3.85ms seq=1528 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=1575 decoded=1575 dropped=3 rx=2599kbit/s decode=3.91ms seq=1584 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=1633 decoded=1633 dropped=3 rx=1856kbit/s decode=3.88ms seq=1642 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=1690 decoded=1690 dropped=3 rx=1884kbit/s decode=3.77ms seq=1699 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=1747 decoded=1747 dropped=3 rx=2635kbit/s decode=3.77ms seq=1756 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=1805 decoded=1805 dropped=3 rx=2636kbit/s decode=3.84ms seq=1814 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=1862 decoded=1862 dropped=3 rx=2292kbit/s decode=3.75ms seq=1871 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=1919 decoded=1919 dropped=3 rx=1881kbit/s decode=3.73ms seq=1928 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=1976 decoded=1976 dropped=3 rx=2526kbit/s decode=3.80ms seq=1985 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=2034 decoded=2034 dropped=3 rx=2658kbit/s decode=3.78ms seq=2043 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=2091 decoded=2091 dropped=3 rx=2202kbit/s decode=3.83ms seq=2100 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=2148 decoded=2148 dropped=3 rx=1890kbit/s decode=3.69ms seq=2157 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=2205 decoded=2205 dropped=3 rx=2205kbit/s decode=3.80ms seq=2214 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=2262 decoded=2262 dropped=3 rx=2649kbit/s decode=3.69ms seq=2271 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=2318 decoded=2318 dropped=3 rx=2499kbit/s decode=3.71ms seq=2327 d3d11=true
+[p5pc] VSTAT fps=59.0 presented=2377 decoded=2377 dropped=3 rx=1948kbit/s decode=3.72ms seq=2386 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=2433 decoded=2433 dropped=3 rx=2270kbit/s decode=3.65ms seq=2442 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=2490 decoded=2490 dropped=3 rx=2390kbit/s decode=3.89ms seq=2499 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=2548 decoded=2548 dropped=3 rx=2553kbit/s decode=3.87ms seq=2557 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=2605 decoded=2605 dropped=3 rx=2098kbit/s decode=3.71ms seq=2614 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=2662 decoded=2662 dropped=3 rx=1802kbit/s decode=3.74ms seq=2671 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=2719 decoded=2719 dropped=3 rx=2255kbit/s decode=3.84ms seq=2728 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=2775 decoded=2775 dropped=3 rx=2498kbit/s decode=3.70ms seq=2784 d3d11=true
+[p5pc] VSTAT fps=59.0 presented=2834 decoded=2834 dropped=3 rx=2522kbit/s decode=3.85ms seq=2843 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=2890 decoded=2890 dropped=3 rx=1811kbit/s decode=3.86ms seq=2899 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=2947 decoded=2947 dropped=3 rx=1869kbit/s decode=3.68ms seq=2956 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=3005 decoded=3005 dropped=3 rx=2556kbit/s decode=3.75ms seq=3014 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=3062 decoded=3062 dropped=3 rx=2888kbit/s decode=3.70ms seq=3071 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=3119 decoded=3119 dropped=3 rx=2024kbit/s decode=3.66ms seq=3128 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=3176 decoded=3176 dropped=3 rx=1610kbit/s decode=3.79ms seq=3185 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=3234 decoded=3234 dropped=3 rx=2476kbit/s decode=3.80ms seq=3243 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=3292 decoded=3292 dropped=3 rx=2599kbit/s decode=3.71ms seq=3301 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=3348 decoded=3348 dropped=3 rx=2143kbit/s decode=3.64ms seq=3357 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=3405 decoded=3405 dropped=3 rx=1521kbit/s decode=3.74ms seq=3414 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=3463 decoded=3463 dropped=3 rx=2304kbit/s decode=3.70ms seq=3472 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=3520 decoded=3520 dropped=3 rx=2464kbit/s decode=3.70ms seq=3529 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=3577 decoded=3577 dropped=3 rx=2386kbit/s decode=3.74ms seq=3586 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=3634 decoded=3634 dropped=3 rx=2216kbit/s decode=3.77ms seq=3643 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=3691 decoded=3691 dropped=3 rx=1769kbit/s decode=3.71ms seq=3700 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=3748 decoded=3748 dropped=3 rx=3384kbit/s decode=3.76ms seq=3757 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=3805 decoded=3805 dropped=3 rx=3273kbit/s decode=3.80ms seq=3814 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=3862 decoded=3862 dropped=3 rx=3334kbit/s decode=3.71ms seq=3871 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=3919 decoded=3919 dropped=3 rx=2692kbit/s decode=3.67ms seq=3928 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=3976 decoded=3976 dropped=3 rx=3242kbit/s decode=3.80ms seq=3985 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=4034 decoded=4034 dropped=3 rx=3238kbit/s decode=3.81ms seq=4043 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=4091 decoded=4091 dropped=3 rx=3329kbit/s decode=3.92ms seq=4100 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=4147 decoded=4147 dropped=3 rx=2386kbit/s decode=3.74ms seq=4156 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=4204 decoded=4204 dropped=3 rx=2944kbit/s decode=3.76ms seq=4213 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=4262 decoded=4262 dropped=3 rx=4052kbit/s decode=3.82ms seq=4271 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=4319 decoded=4319 dropped=3 rx=3144kbit/s decode=3.80ms seq=4328 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=4376 decoded=4376 dropped=3 rx=2880kbit/s decode=3.70ms seq=4385 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=4434 decoded=4434 dropped=3 rx=2850kbit/s decode=3.80ms seq=4443 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=4491 decoded=4491 dropped=3 rx=3441kbit/s decode=3.76ms seq=4500 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=4548 decoded=4548 dropped=3 rx=3289kbit/s decode=3.85ms seq=4557 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=4605 decoded=4605 dropped=3 rx=3127kbit/s decode=3.88ms seq=4614 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=4661 decoded=4661 dropped=3 rx=2330kbit/s decode=3.75ms seq=4670 d3d11=true
+[p5pc] VSTAT fps=59.0 presented=4720 decoded=4720 dropped=3 rx=3002kbit/s decode=3.82ms seq=4729 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=4777 decoded=4777 dropped=3 rx=3441kbit/s decode=3.77ms seq=4786 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=4834 decoded=4834 dropped=3 rx=3826kbit/s decode=3.77ms seq=4843 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=4892 decoded=4892 dropped=3 rx=2454kbit/s decode=3.71ms seq=4901 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=4949 decoded=4949 dropped=3 rx=2842kbit/s decode=3.84ms seq=4958 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=5007 decoded=5007 dropped=3 rx=3469kbit/s decode=3.84ms seq=5016 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=5063 decoded=5063 dropped=3 rx=3326kbit/s decode=3.77ms seq=5072 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=5121 decoded=5121 dropped=3 rx=2996kbit/s decode=3.74ms seq=5130 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=5178 decoded=5178 dropped=3 rx=2611kbit/s decode=3.67ms seq=5187 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=5235 decoded=5235 dropped=3 rx=3278kbit/s decode=3.76ms seq=5244 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=5293 decoded=5293 dropped=3 rx=3314kbit/s decode=3.99ms seq=5302 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=5350 decoded=5350 dropped=3 rx=3370kbit/s decode=3.87ms seq=5359 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=5408 decoded=5408 dropped=3 rx=2752kbit/s decode=3.86ms seq=5417 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=5465 decoded=5465 dropped=3 rx=2289kbit/s decode=3.71ms seq=5474 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=5521 decoded=5521 dropped=3 rx=2541kbit/s decode=3.66ms seq=5530 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=5579 decoded=5579 dropped=3 rx=2710kbit/s decode=3.77ms seq=5588 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=5636 decoded=5636 dropped=3 rx=2221kbit/s decode=3.77ms seq=5645 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=5693 decoded=5693 dropped=3 rx=2113kbit/s decode=3.79ms seq=5702 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=5751 decoded=5751 dropped=3 rx=2702kbit/s decode=3.73ms seq=5760 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=5807 decoded=5807 dropped=3 rx=2770kbit/s decode=3.72ms seq=5816 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=5864 decoded=5864 dropped=3 rx=2467kbit/s decode=3.71ms seq=5873 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=5922 decoded=5922 dropped=3 rx=2185kbit/s decode=3.60ms seq=5931 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=5979 decoded=5979 dropped=3 rx=4768kbit/s decode=3.84ms seq=5988 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=6036 decoded=6036 dropped=3 rx=5281kbit/s decode=3.82ms seq=6045 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=6093 decoded=6093 dropped=3 rx=6462kbit/s decode=3.82ms seq=6102 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=6150 decoded=6150 dropped=3 rx=1541kbit/s decode=3.65ms seq=6159 d3d11=true
+[p5pc] VSTAT fps=59.0 presented=6209 decoded=6209 dropped=3 rx=1647kbit/s decode=3.69ms seq=6218 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=6266 decoded=6266 dropped=3 rx=2202kbit/s decode=3.69ms seq=6275 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=6323 decoded=6323 dropped=3 rx=2325kbit/s decode=3.74ms seq=6332 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=6381 decoded=6381 dropped=3 rx=1876kbit/s decode=3.79ms seq=6390 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=6438 decoded=6438 dropped=3 rx=1597kbit/s decode=3.78ms seq=6447 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=6494 decoded=6494 dropped=3 rx=2215kbit/s decode=3.84ms seq=6503 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=6552 decoded=6552 dropped=3 rx=2419kbit/s decode=3.68ms seq=6561 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=6609 decoded=6609 dropped=3 rx=2672kbit/s decode=3.81ms seq=6618 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=6666 decoded=6666 dropped=3 rx=1517kbit/s decode=3.77ms seq=6675 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=6723 decoded=6723 dropped=3 rx=1836kbit/s decode=3.77ms seq=6732 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=6780 decoded=6780 dropped=3 rx=2215kbit/s decode=3.85ms seq=6789 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=6837 decoded=6837 dropped=3 rx=2287kbit/s decode=3.79ms seq=6846 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=6895 decoded=6895 dropped=3 rx=1671kbit/s decode=3.64ms seq=6904 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=6951 decoded=6951 dropped=3 rx=1310kbit/s decode=3.75ms seq=6960 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=7009 decoded=7009 dropped=3 rx=2318kbit/s decode=3.67ms seq=7018 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=7066 decoded=7066 dropped=3 rx=2315kbit/s decode=3.73ms seq=7075 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=7123 decoded=7123 dropped=3 rx=1906kbit/s decode=3.81ms seq=7132 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=7180 decoded=7180 dropped=3 rx=1476kbit/s decode=3.66ms seq=7189 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=7237 decoded=7237 dropped=3 rx=2526kbit/s decode=3.78ms seq=7246 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=7295 decoded=7295 dropped=3 rx=2260kbit/s decode=3.74ms seq=7304 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=7352 decoded=7352 dropped=3 rx=2254kbit/s decode=3.80ms seq=7361 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=7410 decoded=7410 dropped=3 rx=1588kbit/s decode=3.71ms seq=7419 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=7467 decoded=7467 dropped=3 rx=1649kbit/s decode=3.88ms seq=7476 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=7524 decoded=7524 dropped=3 rx=2263kbit/s decode=3.74ms seq=7533 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=7581 decoded=7581 dropped=3 rx=2225kbit/s decode=3.71ms seq=7590 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=7638 decoded=7638 dropped=3 rx=1870kbit/s decode=3.75ms seq=7647 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=7695 decoded=7695 dropped=3 rx=1301kbit/s decode=3.69ms seq=7704 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=7752 decoded=7752 dropped=3 rx=2165kbit/s decode=3.68ms seq=7761 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=7810 decoded=7810 dropped=3 rx=2708kbit/s decode=3.94ms seq=7819 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=7866 decoded=7866 dropped=3 rx=2037kbit/s decode=3.78ms seq=7875 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=7924 decoded=7924 dropped=3 rx=1377kbit/s decode=3.79ms seq=7933 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=7981 decoded=7981 dropped=3 rx=1921kbit/s decode=3.94ms seq=7990 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=8038 decoded=8038 dropped=3 rx=2163kbit/s decode=3.76ms seq=8047 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=8095 decoded=8095 dropped=3 rx=2290kbit/s decode=3.84ms seq=8104 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=8152 decoded=8152 dropped=3 rx=1655kbit/s decode=3.79ms seq=8161 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=8210 decoded=8210 dropped=3 rx=1450kbit/s decode=3.88ms seq=8219 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=8267 decoded=8267 dropped=3 rx=2324kbit/s decode=3.73ms seq=8276 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=8324 decoded=8324 dropped=3 rx=2388kbit/s decode=3.82ms seq=8333 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=8381 decoded=8381 dropped=3 rx=2080kbit/s decode=3.78ms seq=8390 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=8438 decoded=8438 dropped=3 rx=1776kbit/s decode=3.93ms seq=8447 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=8495 decoded=8495 dropped=3 rx=2022kbit/s decode=3.75ms seq=8504 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=8553 decoded=8553 dropped=3 rx=2220kbit/s decode=3.90ms seq=8562 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=8610 decoded=8610 dropped=3 rx=2215kbit/s decode=3.72ms seq=8619 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=8666 decoded=8666 dropped=3 rx=1301kbit/s decode=3.68ms seq=8675 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=8724 decoded=8724 dropped=3 rx=1853kbit/s decode=3.80ms seq=8733 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=8781 decoded=8781 dropped=3 rx=2156kbit/s decode=3.69ms seq=8790 d3d11=true
+[p5pc] VSTAT fps=58.0 presented=8839 decoded=8839 dropped=3 rx=2297kbit/s decode=3.79ms seq=8848 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=8896 decoded=8896 dropped=3 rx=1792kbit/s decode=3.74ms seq=8905 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=8952 decoded=8952 dropped=3 rx=1412kbit/s decode=3.75ms seq=8961 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=9010 decoded=9010 dropped=3 rx=2680kbit/s decode=3.80ms seq=9019 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=9068 decoded=9068 dropped=3 rx=2266kbit/s decode=3.71ms seq=9077 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=9125 decoded=9125 dropped=3 rx=2167kbit/s decode=3.67ms seq=9134 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=9183 decoded=9183 dropped=3 rx=1417kbit/s decode=3.86ms seq=9192 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=9239 decoded=9239 dropped=3 rx=1776kbit/s decode=3.71ms seq=9248 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=9297 decoded=9297 dropped=3 rx=2154kbit/s decode=3.73ms seq=9306 d3d11=true
+[p5pc] VSTAT fps=57.0 presented=9354 decoded=9354 dropped=3 rx=2266kbit/s decode=3.70ms seq=9363 d3d11=true
+[p5pc] VSTAT fps=56.0 presented=9410 decoded=9410 dropped=3 rx=1538kbit/s decode=3.64ms seq=9419 d3d11=true
+[p5pc] VSTAT fps=58.9 presented=9469 decoded=9469 dropped=3 rx=1684kbit/s decode=3.66ms seq=9478 d3d11=true
+[p5pc] VSTAT fps=55.9 presented=9525 decoded=9525 dropped=3 rx=2256kbit/s decode=3.78ms seq=9534 d3d11=true
+[p5pc] VSTAT fps=57.9 presented=9583 decoded=9583 dropped=3 rx=2282kbit/s decode=3.77ms seq=9592 d3d11=true
+[p5pc] VSTAT fps=56.9 presented=9640 decoded=9640 dropped=3 rx=2347kbit/s decode=3.69ms seq=9649 d3d11=true
+## phone load during the run (our app processes: CPU % of one core summed, PSS, battery)
+02:11:17 ourCPU=0.0% PSS=107910kB level=5% temp=36.5C
+02:11:33 ourCPU=140.0% PSS=185420kB level=5% temp=36.5C
+02:11:49 ourCPU=130.0% PSS=186929kB level=5% temp=36.5C
+02:12:06 ourCPU=135.0% PSS=187857kB level=5% temp=36.5C
+02:12:22 ourCPU=140.0% PSS=187779kB level=5% temp=36.5C
+02:12:38 ourCPU=150.0% PSS=183192kB level=5% temp=36.5C
+02:12:55 ourCPU=151.0% PSS=183612kB level=5% temp=36.5C
+02:13:11 ourCPU=132.0% PSS=186225kB level=5% temp=36.6C
+02:13:27 ourCPU=143.0% PSS=185432kB level=5% temp=36.6C
+02:13:44 ourCPU=140.0% PSS=185271kB level=5% temp=36.6C
+

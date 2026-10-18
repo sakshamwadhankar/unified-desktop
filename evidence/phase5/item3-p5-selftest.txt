@@ -1,0 +1,145 @@
+
+1792352515445 P5TEST begin seconds=12
+1792352515454 P5 start video=true
+1792352515891 P5 desktop FAILED to start
+1792352515918 P5TEST start ok=false
+1792352516479 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352517481 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352518487 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352519490 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352520492 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352521494 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352522498 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352523500 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352524502 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352525504 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352526507 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352527509 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352527923 P5TEST sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352527924 P5 stop (self-test done) sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 
+desktop=down
+1792352527929 P5TEST end
+1792352573348 P5TEST begin seconds=4
+1792352573350 P5 start video=true
+1792352573351 P5 video DISABLED: no resumed Activity to host the Presentation
+1792352573352 P5TEST start ok=false
+1792352574351 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352575353 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352576355 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352577354 P5TEST sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352577356 P5 stop (self-test done) sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 
+desktop=down
+1792352577361 P5TEST end
+1792352621089 P5TEST begin seconds=10
+1792352621092 P5 start video=true
+1792352621278 P5 desktop FAILED to start
+1792352621303 P5TEST start ok=false
+1792352622093 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352623094 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352624097 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352625100 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352626103 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352627106 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352628108 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352629110 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352630112 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352631115 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352631304 P5TEST sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352631304 P5 stop (self-test done) sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 
+desktop=down
+1792352631307 P5TEST end
+1792352688359 P5TEST begin seconds=10
+1792352688381 P5 start video=true
+1792352688722 P5 desktop FAILED to start
+1792352688741 P5TEST start ok=false
+1792352689383 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352690387 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352691391 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352692399 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352693401 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352694402 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352695411 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352696412 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352697415 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352698416 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352698746 P5TEST sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352698747 P5 stop (self-test done) sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 
+desktop=down
+1792352698751 P5TEST end
+1792352738489 P5TEST begin seconds=10
+1792352738505 P5 start video=true
+1792352739506 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent=frames=0 draws=0 keyreq=0 dropped=0 inApplied=0 
+inDropped=0 desktop=down
+1792352740508 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent=frames=0 draws=0 keyreq=0 dropped=0 inApplied=0 
+inDropped=0 desktop=down
+1792352741509 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent=frames=0 draws=0 keyreq=0 dropped=0 inApplied=0 
+inDropped=0 desktop=down
+1792352742511 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent=frames=0 draws=0 keyreq=0 dropped=0 inApplied=0 
+inDropped=0 desktop=down
+1792352743512 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent=frames=0 draws=0 keyreq=0 dropped=0 inApplied=0 
+inDropped=0 desktop=down
+1792352743806 P5 desktop FAILED to start
+1792352743827 P5TEST start ok=false
+1792352744514 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352745515 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352746517 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352747519 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352748521 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352749523 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352750525 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352751526 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352752528 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352753529 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352753833 P5TEST sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 desktop=down
+1792352753834 P5 stop (self-test done) sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent= inApplied=0 inDropped=0 
+desktop=down
+1792352753836 P5TEST end
+1792352798701 P5TEST begin seconds=10
+1792352798709 P5 start video=true
+1792352799045 P5 desktop up 1920x1080 encoder=c2.qti.avc.encoder
+1792352799046 P5TEST start ok=true
+1792352799711 P5 VSTAT sent=0 bytes=0 dropped=0 keyreq=0 keyreqSent=frames=0 draws=17 keyreq=1 dropped=0 inApplied=0 
+inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352799826 P5 keyframe request (video queue full)
+1792352799853 P5 drop-until-keyframe ends at seq=14 droppedSoFar=11
+1792352800296 P5 keyframe request (video queue full)
+1792352800474 P5 drop-until-keyframe ends at seq=64 droppedSoFar=27
+1792352800712 P5 VSTAT sent=57 bytes=420576 dropped=27 keyreq=2 keyreqSent=frames=84 draws=101 keyreq=3 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352801713 P5 VSTAT sent=143 bytes=752640 dropped=27 keyreq=2 keyreqSent=frames=170 draws=186 keyreq=3 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352802716 P5 VSTAT sent=226 bytes=1104960 dropped=27 keyreq=2 keyreqSent=frames=253 draws=270 keyreq=3 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352803460 P5 keyframe request (video queue full)
+1792352803644 P5 drop-until-keyframe ends at seq=332 droppedSoFar=42
+1792352803718 P5 VSTAT sent=295 bytes=1529472 dropped=42 keyreq=3 keyreqSent=frames=337 draws=354 keyreq=4 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352804720 P5 VSTAT sent=379 bytes=1945680 dropped=42 keyreq=3 keyreqSent=frames=421 draws=438 keyreq=4 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352805722 P5 VSTAT sent=462 bytes=2244528 dropped=42 keyreq=3 keyreqSent=frames=504 draws=521 keyreq=4 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352806723 P5 VSTAT sent=547 bytes=2566976 dropped=42 keyreq=3 keyreqSent=frames=589 draws=606 keyreq=4 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352807725 P5 VSTAT sent=629 bytes=3007520 dropped=42 keyreq=3 keyreqSent=frames=671 draws=688 keyreq=4 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352808727 P5 VSTAT sent=714 bytes=3415584 dropped=42 keyreq=3 keyreqSent=frames=756 draws=773 keyreq=4 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352809054 P5TEST sent=742 bytes=3550224 dropped=42 keyreq=3 keyreqSent=frames=784 draws=800 keyreq=4 dropped=0 
+inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 keysReleasedByReleaseAll=0 
+buttonsReleasedByReleaseAll=0
+1792352809055 P5 stop (self-test done) sent=742 bytes=3550224 dropped=42 keyreq=3 keyreqSent=frames=784 draws=801 
+keyreq=4 dropped=0 inApplied=0 inDropped=0 keysDown=0 buttonsDown=0 keysAllTime=0 buttonsAllTime=0 
+keysReleasedByReleaseAll=0 buttonsReleasedByReleaseAll=0
+1792352809091 P5TEST end
+
+
