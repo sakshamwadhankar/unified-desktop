@@ -6,9 +6,10 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 3 of 13. Phase 2 is **CLOSED, PASS** (2026-10-18, verified on the phone by the
+- **Phase:** 3 of 13 done; next is Phase 4 (Connection), not started. Phase 2 is **CLOSED, PASS** (2026-10-18, verified on the phone by the
   manager; details in `docs/PHASE2_RESULT.md`; shipping box64 lib = `e1c21ed2...`, recipe not
-  reproducible, B-030). Phase 3 (VS Code/code-server in a WebView): **gate flows PASS on the
+  reproducible, B-030). **Phase 3 is CLOSED, PASS** (2026-10-18 17:30, verified by the manager on
+  the emulator AND the phone: PNGs viewed, saved files read on disk). Phase 3 (VS Code/code-server in a WebView): **gate flows PASS on the
   emulator** (`emulator-5554`, Android 17 API 37, 16 KB pages) - node+code-server run from
   `nativeLibraryDir` (healthz 200; cold 7.9 s / warm 2.8 s), the full gate flow runs from the
   WebView with injected taps+IME (folder via the `?folder=` deep link; hello.txt edit+Ctrl+S
@@ -19,9 +20,25 @@ corrects it after review.
   installed through the marketplace UI, on-disk `extensions.json`; MIT verified in the
   unpacked tree). Full record: `docs/PHASE3_RESULT.md` (items 1-12, every PNG header-checked
   in `evidence/phase3/`). Build gates green 16:0x (`:app:testDebugUnitTest :app:lintDebug
-  :app:assembleDebug`, build28, 48 unit tests green). **The phone round is owed** (2c0f6edc
-  never connected; SKIPS.md "Phase 3 phone gate" row has the exact chain).
-- **Last updated:** 2026-10-18 ~16:10, agent, phase-3 emulator round (session ~11:00-16:10).
+  :app:assembleDebug`, build28, 48 unit tests green). **The phone round is DONE** (2026-10-18
+  16:17-16:44, `docs/PHASE3_RESULT.md` "Phone gate": install sha-proofed, node v24.18.0 arm64,
+  fetch+unpack+verify 9,134 files, cold healthz 1,899 ms / warm 1,887 ms, hello.txt edit+save
+  AND terminal `term.txt/machine.txt=aarch64` proven on disk via `run-as`, idle CPU 0.0%/60 s
+  caveat WebView-not-attached, PSS app 164.2/node 28.1/worker 55.8 MiB, 8 procs, 3
+  header-checked PNGs in `evidence/phase3/p3phone-*.png`; one new bug B-042; download
+  staged over USB because the app's Wi-Fi path measured ~45 KB/s; left 0 processes).
+- **Last updated:** 2026-10-18 16:47, agent, phase-3 PHONE GATE round (16:17-16:44 on 2c0f6edc,
+  a 35-minute time box; the emulator's earlier round is unchanged in the record above). The
+  emulator round notes (B-039..B-041) and the incident log stand as written. New this round:
+  **B-042** (in-app unpack hung once mid-tree on the phone - CPU frozen ~28 MB written,
+  silent; a retry from the same cached, sha-checked deb completed in 39.8 s with a clean
+  9,134-file verify). Dev-side finding: the app's Wi-Fi deb download measured ~45 KB/s (~43
+  min ETA), so the byte-identical pinned deb (sha `eabd4122...` pre-verified) was staged over
+  adb USB at 22.3 MB/s and the app then did its own `cached sha ok` check + unpack - the
+  transport is dev-side, sha checking stays in-app. SKIPS.md "Phase 3 phone gate" row DELETED
+  (done). Phone cleanup verified: 0 processes of our uid left, `stayon false`; the
+  580-MB-scale `files/phase3` tree + 117 MB deb cache stay on the phone (dev artifact,
+  re-fetchable).
   Mid-session the host killed the emulator in an OOM storm (PowerShell OOM, ~15:2x); the
   emulator is now owned by the agent and its hang/crash recovery is codified (BUGS B-041,
   incident log in docs/PHASE3_RESULT.md, LESSONS §5: relaunch only above 3 GB free at
@@ -33,11 +50,11 @@ corrects it after review.
   (host RAM/emulator hangs). Harness additions: `cs-gofolder` deep-link action,
   focusable WebView, `boxes` DOM probe v4 (menus/quick-input/editor lines/terminal/
   activity bar/extension rows).
-- **Next action:** the manager reviews Phase 3 (docs/PHASE3_RESULT.md + PNGs) and then
-  decides: (a) run the phone gate when 2c0f6edc is available (SKIPS.md row), (b) B-039's
-  Phase-5 keyboard-input decision, (c) extension-shipping policy (THIRD_PARTY row -
-  indent-rainbow added as runtime-installed, not shipped). Phase 4 (PC link/stream) per
-  PLAN.md; its input plan must start from B-039's findings.
+- **Next action:** the manager reviews Phase 3 (docs/PHASE3_RESULT.md incl. the new "Phone
+  gate" section + PNGs) and then decides: (a) close phase 3 and plan Phase 4 (PC link/stream)
+  per PLAN.md - its input plan must start from B-039's findings; (b) B-039's Phase-5
+  keyboard-input decision; (c) extension-shipping policy (THIRD_PARTY row - indent-rainbow
+  added as runtime-installed, not shipped); (d) B-042 follow-up policy (one-off unpack hang).
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app

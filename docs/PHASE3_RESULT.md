@@ -435,6 +435,39 @@ B-035 (dev standby bucket), B-037 (symlink relink after reinstall), B-038
 input decision needed)**, B-040 (PowerShell->adb quoting trap; harness only), B-041
 (host RAM/emulator hangs, dev environment).
 
+## Phone gate (2026-10-18, 16:17-16:44, phone serial 2c0f6edc, OnePlus, arm64-v8a, 4 KB pages)
+
+The last deferred gate part, run inside the 35-minute prompt time box on the real phone.
+Everything below is **phone**. Install: `app-debug.apk` (built 15:51, unchanged since commit
+7492ee7 - no rebuild) installed `Success` with `install -r -t`; on-phone
+`nativeLibraryDir/libnode.so` sha256 `3db11b8a...` == jniLibs `arm64-v8a/libnode.so`
+(83,296,208 B), so no B-010 reinstall. mCallState=0 checked before every input batch.
+
+| Gate part | Phone verdict | Proof (all from the app's/logs' own output) |
+|---|---|---|
+| node from nativeLibraryDir | **PASS** | `v24.18.0 arm64` (`process.arch`), exit 0, wall 313-314 ms, first output 236-274 ms; `/proc/pid/exe` under nativeLibraryDir (`under=true`); exe = `libnode.so` |
+| code-server fetch + sha256 | PASS (staged transport) | Pinned deb `code-server_4.141.0_aarch64.deb` 117,176,796 B sha `eabd4122...c5`. The app's own phone download was capped at ~45 KB/s (7,535,336 -> 8,420,072 B in ~29 s => ~43 min ETA; would have eaten the whole box), so the byte-identical laptop copy (same deb, sha pre-verified) was staged over adb USB (22.3 MB/s) and the app then ran its OWN check + unpack: `CSDL DL ... cached sha ok` -> `CSDL ok bytes=117176796`. The download transport is the only deviation; sha checking stayed in-app. |
+| Unpack JS-only tree | PASS (one hang, B-042) | First attempt stalled (28,103 kB static >90 s, app CPU frozen, silent) -> BUGS B-042. Retry from the same cached deb: `CS_UNPACK ms=39772` (+ Elf guard dropped 0), `CS_LINK mapped=7 created=7`, `CS_VERIFY root=files/phase3/code-server files=9134 bytes=326507659 elf=0 symlinks=31 broken=0 links_ok=7/7`, marker sha `eabd4122...` - same 9,134-file count as the emulator (byte delta 1,023 B = env/marker paths) |
+| server start (cold) | PASS | `CS_START OK pid=7957 port=33617 healthz=200 first_response_ms=1899`; `relink created=0 already=7`; `cleartext_127=true cleartext_localhost=true cleartext_example=false`; file-16 date OK |
+| server start (warm) | PASS | `CS_STOP pids=3 survived=0` then `CS_START OK pid=13541 port=45199 healthz=200 first_response_ms=1887` |
+| WebView workbench | PASS | `CS_WEB postUrl /login` -> load 5,685 ms -> `dom+3000ms {title:"code-server", workbench:true, parts:true}` (real DOM, dpr=3, viewport 800x360 CSS / 2400x1080 device landscape) |
+| Folder deep link | PASS | `cs-gofolder:.../workspace` -> `?folder=...`; `dom[state] title="Welcome - workspace - code-server" listRows=1` (the full nav page load measured ms=27958) |
+| Edit + save on disk | **PASS** | Explorer tap opened hello.txt (title `hello.txt - workspace - code-server`); probe measured viewlines (`phase3` y=102, blank y=121 CSS); tap line 2 + `input text phase3-phone` (IME) + `input keycombination 113 47` (Ctrl+S, system path) -> `run-as cat files/phase3/workspace/hello.txt` = `phase3` + `phase3-phone` on disk |
+| Terminal command on disk | **PASS** | Menu taps (hamburger 132,225 -> Terminal 720,606 -> New Terminal 960,149 device px, all from the boxes probe); xterm `ime-text-area`/`term-helper-textarea` in the DOM; typed command files: `term.txt=phase3-phone-ok`, `machine.txt=aarch64`, `pwd.txt=/data/user/0/dev.unifieddesktop.app/files/phase3/workspace`, hello.txt intact. (First batch silently lost the `-` of `uname -m` in the adb->device text chain -> empty machine.txt; retyped correctly. `\;` reached the pty as a separator as B-040 intends.) |
+| RAM | measured | PSS at idle: app 168,147 kB (164.2 MiB, RSS 329,036 kB); node main 28,766 kB (28.1 MiB); entry worker 57,105 kB (55.8 MiB) |
+| Process count | measured | 8 under the app uid at snapshot (app, `:black`, node main + 5 libnode forks); emulator steady-state comparison ~11 |
+| Idle CPU (60 s, untouched) | measured | node main utime+stime 131+18 ticks before == after 60 s = **0.0 % of one core**. Caveat (measured context): WebView NOT attached at sampling (warm restart dropped it; emulator measured workbench-open = 0.15 %) |
+| data on device | measured | unpack root `du -sk` 348,623 kB; deb cache 117,176,796 B left in place |
+| Screenshots (phone) | PNGs in evidence/phase3/ `89 50 4E 47` | p3phone-folder.png 193,758 B (folder/workbench), p3phone-saved.png 202,034 B (saved editor), p3phone-terminal.png 244,949 B (terminal output) |
+
+Cleanup at 16:44: `cs-stop` (`survived=0`), `run-as kill -9 -1`, `am force-stop`,
+`svc power stayon false` -> 0 processes of our uid in `ps -A`; deb cache kept (re-fetchable,
+dev artifact).
+
+**Phone-gate bugs:** B-042 (unpack hang, once, not reproduced, BUGS.md) - the only new row.
+B-037/B-038 fixes held on arm64 (`relink already=7`, `--preserve-symlinks`); B-010 not needed
+(shas equal); B-040 quoting recipe worked as documented.
+
 ---
 
 ---
