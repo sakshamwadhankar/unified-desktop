@@ -1,0 +1,9 @@
+TEST A: kill the PC process mid-bench; expect SESSION_END within 20 s (normal 256 KiB window).
+kill at 21:45:51
+elapsed to SESSION_END: 1 s
+==== phone log since TLS_UP ====
+1792340124549 SESSION_END peer=FAAED033F62353AC
+
+==== PC output (killed) ====
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+link: reconnected silently to pinned phone 12FB82597D0CBCCC (127.0.0.1:47600)

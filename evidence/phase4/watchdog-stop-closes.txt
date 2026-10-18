@@ -1,0 +1,19 @@
+TEST C: stop the service mid-bench; stopAll must force-close the live session and status must show live=0.
+==== phone log since STOP begin ====
+1792340194964 SESSION force-close (service stop) peer=FAAED033F62353AC
+1792340194964 STOP force-closed 1 live session(s)
+1792340194966 SESSION_END peer=FAAED033F62353AC
+1792340194970 NSD unregistered
+1792340194970 SERVER exit
+1792340198019 STATUS running=false live=0 last=SERVER exit
+
+status line: 1792340198019 STATUS running=false live=0 last=SERVER exit
+==== PC output ====
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+link: reconnected silently to pinned phone 12FB82597D0CBCCC (127.0.0.1:47600)
+C:\Users\Asus\Documents\GitHub\unified-desktop\pc\target\release\udreceiver.exe : BENCH FAILED: tls read: peer closed 
+connection without sending TLS close_notify: 
+https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+    + CategoryInfo          : NotSpecified: (BENCH FAILED: t...#unexpected-eof:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

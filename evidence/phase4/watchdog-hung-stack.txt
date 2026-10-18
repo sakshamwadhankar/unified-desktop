@@ -1,0 +1,46 @@
+1792340136479 THREAD p4-watchdog state=TIMED_WAITING alive=true
+1792340136479   at java.lang.Thread.sleep(Native Method)
+1792340136479   at java.lang.Thread.sleep0(Thread.java:687)
+1792340136479   at java.lang.Thread.sleep(Thread.java:665)
+1792340136480   at java.lang.Thread.sleep(Thread.java:578)
+1792340136480   at dev.unifieddesktop.app.Phase4LinkService.watchdogLoop(Phase4LinkService.kt:200)
+1792340136480   at dev.unifieddesktop.app.Phase4LinkService.startAll$lambda$2(Phase4LinkService.kt:147)
+1792340136481   at dev.unifieddesktop.app.Phase4LinkService$$ExternalSyntheticLambda2.run(D8$$SyntheticClass:0)
+1792340136481   at java.lang.Thread.run(Thread.java:1571)
+1792340136482 THREAD p4-tcp-server state=RUNNABLE alive=true
+1792340136482   at libcore.io.Linux.poll(Native Method)
+1792340136482   at libcore.io.ForwardingOs.poll(ForwardingOs.java:418)
+1792340136482   at libcore.io.BlockGuardOs.poll(BlockGuardOs.java:285)
+1792340136482   at libcore.io.ForwardingOs.poll(ForwardingOs.java:418)
+1792340136482   at android.system.Os.poll(Os.java:546)
+1792340136482   at libcore.io.IoBridge.poll(IoBridge.java:853)
+1792340136482   at java.net.PlainSocketImpl.socketAccept(PlainSocketImpl.java:194)
+1792340136482   at java.net.AbstractPlainSocketImpl.accept(AbstractPlainSocketImpl.java:451)
+1792340136482   at java.net.ServerSocket.implAccept(ServerSocket.java:568)
+1792340136482   at com.android.org.conscrypt.ConscryptServerSocket.accept(ConscryptServerSocket.java:175)
+1792340136482   at dev.unifieddesktop.app.Phase4LinkService.serverLoop(Phase4LinkService.kt:286)
+1792340136482   at dev.unifieddesktop.app.Phase4LinkService.startAll$lambda$0(Phase4LinkService.kt:146)
+1792340136483   at dev.unifieddesktop.app.Phase4LinkService$$ExternalSyntheticLambda1.run(D8$$SyntheticClass:0)
+1792340136483   at java.lang.Thread.run(Thread.java:1571)
+1792340136483 THREAD p4-session state=RUNNABLE alive=true
+1792340136483   at java.net.SocketOutputStream.socketWrite0(Native Method)
+1792340136483   at java.net.SocketOutputStream.socketWrite(SocketOutputStream.java:116)
+1792340136483   at java.net.SocketOutputStream.write(SocketOutputStream.java:156)
+1792340136483   at com.android.org.conscrypt.ConscryptEngineSocket$SSLOutputStream.writeToSocket(ConscryptEngineSocket.java:795)
+1792340136483   at com.android.org.conscrypt.ConscryptEngineSocket$SSLOutputStream.writeInternal(ConscryptEngineSocket.java:769)
+1792340136483   at com.android.org.conscrypt.ConscryptEngineSocket$SSLOutputStream.write(ConscryptEngineSocket.java:723)
+1792340136483   at dev.unifieddesktop.app.Phase4LinkService.sessionThread(Phase4LinkService.kt:413)
+1792340136483   at dev.unifieddesktop.app.Phase4LinkService.serverLoop$lambda$7(Phase4LinkService.kt:294)
+1792340136483   at dev.unifieddesktop.app.Phase4LinkService$$ExternalSyntheticLambda3.run(D8$$SyntheticClass:0)
+1792340136483   at java.lang.Thread.run(Thread.java:1571)
+1792340136483 THREAD p4-dispatch state=RUNNABLE alive=true
+1792340136483   at dalvik.system.VMStack.getThreadStackTrace(Native Method)
+1792340136484   at java.lang.Thread.getStackTrace(Thread.java:2849)
+1792340136484   at java.lang.Thread.getAllStackTraces(Thread.java:2916)
+1792340136484   at dev.unifieddesktop.app.Phase4Dispatch.runX$lambda$0(Phase4Dispatch.kt:44)
+1792340136484   at dev.unifieddesktop.app.Phase4Dispatch$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+1792340136484   at java.lang.Thread.run(Thread.java:1571)
+1792340136484 DUMP done
+1792340148136 SESSION force-close (no inbound for 15 s) peer=FAAED033F62353AC
+1792340148136 SESSION io SocketException: Broken pipe
+1792340148137 SESSION_END peer=FAAED033F62353AC

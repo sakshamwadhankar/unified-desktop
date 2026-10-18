@@ -1,0 +1,5 @@
+TEST B: bench --window-kib 8192 stalls the adb-forward pipe; thread stacks taken mid-stall; watchdog must force-close.
+elapsed from dump to SESSION_END: 10 s
+==== PC output ====
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+link: reconnected silently to pinned phone 12FB82597D0CBCCC (127.0.0.1:47600)

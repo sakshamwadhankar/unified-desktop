@@ -20,3 +20,46 @@ Rules:
 
 
 The emulator limitation and all round-2 results are summarized in `docs/PHASE1_RESULT.md`.
+
+---
+
+## No-adb / no-developer-mode proof (item 11, 2026-10-18; label: code-only)
+
+Product rule (AGENTS.md): no developer mode, no root, no ADB from the user at any step.
+Grep transcript over the shipping sources `android/app/src/main` (case-insensitive):
+
+- **A. `adb` occurrences** (`Get-ChildItem -Recurse -Include *.kt,*.xml | Select-String "adb"`):
+  real hits are **doc comments only**, in the debug-harness classes and two older notes:
+  `HarnessActivity.kt:23,25`, `HarnessReceiver.kt:12`, `Phase3Dispatch.kt:9`,
+  `Phase4Dispatch.kt:10` (usage examples for `adb shell am ...`),
+  `Phase3CodeActivity.kt:60`, `Phase3Server.kt:107`, `Phase2X11.kt:100` (B-019 note).
+  Every other match is the substring inside `readBytes` (e.g. `Phase2Data.kt:148`).
+- **B. process starts** (`ProcessBuilder|Runtime.getRuntime`): all 20 sites exec the app's
+  own `lib*.so` from `nativeLibraryDir` (Phase-2 Box64/Wine, Phase-3 Node). No `su`, no
+  `adb`, no `sh -c` of anything that is not one of our own binaries.
+- **C. developer-mode / root signals** (`ADB_ENABLED|development_settings|isRooted|
+  /system/xbin|which su|su -c`): a single hit, `Phase3Native.kt:102`, which only sets the
+  child-process env `PATH=/system/bin:/system/xbin` for the Node interpreter. No root
+  binary is invoked and no developer setting is read anywhere.
+- **D. manifest permissions**: `INTERNET`, `FOREGROUND_SERVICE`,
+  `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `FOREGROUND_SERVICE_DATA_SYNC`,
+  `POST_NOTIFICATIONS` - no privileged/system-only permission.
+
+Conclusion: the shipping code path never reads a developer-mode setting, never calls a
+privileged API and never spawns a process we do not ship; all `adb` mentions are comments
+for our test harness.
+
+**Owner check steps** (on a stock phone; keeps developer options OFF, USB debugging OFF):
+
+1. Leave developer options disabled (never tap "Build number" seven times); keep USB
+   debugging off.
+2. Install the app normally and open it once (the link service starts itself / is started
+   by the PC step).
+3. Wi-Fi: phone and PC on the same network; on the PC run `udreceiver discover`, then
+   `udreceiver pair --addr <found-ip>:47600`. Expect the `Pair this PC?` notification with
+   the same 6-digit code as the PC, then Yes -> the bench must run. No ADB, no driver.
+4. USB: plug the phone in. Expect the Android accessory dialog for unified-desktop (or the
+   tether path from item 9). No driver install is offered by us, no `adb` anywhere.
+5. If any step demands developer mode, ADB or root, or a system dialog says "USB debugging
+   required", that is a bug: screenshot it and file it in BUGS.md.
+

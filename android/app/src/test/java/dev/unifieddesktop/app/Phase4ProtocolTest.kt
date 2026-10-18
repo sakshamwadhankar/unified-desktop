@@ -2,6 +2,7 @@ package dev.unifieddesktop.app
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -121,5 +122,49 @@ class Phase4ProtocolTest {
         // Empty payload frame - payload is empty
         assertEquals(0, msgs[0].payload.size)
         assertTrue(msgs[0].payload.isEmpty())
+    }
+
+    // ---- pairing channel gate (manager review 2026-10-18): the decision is a pure
+    // function so an unpaired PC can never use the data channels. -----------------
+
+    /** Unpaired (no prompt up yet): only the control channel passes. */
+    @Test
+    fun gateUnpairedAllowsOnlyControl() {
+        assertTrue(P.mayProcessChannel(P.CH_CONTROL, Phase4Protocol.Gate.UNPAIRED))
+        assertFalse(P.mayProcessChannel(P.CH_BENCH, Phase4Protocol.Gate.UNPAIRED))
+        assertFalse(P.mayProcessChannel(P.CH_INPUT, Phase4Protocol.Gate.UNPAIRED))
+        assertFalse(P.mayProcessChannel(P.CH_VIDEO, Phase4Protocol.Gate.UNPAIRED))
+    }
+
+    /** Pairing pending (prompt on screen, no Yes yet): only the control channel passes. */
+    @Test
+    fun gatePairingPendingAllowsOnlyControl() {
+        assertTrue(P.mayProcessChannel(P.CH_CONTROL, Phase4Protocol.Gate.PAIRING))
+        assertFalse(P.mayProcessChannel(P.CH_BENCH, Phase4Protocol.Gate.PAIRING))
+        assertFalse(P.mayProcessChannel(P.CH_INPUT, Phase4Protocol.Gate.PAIRING))
+        assertFalse(P.mayProcessChannel(P.CH_VIDEO, Phase4Protocol.Gate.PAIRING))
+    }
+
+    /** Paired (pinned, or Yes tapped in this session): all four channels pass. */
+    @Test
+    fun gatePairedAllowsAllChannels() {
+        for (ch in byteArrayOf(P.CH_CONTROL, P.CH_BENCH, P.CH_INPUT, P.CH_VIDEO)) {
+            assertTrue("channel ${P.channelName(ch)} must pass when paired", P.mayProcessChannel(ch, Phase4Protocol.Gate.PAIRED))
+        }
+    }
+
+    // ---- dead-link watchdog (manager review 2026-10-18): pure predicate, tested. ----
+
+    /** Inside the window nothing is closed (a healthy keep-alive gap stays open). */
+    @Test
+    fun watchdogStaysQuietWithinWindow() {
+        assertFalse(P.watchdogExpired(1_000, 1_000 + P.DEAD_TIMEOUT_MS))
+        assertFalse(P.watchdogExpired(1_000, 1_000 + P.DEAD_TIMEOUT_MS - 1))
+    }
+
+    /** Past the window the supervisor closes the socket (unblocks a stuck write()). */
+    @Test
+    fun watchdogExpiresPastWindow() {
+        assertTrue(P.watchdogExpired(1_000, 1_000 + P.DEAD_TIMEOUT_MS + 1))
     }
 }

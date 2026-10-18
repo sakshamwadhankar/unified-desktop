@@ -16,7 +16,12 @@ pub const PAIR_CONFIRM_TIMEOUT: Duration = Duration::from_secs(300);
 pub const BENCH_RTT_SAMPLES: usize = 1000;
 pub const BENCH_RTT_PAYLOAD: usize = 64;
 pub const BENCH_MESSAGE_LEN: usize = 1 << 20; // 1 MiB logical messages
-pub const BENCH_WINDOW_BYTES: usize = 8 << 20; // 8 MiB in flight
+/// Default in-flight window. The first design used 8 MiB in flight; that deadlocks the
+/// adb-forward dev path: the guest TCP queues fill (~1 MB each way) and freeze -- the
+/// app blocks writing an echo while the relay blocks writing the next input (verified
+/// 2026-10-18 via /proc/net/tcp on the emulator, queues identical minutes apart).
+/// 256 KiB stays inside every buffer on that path. `--window-kib` overrides it.
+pub const BENCH_WINDOW_BYTES: u64 = 256 << 10;
 /// Keep-alive cadence (docs/PHASE4_PROTOCOL.md); every framework callsite logs it, the
 /// bench quiescent path messages it from Phase 5.
 #[allow(dead_code)]
@@ -81,9 +86,12 @@ fn next_frame(
     }
     loop {
         let mut buf = [0u8; 16384];
-        let n = tls
-            .read(&mut buf)
-            .map_err(|e| format!("tls read: {e}"))?;
+        let n = tls.read(&mut buf).map_err(|e| match e.kind() {
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                "stalled: no inbound data within the socket read timeout".to_string()
+            }
+            _ => format!("tls read: {e}"),
+        })?;
         if n == 0 {
             return Ok(None);
         }
@@ -275,6 +283,7 @@ impl BenchResult {
 pub fn bench(
     session: &mut Session,
     seconds: u64,
+    window_bytes: u64,
 ) -> Result<BenchResult, String> {
     // ---- RTT: 1000 small pings, echo per frame
     let mut samples = Vec::with_capacity(BENCH_RTT_SAMPLES);
@@ -318,7 +327,7 @@ pub fn bench(
             if now >= deadline && in_flight == 0 {
                 break;
             }
-            if in_flight < BENCH_WINDOW_BYTES as u64 && now < deadline {
+            if in_flight < window_bytes && now < deadline {
                 let payload = message_for(seq);
                 for chunk in payload.chunks(MAX_FRAME_PAYLOAD) {
                     let frame = encode_frame(CH_BENCH, 0, chunk).map_err(|e| e.to_string())?;

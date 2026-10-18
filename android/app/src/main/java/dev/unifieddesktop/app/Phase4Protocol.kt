@@ -25,6 +25,9 @@ object Phase4Protocol {
     const val FLAG_KEEPALIVE_ECHO: Byte = 0b1
     const val FLAG_MORE_FOLLOWS: Byte = 0b10
 
+    /** Link-dead policy (docs/PHASE4_PROTOCOL.md): no inbound frame for this long = dead. */
+    const val DEAD_TIMEOUT_MS = 15_000L
+
     /** Strict priority: input > control > video > bench (OPTIMIZATION 5). */
     val CHANNEL_PRIORITY = byteArrayOf(CH_INPUT, CH_CONTROL, CH_VIDEO, CH_BENCH)
 
@@ -50,6 +53,38 @@ object Phase4Protocol {
     class ProtocolException(message: String) : Exception(message)
 
     fun isValidChannel(ch: Byte) = ch == CH_CONTROL || ch == CH_INPUT || ch == CH_VIDEO || ch == CH_BENCH
+
+    /**
+     * Pairing gate state of one session (manager review 2026-10-18): a PC that is not
+     * pinned yet may use the control channel only (pairing frames + keep-alive); bench
+     * (data), input and video frames are dropped until the user taps Yes (this session
+     * becomes PAIRED) or the PC is already pinned (PAIRED from the first frame).
+     */
+    enum class Gate {
+        /** No pin for this PC and no prompt shown (transient start state): control only. */
+        UNPAIRED,
+
+        /** The pairing prompt is on screen; the user has not tapped yet: control only. */
+        PAIRING,
+
+        /** PC pinned (trusted store) or user tapped Yes in this session: all channels. */
+        PAIRED,
+    }
+
+    /** Pure channel gate: may a frame on [channel] be processed in [gate] state? */
+    fun mayProcessChannel(channel: Byte, gate: Gate): Boolean = when (gate) {
+        Gate.PAIRED -> true
+        Gate.PAIRING -> channel == CH_CONTROL
+        Gate.UNPAIRED -> channel == CH_CONTROL
+    }
+
+    /**
+     * Watchdog predicate: a session armed for the dead-link rule is expired when nothing
+     * has come in for [DEAD_TIMEOUT_MS]. Pure function so it is unit-testable (the
+     * supervisor thread that calls it lives in Phase4LinkService).
+     */
+    fun watchdogExpired(lastInboundMs: Long, nowMs: Long): Boolean =
+        nowMs - lastInboundMs > DEAD_TIMEOUT_MS
 
     /** One on-the-wire frame: header + payload (payload must respect the chunk cap). */
     fun encodeFrame(channel: Byte, flags: Byte, payload: ByteArray): ByteArray {

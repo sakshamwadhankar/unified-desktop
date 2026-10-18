@@ -1,0 +1,2 @@
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+OK: reconnected silently to pinned phone 12FB82597D0CBCCC (127.0.0.1:47600)

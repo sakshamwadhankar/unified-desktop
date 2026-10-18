@@ -9,7 +9,7 @@ import android.content.Intent
  *
  *   adb shell am broadcast -n dev.unifieddesktop.app/.HarnessReceiver --es phase4x start
  *
- * Actions: start | stop | status | trust | forget[:<prefix>] | aoa-check | aoa-open
+ * Actions: start | stop | status | dump | trust | forget[:<prefix>] | aoa-check | aoa-open
  * Each runs on its own thread; every line lands in files/p4/p4.log.
  */
 object Phase4Dispatch {
@@ -35,8 +35,21 @@ object Phase4Dispatch {
                     )
                     "status" -> Phase4Log.say(
                         ctx,
-                        "STATUS running=${Phase4LinkService.isRunning()} last=${Phase4LinkService.stateLine()}"
+                        "STATUS running=${Phase4LinkService.isRunning()} live=${Phase4LinkService.liveCount()}" +
+                            " last=${Phase4LinkService.stateLine()}"
                     )
+                    "dump" -> {
+                        // Thread dump for evidence (kill -3 goes to /data/anr which shell
+                        // cannot read on this image; debuggerd -j needs root).
+                        val stacks = Thread.getAllStackTraces()
+                        Phase4Log.say(ctx, "DUMP threads=${stacks.size}")
+                        for ((th, stack) in stacks) {
+                            if (!th.name.startsWith("p4-")) continue
+                            Phase4Log.say(ctx, "THREAD ${th.name} state=${th.state} alive=${th.isAlive}")
+                            for (el in stack) Phase4Log.say(ctx, "  at $el")
+                        }
+                        Phase4Log.say(ctx, "DUMP done")
+                    }
                     "trust" -> {
                         for (r in Phase4Crypto.trustedList(ctx)) {
                             Phase4Log.say(ctx, "TRUST fpr=${r.first} label=${r.second} added=${r.third}")

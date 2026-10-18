@@ -1,0 +1,5 @@
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+PC code:  733362  <-- MUST match the code on the phone
+Waiting for Yes on the phone (up to 300s) ...
+Phone confirmed. Pin saved to C:\Users\Asus\AppData\Roaming\unified-desktop-receiver\trusted-phones.ndjson
+OK: paired with phone 12FB82597D0CBCCC (127.0.0.1:47600)

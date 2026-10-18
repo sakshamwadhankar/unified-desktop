@@ -1,0 +1,8 @@
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+PC code:  733362  <-- MUST match the code on the phone
+Waiting for Yes on the phone (up to 300s) ...
+Phone confirmed. Pin saved to C:\Users\Asus\AppData\Roaming\unified-desktop-receiver\trusted-phones.ndjson
+link: paired with phone 12FB82597D0CBCCC (127.0.0.1:47600)
+=== BENCH (PC -> 127.0.0.1:47600, pinned TLS session) ===
+RTT (1000 samples, 64 B per sample): p50 0.96 ms | p95 1.68 ms | p99 2.73 ms | min 0.64 | max 4.92
+Throughput: 32.10 MB/s over 5 s (161 MB echoed)

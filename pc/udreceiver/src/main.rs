@@ -47,7 +47,7 @@ fn flag(args: &[String], name: &str, default: &str) -> String {
 fn print_usage() {
     println!(
         "usage:\n  udrxcb pair --addr <ip:port> [--label <label>]\n  \
-         udrxcb bench --addr <ip:port> [--seconds <s>]\n  \
+         udrxcb bench --addr <ip:port> [--seconds <s>] [--window-kib <n>]\n  \
          udrxcb trust list\n  udrxcb trust forget <fpr-prefix>"
     );
 }
@@ -91,6 +91,10 @@ fn cmd_bench(rest: &[String]) -> ExitCode {
         return ExitCode::from(2);
     }
     let seconds: u64 = flag(rest, "--seconds", "5").parse().unwrap_or(5);
+    let window_default = session::BENCH_WINDOW_BYTES / 1024;
+    let window_kib: u64 = flag(rest, "--window-kib", &window_default.to_string())
+        .parse()
+        .unwrap_or(window_default);
     let id = ident();
     let store = TrustedPhoneStore::open();
     let _ = crypto::ensure_ring_default();
@@ -99,7 +103,12 @@ fn cmd_bench(rest: &[String]) -> ExitCode {
     match session::connect_and_pair(&addr, &id, &store, "unified-desktop phone") {
         Ok((mut s, description)) => {
             println!("link: {description}");
-            match session::bench(&mut s, seconds) {
+            // A stalled peer (or a dead adb-forward pipe) must fail cleanly, not hang.
+            let _ = s
+                .tls
+                .sock
+                .set_read_timeout(Some(std::time::Duration::from_secs(60)));
+            match session::bench(&mut s, seconds, window_kib * 1024) {
                 Ok(r) => {
                     print!("{}", r.render(&format!("PC -> {addr}, pinned TLS session")));
                     ExitCode::SUCCESS
