@@ -89,5 +89,18 @@ echoes each; per-sample time recorded, p50/p95/p99.
 Versioning: version byte + cert pinning both stable; a future breaking protocol change
 bumps the version byte and re-pairing, nothing else (Phase-4 scope has no discovery of
 feature sets; keep it dumb).
-AOA note: the manifest side (`usb accessory` filter + `UsbManager.getPermission` +
-`openAccessory`) is the same Phase-4 code; AOA only changes the byte transport.
+
+Discovery (Wi-Fi): the phone advertises `_udlink._tcp` via `NsdManager` (instance
+`unified-desktop`); the PC browses the same type with a hand-written mDNS query
+(`udreceiver discover`: unicast-response bit set, PTR -> SRV -> A follow-ups) and
+`pair`/`bench` accept `--addr auto` to use the first answer. The SRV record carries the
+actual listening port (47600 today).
+
+AOA note: the PC switches the phone with WinUSB control requests GET_PROTOCOL (51),
+SEND_STRING (52; manufacturer `unified-desktop`, model `desktop` - the strings the
+accessory filter matches) and START (53) (`udreceiver aoa start`); the phone then starts
+the link service from the attach activity and adopts the accessory FD
+(`ACC adopted fd=...`, status `acc=true`). The manifest side (`usb accessory` filter +
+`UsbManager.getPermission` + `openAccessory`) is the same Phase-4 code; AOA only changes
+the byte transport. The TLS-over-accessory-stream transport itself is not wired yet -
+that is item 8's remaining work.

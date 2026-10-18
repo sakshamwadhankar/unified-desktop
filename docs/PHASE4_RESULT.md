@@ -4,7 +4,9 @@
 > link**. The packet path is adb's TCP relay on one machine; nothing here is a Wi-Fi or
 > USB throughput figure. Real-link numbers are phone items 7-10 (blocked, see the end).
 
-Date of the runs below: 2026-10-18, 21:29-21:35 (item 6) and 21:45-21:56 (watchdog proofs).
+Date of the runs below: 2026-10-18, 21:29-21:35 (item 6), 21:45-21:56 (watchdog proofs) and
+21:57-22:15 (manager-21:55 user-path/accessory/discover fixes; emulator rehearsal of the
+real user path).
 Machine: owner's laptop (Win11), emulator `Pixel_8_Pro` (android-37.2
 google_apis_playstore_ps16k x86_64, 3072 MB), Android app `dev.unifieddesktop.app`, PC tool
 `pc/udreceiver` (release).
@@ -121,6 +123,48 @@ Proofs (emulator, 2026-10-18 21:45-21:56):
 The PC side fails cleanly in the same situations, e.g. `BENCH FAILED: tls read: peer closed
 connection without sending TLS close_notify`. This is what item 10 (failover) needs: a
 pulled cable or a dead PC is noticed and the session is torn down.
+
+## 2c. User path and other manager-21:55 fixes (before the phone round)
+
+The manager's 21:55 review listed five fixes; all are implemented:
+
+1. **The link service now has a user path** (before this, only the debug harness could
+   start it). `HarnessActivity` (the launcher activity) asks for `POST_NOTIFICATIONS` at
+   runtime on Android 13+ and shows a minimal `Start link` / `Stop link` pair with a
+   status line (`link: running=... live=... acc=... last=...`); the buttons do a
+   foreground start from the visible activity. Emulator rehearsal of the real user path
+   (label emulator): `pm revoke POST_NOTIFICATIONS` -> open the app -> real system dialog
+   "Allow Unified Desktop Phase 1 to send you notifications?" -> `input tap` Allow ->
+   `input tap` `Start link` -> status `running=true live=0 acc=false last=NSD registered
+   unified-desktop`, the "Desktop link running" FGS notification present, `p4.log` shows
+   `START ok port=47600`; `Stop link` -> `running=false`. Screenshots
+   `evidence/phase4/userpath1-notif-dialog.png`, `userpath2-after-start.png`. On the
+   phone round the same flow runs after `pm revoke` (or clear data) - adb is used only
+   for simulated taps, screenshots and reading logs.
+2. **AOA attach path**: `Phase4AccessoryActivity` starts the link service itself on
+   `USB_ACCESSORY_ATTACHED`; the new `Phase4AccessoryReceiver` handles the permission
+   dialog result; `Phase4Aoa.handOff` opens the accessory and the service adopts the FD
+   (`ParcelFileDescriptor.adoptFd`, status `acc=true`, log `ACC adopted fd=...`). The TLS
+   transport over that FD is **not** wired yet - that is item 8's remaining work; the
+   attach path no longer needs adb.
+3. **`udreceiver discover`** (item 7): a hand-written, std-only mDNS browse of
+   `_udlink._tcp.local` (unicast-response query to `224.0.0.251:5353`, bind-5353-or-
+   ephemeral, DNS name decompression, follow-up SRV/A queries). No new dependency, so no
+   THIRD_PARTY row. `pair`/`bench` accept `--addr auto` (or no `--addr`) and use the
+   first discovered phone. Unit tests cover the record parser (synthetic packet with
+   compression pointers), the service filter, truncation and the query bits; the live
+   proof is item 7. `discover` on the laptop without a phone prints `DISCOVER none` and
+   exits 1 (verified).
+4. **`udreceiver aoa list|probe|start [--vid <hex>]`** (item 8): SetupAPI enumeration of
+   USB device interfaces + `CreateFileW`/`WinUsb_Initialize` + `WinUsb_ControlTransfer`
+   for GET_PROTOCOL (51), SEND_STRING (52; manufacturer `unified-desktop`, model
+   `desktop` - matching `usb_accessory_filter.xml`) and START (53), via the `windows`
+   0.62.2 crate (THIRD_PARTY.md row added before first use). `aoa list` was run on the
+   laptop: it enumerates real USB devices and reports that none is WinUSB-openable
+   (expected without the phone); the phone-side proof is item 8.
+5. **Phone-round scripts** `p4\item7.ps1` ... `item10.ps1` (+ `p4common.ps1`) drive the
+   user path only (open app -> `Start link` button), use simulated taps for the pairing
+   `Yes`, and write every text file UTF-8 without BOM via `[IO.File]::WriteAllText`.
 
 ## 3. Silent reconnect and forget cycles
 

@@ -2,6 +2,7 @@ package dev.unifieddesktop.app
 
 import android.app.*
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -30,6 +31,7 @@ import kotlin.math.roundToInt
  */
 class HarnessActivity : Activity() {
     private lateinit var status: TextView
+    private lateinit var linkStatus: TextView
     private val main = Handler(Looper.getMainLooper())
     private val engine by lazy { EngineBridge(this) }
     private var smokePresentation: Presentation? = null
@@ -51,6 +53,7 @@ class HarnessActivity : Activity() {
         super.onCreate(b)
         (application as Application).registerActivityLifecycleCallbacks(HarnessCallbacks())
         buildUi()
+        maybeAskNotifications()
         maybeRunGuestFromIntent(intent)
     }
 
@@ -65,7 +68,47 @@ class HarnessActivity : Activity() {
         val edit = EditText(this); edit.hint = "guest package id"; box.addView(edit)
         val row2 = LinearLayout(this)
         button(row2,"Import+Launch guest") { runGuest(edit.text.toString().trim(), 6) }; box.addView(row2)
+        // Phase 4 (manager 21:55): the user path for the PC link. Start/stop are buttons
+        // here; Android 13+ asks for POST_NOTIFICATIONS in the system dialog on launch.
+        val row3 = LinearLayout(this)
+        button(row3,"Start link") { startLink() }; button(row3,"Stop link") { stopLink() }
+        box.addView(row3)
+        linkStatus = TextView(this); linkStatus.text = "link: not running"; box.addView(linkStatus)
+        main.postDelayed(object : Runnable {
+            override fun run() { refreshLink(); main.postDelayed(this, 2000) }
+        }, 1000)
         setContentView(box)
+    }
+
+    private fun startLink() {
+        try {
+            startForegroundService(
+                Intent(this, Phase4LinkService::class.java).setAction(Phase4LinkService.ACTION_START)
+            )
+            say("Link start requested (notifications ${if (notificationsGranted()) "on" else "off - tap Allow"})")
+        } catch (t: Throwable) { say("ERROR start link: $t") }
+    }
+
+    private fun stopLink() {
+        try {
+            startService(Intent(this, Phase4LinkService::class.java).setAction(Phase4LinkService.ACTION_STOP))
+            say("Link stop requested")
+        } catch (t: Throwable) { say("ERROR stop link: $t") }
+    }
+
+    private fun refreshLink() {
+        linkStatus.text = "link: running=${Phase4LinkService.isRunning()} live=${Phase4LinkService.liveCount()}" +
+            " acc=${Phase4LinkService.accessoryOpen()} last=${Phase4LinkService.stateLine()}"
+    }
+
+    private fun notificationsGranted() = Build.VERSION.SDK_INT < 33 ||
+        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    /** Real user path: Android 13+ asks for the notification permission on first launch. */
+    private fun maybeAskNotifications() {
+        if (!notificationsGranted()) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 40)
+        }
     }
 
     private fun button(parent: LinearLayout, text: String, f: () -> Unit) { Button(this).also { it.text=text; it.setOnClickListener{f()}; parent.addView(it) } }

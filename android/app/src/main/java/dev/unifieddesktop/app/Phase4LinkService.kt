@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.Log
 import java.io.File
@@ -48,6 +49,7 @@ class Phase4LinkService : Service() {
         const val ACTION_PAIR_YES = "dev.unifieddesktop.app.p4.PAIR_YES"
         const val ACTION_PAIR_NO = "dev.unifieddesktop.app.p4.PAIR_NO"
         const val ACTION_FORGET = "dev.unifieddesktop.app.p4.FORGET"
+        const val ACTION_ACCESSORY = "dev.unifieddesktop.app.p4.ACCESSORY"
 
         private val running = AtomicBoolean(false)
         private val lastState = AtomicReference("idle")
@@ -57,6 +59,9 @@ class Phase4LinkService : Service() {
         private var nsdListener: NsdManager.RegistrationListener? = null
         private val pendingPairing = AtomicReference<Pairing?>(null)
         private val liveSessions = java.util.concurrent.ConcurrentHashMap.newKeySet<LiveSession>()
+
+        /** Open AOA accessory FD handed over by the USB attach path (manager 21:55). */
+        @Volatile private var accessoryPfd: ParcelFileDescriptor? = null
 
         /** Supervisor thread that force-closes dead session sockets (manager review). */
         private var watchdogThread: Thread? = null
@@ -68,6 +73,9 @@ class Phase4LinkService : Service() {
 
         /** Live session sockets; the harness `status` action and the stop proof use it. */
         fun liveCount(): Int = liveSessions.size
+
+        /** True while an AOA accessory FD is held (USB attach user path). */
+        fun accessoryOpen(): Boolean = accessoryPfd != null
     }
 
     /**
@@ -98,7 +106,7 @@ class Phase4LinkService : Service() {
         when (intent?.action) {
             ACTION_START -> startAll()
             ACTION_STOP -> stopAll()
-            ACTION_STATUS -> say("status running=${running.get()} live=${liveSessions.size} last=$lastState pair=${pendingPairing.get() != null}")
+            ACTION_STATUS -> say("status running=${running.get()} live=${liveSessions.size} last=$lastState pair=${pendingPairing.get() != null} acc=${accessoryPfd != null}")
             ACTION_PAIR_YES -> pendingPairing.get()?.resolve(true)
             ACTION_PAIR_NO -> pendingPairing.get()?.resolve(false)
             ACTION_FORGET -> {
@@ -111,6 +119,7 @@ class Phase4LinkService : Service() {
                 } else if (Phase4Crypto.trustedForget(this, fpr)) 1 else 0
                 say("FORGET count=$n prefixOrEmpty=${fpr.take(6)} pins=${Phase4Crypto.trustedList(this).size}")
             }
+            ACTION_ACCESSORY -> adoptAccessory(intent)
             else -> say("onStartCommand unknown action=${intent?.action}")
         }
         return START_NOT_STICKY
@@ -124,6 +133,18 @@ class Phase4LinkService : Service() {
         f.mkdirs()
         File(f, "p4.log").appendText("${System.currentTimeMillis()} $line\n")
         lastState.set(line)
+    }
+
+    /** AOA hand-off: the attach path (activity or permission receiver) sends the open FD. */
+    private fun adoptAccessory(intent: Intent) {
+        val fd = intent.getIntExtra("fd", -1)
+        if (fd < 0) {
+            say("ACC adopt: no fd in intent")
+            return
+        }
+        try { accessoryPfd?.close() } catch (_: Throwable) {}
+        accessoryPfd = ParcelFileDescriptor.adoptFd(fd)
+        say("ACC adopted fd=$fd m=${intent.getStringExtra("m")} model=${intent.getStringExtra("model")}")
     }
 
     private fun channels() {

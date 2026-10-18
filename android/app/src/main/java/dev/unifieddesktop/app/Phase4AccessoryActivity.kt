@@ -21,19 +21,28 @@ class Phase4AccessoryActivity : Activity() {
             "ACC_ATTACHED m=${acc?.manufacturer} model=${acc?.model} v=${acc?.version}" +
                 " granted=${if (acc == null) "?" else (getSystemService(UsbManager::class.java).hasPermission(acc)).toString()}"
         )
+        // User path (manager 21:55): the accessory attach itself starts the link service.
+        try {
+            startForegroundService(
+                Intent(this, Phase4LinkService::class.java).setAction(Phase4LinkService.ACTION_START)
+            )
+        } catch (t: Throwable) {
+            Phase4Log.say(this, "ACC service start failed: $t")
+        }
         if (acc != null) {
             val um = getSystemService(UsbManager::class.java)
             if (!um.hasPermission(acc)) {
                 val pi = android.app.PendingIntent.getBroadcast(
                     this,
                     0,
-                    Intent(ACTION_USB_PERMISSION).setPackage(packageName),
+                    Intent(this, Phase4AccessoryReceiver::class.java).setAction(ACTION_USB_PERMISSION),
                     android.app.PendingIntent.FLAG_MUTABLE
                 )
                 um.requestPermission(acc, pi)
                 Phase4Log.say(this, "ACC permission requested")
             } else {
                 Phase4Log.say(this, "ACC permission already granted")
+                Phase4Aoa.handOff(this, acc)
             }
         }
         // jump back to the harness so the session flow can continue on one screen

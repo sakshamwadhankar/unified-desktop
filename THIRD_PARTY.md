@@ -51,6 +51,7 @@ AGPL needs a DECISIONS.md entry first, because it affects how the app may be shi
 | rustls (direct Rust crate, `pc/` receiver) | 0.23.46 (pinned `0.23` semver; crates.io license metadata read at fetch 2026-10-18) | Apache-2.0 OR ISC OR MIT | TLS 1.3 on the PC side of the link (D16: standard maintained crypto) | https://crates.io/crates/rustls ; https://github.com/rustls/rustls |
 | ring (direct Rust crate, `pc/` receiver) | 0.17.14 (pinned `0.17`; pulled by rustls's `ring` crypto provider and rcgen; crates.io license metadata read) | Apache-2.0 AND ISC (dual, as declared on crates.io) | SHA-256/ECC backend under rustls and rcgen | https://crates.io/crates/ring ; https://github.com/briansmith/ring |
 | rcgen (direct Rust crate, `pc/` receiver) | 0.14.10 (pinned `0.14`; crates.io license metadata read) | MIT OR Apache-2.0 | Generates the receiver's persistent self-signed TLS certificate at first run (pairing pins it) | https://crates.io/crates/rcgen ; https://github.com/rustls/rcgen |
+| windows (direct Rust crate, `pc/` receiver, Windows-only target) | 0.62.2 (pinned `0.62`; crates.io license metadata read 2026-10-18) | MIT OR Apache-2.0 | WinUSB + SetupAPI bindings for the AOA switch (item 8): enumerate the phone's USB device interfaces, open the one bound to WinUSB, send control requests 51/52/53 to switch the phone into accessory mode | https://crates.io/crates/windows ; https://github.com/microsoft/windows-rs |
 
 ## Candidates (not used yet; licenses to confirm from the real LICENSE file)
 

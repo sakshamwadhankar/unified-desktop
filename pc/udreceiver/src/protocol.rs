@@ -26,8 +26,8 @@ pub const FLAG_MORE_FOLLOWS: u8 = 0b0000_0010; // logical message continues
 /// Strict priority: input > control > video > bench (OPTIMIZATION 5).
 pub const CHANNEL_PRIORITY: [u8; 4] = [CH_INPUT, CH_CONTROL, CH_VIDEO, CH_BENCH];
 
+#[allow(dead_code)] // diagnostics/log lines (bin CLI); session logging wires this later
 pub fn channel_name(ch: u8) -> &'static str {
-    // diagnostics/log lines (bin CLI); allow(dead_code) until session logging uses it
     #[allow(clippy::match_same_arms)]
     match ch {
         CH_CONTROL => "control",
@@ -142,6 +142,7 @@ pub struct PriorityWriter<W: Write> {
 }
 
 impl<W: Write> PriorityWriter<W> {
+    #[allow(dead_code)] // used by this module's tests; the session pumps via emit_one()
     pub fn new(inner: W) -> Self {
         PriorityWriter {
             inner,
@@ -155,6 +156,7 @@ impl<W: Write> PriorityWriter<W> {
         }
     }
 
+    #[allow(dead_code)] // tests + the upcoming video path queue frames through this
     pub fn push(&mut self, msg: Message) -> Result<(), &'static str> {
         if !matches!(msg.channel, CH_CONTROL | CH_INPUT | CH_VIDEO | CH_BENCH) {
             return Err("unknown channel");
@@ -166,6 +168,7 @@ impl<W: Write> PriorityWriter<W> {
         Ok(())
     }
 
+    #[allow(dead_code)] // PriorityWriter API completeness; session pumps via emit_one()
     pub fn is_empty(&self) -> bool {
         self.queues.iter().all(|q| q.is_empty())
     }
@@ -204,6 +207,7 @@ impl<W: Write> PriorityWriter<W> {
     }
 
     /// Emit until empty; flush at the end.
+    #[allow(dead_code)] // kept for one-shot drains; the session loops on emit_one()
     pub fn emit_all(&mut self) -> io::Result<usize> {
         let mut total = 0;
         while let Some(n) = self.emit_one()? {
@@ -213,6 +217,7 @@ impl<W: Write> PriorityWriter<W> {
         Ok(total)
     }
 
+    #[allow(dead_code)] // access to the inner writer (flush/stat probes)
     pub fn get_mut(&mut self) -> &mut W {
         &mut self.inner
     }

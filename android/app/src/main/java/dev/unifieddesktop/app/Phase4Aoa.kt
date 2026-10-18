@@ -62,6 +62,42 @@ object Phase4Aoa {
         return false
     }
 
+    /**
+     * User-path hand-off (manager 21:55): open the accessory and give the FD to the link
+     * service, so AOA needs no adb either. The service adopts the FD; the TLS/bulk session
+     * over it is item-8 work.
+     */
+    fun handOff(ctx: Context, acc: UsbAccessory): Boolean {
+        val um = um(ctx)
+        if (!um.hasPermission(acc)) {
+            say(ctx, "AOA handOff: permission missing for ${acc.model}")
+            return false
+        }
+        val pfd = try {
+            um.openAccessory(acc)
+        } catch (t: Throwable) {
+            say(ctx, "AOA handOff: openAccessory threw $t")
+            null
+        }
+        if (pfd == null) {
+            say(ctx, "AOA handOff: openAccessory returned null")
+            return false
+        }
+        val i = Intent(ctx, Phase4LinkService::class.java)
+            .setAction(Phase4LinkService.ACTION_ACCESSORY)
+            .putExtra("fd", pfd.detachFd())
+            .putExtra("m", acc.manufacturer)
+            .putExtra("model", acc.model)
+        return try {
+            ctx.startService(i)
+            say(ctx, "AOA handOff sent fd to link service m=${acc.manufacturer} model=${acc.model}")
+            true
+        } catch (t: Throwable) {
+            say(ctx, "AOA handOff: startService failed $t")
+            false
+        }
+    }
+
     private fun say(ctx: Context, line: String) {
         Phase4Log.say(ctx, line)
     }

@@ -37,5 +37,11 @@
    <meta-data android:name="android.hardware.usb.action.USB_ACCESSORY_ATTACHED"
               android:resource="@xml/usb_accessory_filter"/>
   </activity>
+   <!-- Accessory permission result (user path, manager 21:55). -->
+   <receiver android:name=".Phase4AccessoryReceiver" android:exported="false">
+    <intent-filter>
+     <action android:name="dev.unifieddesktop.app.p4.USB_PERMISSION"/>
+    </intent-filter>
+   </receiver>
  </application>
 </manifest>

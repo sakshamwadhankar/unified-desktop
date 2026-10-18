@@ -36,7 +36,7 @@ object Phase4Dispatch {
                     "status" -> Phase4Log.say(
                         ctx,
                         "STATUS running=${Phase4LinkService.isRunning()} live=${Phase4LinkService.liveCount()}" +
-                            " last=${Phase4LinkService.stateLine()}"
+                            " acc=${Phase4LinkService.accessoryOpen()} last=${Phase4LinkService.stateLine()}"
                     )
                     "dump" -> {
                         // Thread dump for evidence (kill -3 goes to /data/anr which shell

@@ -40,7 +40,7 @@ impl Session {
     pub fn describe(&self) -> String {
         format!(
             "phone={} pinned={}",
-            fingerprint_hex(&self.phone_fp)[..16].to_string(),
+            &fingerprint_hex(&self.phone_fp)[..16],
             self.pinned
         )
     }
@@ -148,7 +148,7 @@ pub fn connect_and_pair(
         (
             format!(
                 "reconnected silently to pinned phone {} ({})",
-                fingerprint_hex(&fp)[..16].to_string(),
+                &fingerprint_hex(&fp)[..16],
                 addr
             ),
             Session {
@@ -170,7 +170,7 @@ pub fn connect_and_pair(
         store.remember(&fp, label);
         println!("Phone confirmed. Pin saved to {}", store.path().display());
         (
-            format!("paired with phone {} ({addr})", fingerprint_hex(&fp)[..16].to_string()),
+            format!("paired with phone {} ({addr})", &fingerprint_hex(&fp)[..16]),
             Session {
                 tls,
                 phone_fp: fp,

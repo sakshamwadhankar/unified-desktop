@@ -8,6 +8,17 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 ring = "0.17"
 rcgen = "0.14"
 
+# AOA switch for item 8 (THIRD_PARTY.md row added 2026-10-18 before first use).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Devices_Usb",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+] }
+
 [profile.release]
 panic = "abort"
 strip = true

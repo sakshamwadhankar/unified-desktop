@@ -53,13 +53,18 @@ for our test harness.
 
 1. Leave developer options disabled (never tap "Build number" seven times); keep USB
    debugging off.
-2. Install the app normally and open it once (the link service starts itself / is started
-   by the PC step).
+2. Install the app normally and open it once. It asks for the notification permission
+   (Android 13+ dialog; required for the `Pair this PC?` notification) and shows a
+   `Start link` / `Stop link` pair of buttons with a status line. Tap `Start link`; the
+   `Desktop link running` notification appears. No ADB, no harness broadcast.
 3. Wi-Fi: phone and PC on the same network; on the PC run `udreceiver discover`, then
-   `udreceiver pair --addr <found-ip>:47600`. Expect the `Pair this PC?` notification with
-   the same 6-digit code as the PC, then Yes -> the bench must run. No ADB, no driver.
-4. USB: plug the phone in. Expect the Android accessory dialog for unified-desktop (or the
-   tether path from item 9). No driver install is offered by us, no `adb` anywhere.
+   `udreceiver pair --addr auto` (or `--addr <found-ip>:47600`). Expect the
+   `Pair this PC?` notification with the same 6-digit code as the PC, then Yes -> the
+   bench must run. No ADB, no driver.
+4. USB: plug the phone in. Expect the Android accessory dialog for unified-desktop; the
+   attach starts the link service itself and hands it the accessory FD (item 8; the TLS
+   transport over that FD is not wired yet), or the tether path from item 9. No driver
+   install is offered by us, no `adb` anywhere.
 5. If any step demands developer mode, ADB or root, or a system dialog says "USB debugging
    required", that is a bug: screenshot it and file it in BUGS.md.
 
