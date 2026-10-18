@@ -1,6 +1,6 @@
 //! unified-desktop Phase-4 PC receiver skeleton (D16: Rust).
 //! Usage:
-//!   udrxcb discover [--seconds <s>]                     mDNS browse for the phone (item 7)
+//!   udrxcb discover [--seconds <s>] [--to <ip[:port]>]  mDNS browse for the phone (item 7)
 //!   udrxcb pair --addr <ip:port|auto> [--label <label>]  first pair (6-digit code compare)
 //!   udrxcb bench --addr <ip:port|auto> [--seconds <s>]   RTT + throughput against a paired phone
 //!   udrxcb trust list | trust forget <fpr-prefix>       the trusted-phone store
@@ -53,7 +53,7 @@ fn flag(args: &[String], name: &str, default: &str) -> String {
 
 fn print_usage() {
     println!(
-        "usage:\n  udrxcb discover [--seconds <s>]\n  \
+        "usage:\n  udrxcb discover [--seconds <s>] [--to <ip[:port]>]\n  \
          udrxcb aoa list | probe | start [--vid <hex>]      (Windows host, item 8)\n  \
          udrxcb pair --addr <ip:port|auto> [--label <label>]\n  \
          udrxcb bench --addr <ip:port|auto> [--seconds <s>] [--window-kib <n>]\n  \
@@ -91,12 +91,37 @@ fn cmd_aoa(rest: &[String]) -> ExitCode {
 
 fn cmd_discover(rest: &[String]) -> ExitCode {
     let secs: u64 = flag(rest, "--seconds", "2").parse().unwrap_or(2);
-    println!(
-        "discover: browsing mDNS for {} (unicast-response query to 224.0.0.251:5353, {}s)...",
-        mdns::SERVICE,
-        secs.max(1)
-    );
-    let found = mdns::browse(std::time::Duration::from_secs(secs.max(1)));
+    let to = flag(rest, "--to", "");
+    let to_addr = if to.is_empty() {
+        None
+    } else {
+        let parsed = if to.contains(':') {
+            to.parse::<std::net::SocketAddrV4>()
+        } else {
+            to.parse::<std::net::Ipv4Addr>()
+                .map(|ip| std::net::SocketAddrV4::new(ip, 5353))
+        };
+        match parsed {
+            Ok(a) => Some(a),
+            Err(_) => {
+                eprintln!("--to: '{to}' is not <ip> or <ip:port>");
+                return ExitCode::from(2);
+            }
+        }
+    };
+    match to_addr {
+        None => println!(
+            "discover: browsing mDNS for {} (QU to 224.0.0.251:5353 from each local address, {}s)...",
+            mdns::SERVICE,
+            secs.max(1)
+        ),
+        Some(a) => println!(
+            "discover: unicast query for {} to {a} ({}s)...",
+            mdns::SERVICE,
+            secs.max(1)
+        ),
+    }
+    let found = mdns::browse_with(std::time::Duration::from_secs(secs.max(1)), to_addr);
     if found.is_empty() {
         eprintln!(
             "DISCOVER none: no answer for {}. Check: phone and PC on the same Wi-Fi, link \

@@ -116,22 +116,18 @@ impl ReceiverIdentity {
 
 // ------------------------------------------------------------------ server verifier
 
-#[derive(Clone)]
-pub enum ServerPinMode {
-    /// First-ever connect: accept a properly self-signed server cert (validated as
-    /// self-signed by webpki with the incoming cert as its own trust anchor) and report
-    /// it through `conn.peer_certificates()` for the pairing-code + pin step.
-    FirstConnect,
-    /// Normal reconnect: only pinned phone certs verify (byte-equal pin; the TLS 1.3
-    /// handshake signature is still fully verified against the cert's own key, so a
-    /// replayed cert without its private key fails).
-    Pinned(Vec<Vec<u8>>),
-}
-
 /// One verifier per connection (constructed per connect; never shared).
+///
+/// The verifier accepts any valid self-signed phone cert (webpki with the incoming cert
+/// as its own trust anchor: signature, validity, key usage and SAN are all checked, and
+/// the TLS 1.3 handshake signature proves the peer holds the cert's private key). It
+/// deliberately does NOT refuse a phone that is absent from the trust store:
+/// `session::connect_and_pair` looks the fingerprint up and either reconnects silently
+/// (pinned phone) or runs the visible pairing step (6-digit code + Yes on the phone).
+/// A new or second phone can therefore always pair, even when other phones are pinned;
+/// the pairing code binds both certificates.
 #[derive(Clone)]
 pub struct PhoneCertVerifier {
-    mode: ServerPinMode,
     algos: WebPkiSupportedAlgorithms,
 }
 
@@ -142,95 +138,78 @@ impl std::fmt::Debug for PhoneCertVerifier {
 }
 
 impl PhoneCertVerifier {
-    pub fn new(mode: ServerPinMode) -> Self {
+    pub fn new() -> Self {
         ensure_ring_default();
         PhoneCertVerifier {
-            mode,
             algos: rustls::crypto::ring::default_provider().signature_verification_algorithms,
         }
     }
 
     /// rustls ClientConfig for the PC as TLS client, with our cert as client cert.
     pub fn client_config(&self, identity: &ReceiverIdentity) -> Arc<rustls::ClientConfig> {
-        let self_clone = self.clone();
-        struct V(PhoneCertVerifier);
-        impl std::fmt::Debug for V {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("V(...)")
-            }
-        }
-        impl ServerCertVerifier for V {
-            fn verify_server_cert(
-                &self,
-                end_entity: &CertificateDer<'_>,
-                _intermediates: &[CertificateDer<'_>],
-                _server_name: &ServerName<'_>,
-                ocsp: &[u8],
-                now: UnixTime,
-            ) -> Result<ServerCertVerified, RustlsError> {
-                match &self.0.mode {
-                    ServerPinMode::Pinned(pins) => {
-                        let fp = cert_fingerprint(end_entity.as_ref());
-                        if pins.iter().any(|p| p.as_slice() == fp.as_slice()) {
-                            return Ok(ServerCertVerified::assertion());
-                        }
-                        Err(RustlsError::General(format!(
-                            "phone certificate {} is not the pinned phone",
-                            fingerprint_hex(&fp)
-                        )))
-                    }
-                    ServerPinMode::FirstConnect => {
-                        // Validate the self-signed cert with webpki, root = itself. This
-                        // checks signatures, validity, key usage, and SAN. webpki name
-                        // check runs against TLS_SERVER_NAME, which the phone cert must
-                        // carry as SAN.
-                        let mut roots = RootCertStore::empty();
-                        roots
-                            .add(end_entity.clone())
-                            .map_err(|e| RustlsError::General(format!("bad cert: {e}")))?;
-                        let wp = WebPkiServerVerifier::builder(Arc::new(roots))
-                            .build()
-                            .map_err(|e| RustlsError::General(format!("verifier: {e}")))?;
-                        let name = ServerName::try_from(TLS_SERVER_NAME.to_string())
-                            .map_err(|e| RustlsError::General(format!("name: {e}")))?;
-                        wp.verify_server_cert(end_entity, &[], &name, ocsp, now)
-                    }
-                }
-            }
-
-            fn verify_tls12_signature(
-                &self,
-                _message: &[u8],
-                _cert: &CertificateDer<'_>,
-                _dss: &DigitallySignedStruct,
-            ) -> Result<HandshakeSignatureValid, RustlsError> {
-                Err(RustlsError::General("TLS 1.2 is not supported".to_string()))
-            }
-
-            fn verify_tls13_signature(
-                &self,
-                message: &[u8],
-                cert: &CertificateDer<'_>,
-                dss: &DigitallySignedStruct,
-            ) -> Result<HandshakeSignatureValid, RustlsError> {
-                // NEVER skipped: proves the peer holds the private key of the cert.
-                rustls::crypto::verify_tls13_signature(message, cert, dss, &self.0.algos)
-            }
-
-            fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-                self.0.algos.supported_schemes()
-            }
-        }
-
         let cfg = rustls::ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(V(self_clone)))
+            .with_custom_certificate_verifier(Arc::new(self.clone()))
             .with_client_auth_cert(
                 vec![identity.rustls_cert()],
                 identity.rustls_key_der(),
             )
             .expect("client config");
         Arc::new(cfg)
+    }
+}
+
+impl Default for PhoneCertVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ServerCertVerifier for PhoneCertVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        ocsp: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, RustlsError> {
+        // Validate the self-signed cert with webpki, root = itself. This checks
+        // signatures, validity, key usage, and SAN; the webpki name check runs against
+        // TLS_SERVER_NAME, which every phone cert must carry as SAN.
+        let mut roots = RootCertStore::empty();
+        roots
+            .add(end_entity.clone())
+            .map_err(|e| RustlsError::General(format!("bad cert: {e}")))?;
+        let wp = WebPkiServerVerifier::builder(Arc::new(roots))
+            .build()
+            .map_err(|e| RustlsError::General(format!("verifier: {e}")))?;
+        let name = ServerName::try_from(TLS_SERVER_NAME.to_string())
+            .map_err(|e| RustlsError::General(format!("name: {e}")))?;
+        wp.verify_server_cert(end_entity, &[], &name, ocsp, now)
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
+        Err(RustlsError::General("TLS 1.2 is not supported".to_string()))
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
+        // NEVER skipped: proves the peer holds the private key of the cert.
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algos)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.algos.supported_schemes()
     }
 }
 
@@ -396,7 +375,7 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 
-    /// Serial combined test: identity persistence + verifier modes (both temporarily set
+    /// Serial combined test: identity persistence + verifier config (temporarily sets
     /// UD_RECEIVER_DIR; combined so parallel tests never race the env var).
     #[test]
     fn identity_and_verifier_modes() {
@@ -418,19 +397,71 @@ mod tests {
         params.distinguished_name = rcgen::DistinguishedName::new();
         params.is_ca = rcgen::IsCa::ExplicitNoCa;
         let cert = params.self_signed(&key).unwrap();
-        let der = cert.der().as_ref().to_vec();
+        let der = CertificateDer::from(cert.der().as_ref().to_vec());
 
-        // FirstConnect config builds; pinned config builds
-        let v = PhoneCertVerifier::new(ServerPinMode::FirstConnect);
+        // the client config builds and the verifier accepts this valid self-signed cert
+        let v = PhoneCertVerifier::new();
         let cfg = v.client_config(&id);
-        let vp = PhoneCertVerifier::new(ServerPinMode::Pinned(vec![der.clone()]));
-        let cfgp = vp.client_config(&id);
-        let _ = (cfg, cfgp);
+        let name = ServerName::try_from(TLS_SERVER_NAME.to_string()).unwrap();
+        assert!(v
+            .verify_server_cert(&der, &[], &name, &[], UnixTime::now())
+            .is_ok());
+        let _ = cfg;
 
         match saved {
             Some(v) => std::env::set_var("UD_RECEIVER_DIR", v),
             None => std::env::remove_var("UD_RECEIVER_DIR"),
         }
+        fs::remove_dir_all(dir).ok();
+    }
+
+    /// Regression (item 7 review): the PC used to hard-fail with "not the pinned phone"
+    /// whenever its store held *another* phone's pin, so a new or second phone could
+    /// never pair. The handshake must accept any valid self-signed phone cert; the
+    /// pinned-vs-missing decision then happens in `session::connect_and_pair`: a pinned
+    /// phone reconnects silently, any other phone runs the visible pairing step.
+    #[test]
+    fn unknown_phone_cert_is_accepted_so_it_can_pair() {
+        ensure_ring_default();
+        let mk = |san: &str| -> CertificateDer<'static> {
+            let key = rcgen::KeyPair::generate().unwrap();
+            let mut params = rcgen::CertificateParams::new(vec![san.to_string()]).unwrap();
+            params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
+            params.distinguished_name = rcgen::DistinguishedName::new();
+            params.is_ca = rcgen::IsCa::ExplicitNoCa;
+            CertificateDer::from(params.self_signed(&key).unwrap().der().as_ref().to_vec())
+        };
+        let v = PhoneCertVerifier::new();
+        let name = ServerName::try_from(TLS_SERVER_NAME.to_string()).unwrap();
+        let unknown_but_valid = mk(TLS_SERVER_NAME);
+        assert!(
+            v.verify_server_cert(&unknown_but_valid, &[], &name, &[], UnixTime::now())
+                .is_ok(),
+            "a phone absent from the store must reach the pairing step, not be refused"
+        );
+        let wrong_name = mk("some.other.name");
+        assert!(
+            v.verify_server_cert(&wrong_name, &[], &name, &[], UnixTime::now())
+                .is_err(),
+            "a cert that is not a phone cert (bad SAN) must still be refused"
+        );
+
+        // the store lookup `connect_and_pair` decides on (same rule as the phone side)
+        let dir = temp_dir("unknown-store");
+        let store = TrustedPhoneStore {
+            path: dir.join("phones.ndjson"),
+        };
+        let pinned_phone = [0x11u8; 32];
+        let new_phone = [0x22u8; 32];
+        store.remember(&pinned_phone, "first phone");
+        assert!(
+            store.find(&pinned_phone).is_some(),
+            "pinned phone -> silent reconnect"
+        );
+        assert!(
+            store.find(&new_phone).is_none(),
+            "unknown phone -> visible pairing step"
+        );
         fs::remove_dir_all(dir).ok();
     }
 }

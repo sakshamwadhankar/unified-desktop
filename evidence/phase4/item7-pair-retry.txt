@@ -1,0 +1,41 @@
+== item 7b: fresh pairing (phone reinstalled 23:47) + bench with the fixed PC binary ==
+started 00:05:20
+mCallState=
+0
+screenshot item7-5-pair-notification.png png=True
+screen texts: [redacted by the manager (privacy): the dump was the phone's notification shade. Our 'Desktop link running' notification visible: yes. Our 'Pair this PC?' prompt in this dump: no.]
+tap: NOT FOUND: Yes
+screenshot item7-6-after-yes.png png=True
+--- pair output ---
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+PC code:  038762  <-- MUST match the code on the phone
+Waiting for Yes on the phone (up to 300s) ...
+Phone confirmed. Pin saved to C:\Users\Asus\AppData\Roaming\unified-desktop-receiver\trusted-phones.ndjson
+OK: paired with phone B20B88AFAB081BF1 (192.168.1.16:47600)
+
+--- trust store ---
+B20B88AFAB081BF1BDFEBAE4B64DED83FF70A6D7FD0C451171DE3562D1E54FB5  label=unified-desktop phone  added=1792348530
+
+--- bench over Wi-Fi (5 s, fixed binary) ---
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+link: reconnected silently to pinned phone B20B88AFAB081BF1 (192.168.1.16:47600)
+=== BENCH (PC -> 192.168.1.16:47600, pinned TLS session) ===
+RTT (1000 samples, 64 B per sample): p50 14.88 ms | p95 19.59 ms | p99 30.10 ms | min 5.26 | max 39.79
+Throughput: 8.68 MB/s over 5 s (44 MB echoed)
+
+--- phone p4.log tail ---
+1792347689960 TLS_UP role=server peer-fpr=FAAED033F62353AC pins=0 proto=TLSv1.3 cipher=TLS_AES_256_GCM_SHA3
+1792347689996 PAIRING prompt code=038762 client-fpr=FAAED033F62353AC
+1792348422764 SESSION io SocketException: Connection reset
+1792348422773 SESSION_END peer=FAAED033F62353AC
+1792348526661 SERVER accepted connection from /192.168.1.13
+1792348526668 SERVER waiting for accept...
+1792348526732 TLS_UP role=server peer-fpr=FAAED033F62353AC pins=0 proto=TLSv1.3 cipher=TLS_AES_256_GCM_SHA3
+1792348526800 PAIRING prompt code=038762 client-fpr=FAAED033F62353AC
+1792348534439 PAIR_YES stored fpr=FAAED033F62353AC pins=1
+1792348534447 SESSION_END peer=FAAED033F62353AC
+1792348556868 SERVER accepted connection from /192.168.1.13
+1792348556870 SERVER waiting for accept...
+1792348556904 TLS_UP role=server peer-fpr=FAAED033F62353AC pins=1 proto=TLSv1.3 cipher=TLS_AES_256_GCM_SHA3
+1792348577398 SESSION_END peer=FAAED033F62353AC
+finished 00:06:13 (54 s)

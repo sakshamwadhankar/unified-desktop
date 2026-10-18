@@ -8,6 +8,12 @@
 //! (another mDNS daemon) it falls back to an ephemeral port and relies on QU. Answers
 //! missing the SRV/A records are followed up with direct questions.
 //!
+//! On a laptop with several adapters (VPN client, hypervisor switches, Wi-Fi Direct,
+//! WSL), an mDNS send from a 0.0.0.0-bound socket can leave through the wrong interface
+//! and never reach the LAN: the same query from a socket bound to the address the OS
+//! uses for the multicast group does reach it (item 7 finding, 2026-10-18). browse
+//! therefore binds that address when browsing (`--to` keeps the plain socket).
+//!
 //! `parse_answers`/`resolve` are pure and unit-tested against a synthetic packet
 //! (compression pointers included); the real proof is item 7 on the phone.
 
@@ -160,8 +166,8 @@ fn resolve(recs: &Recs) -> Vec<Found> {
     out
 }
 
-fn exchange(sock: &UdpSocket, pkt: &[u8], dur: Duration, recs: &mut Recs) {
-    let _ = sock.send_to(pkt, SocketAddrV4::new(MDNS, PORT));
+fn exchange(sock: &UdpSocket, pkt: &[u8], dur: Duration, recs: &mut Recs, dest: SocketAddrV4) {
+    let _ = sock.send_to(pkt, dest);
     let deadline = Instant::now() + dur;
     let mut buf = [0u8; 4096];
     while Instant::now() < deadline {
@@ -171,17 +177,101 @@ fn exchange(sock: &UdpSocket, pkt: &[u8], dur: Duration, recs: &mut Recs) {
     }
 }
 
+/// Local IPv4 addresses a phone on the LAN could be reached from: the machine's own
+/// addresses from host-name resolution (Windows registers every adapter there), without
+/// loopback/link-local, de-duplicated, ordinary 192.168/10/172.16-31 LAN ranges first.
+/// WARP, hypervisor switches and WSL adapters stay in the list as later attempts -- they
+/// simply do not answer, so the browse costs a short probe each.
+fn lan_candidates() -> Vec<Ipv4Addr> {
+    use std::net::ToSocketAddrs;
+    let mut v: Vec<Ipv4Addr> = Vec::new();
+    let host = std::env::var("COMPUTERNAME").unwrap_or_default();
+    if !host.is_empty() {
+        if let Ok(addrs) = (host.as_str(), 0u16).to_socket_addrs() {
+            for a in addrs {
+                if let std::net::SocketAddr::V4(v4) = a {
+                    let ip = *v4.ip();
+                    if !ip.is_loopback()
+                        && !ip.is_unspecified()
+                        && !ip.is_multicast()
+                        && !ip.is_link_local()
+                        && !v.contains(&ip)
+                    {
+                        v.push(ip);
+                    }
+                }
+            }
+        }
+    }
+    v.sort_by_key(|ip| {
+        let o = ip.octets();
+        if o[0] == 192 && o[1] == 168 {
+            0
+        } else if o[0] == 10 {
+            1
+        } else if o[0] == 172 && (16..=31).contains(&o[1]) {
+            3
+        } else {
+            2
+        }
+    });
+    v
+}
+
 /// Browse for the phone's NSD service for up to `timeout` (plus follow-ups).
 pub fn browse(timeout: Duration) -> Vec<Found> {
-    let Ok(sock) = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, PORT))
+    browse_with(timeout, None)
+}
+
+/// `to = Some(addr)` sends the query unicast to `addr` instead of 224.0.0.251:5353.
+/// Useful when a local process (on Windows, the DNS Client service) owns port 5353, and
+/// as a diagnostic of the phone's mDNS answer path (item 7).
+///
+/// Multicast browse tries each local IPv4 address as the socket's source, because with
+/// several adapters (WARP, VMware, WSL, Wi-Fi Direct) an unbound socket's multicast send
+/// can leave through a tunnel that never reaches the LAN (item 7 finding: the same
+/// query from a socket bound to the Wi-Fi address is answered). First address that
+/// answers wins; the unbound multicast path stays as the last attempt.
+pub fn browse_with(timeout: Duration, to: Option<SocketAddrV4>) -> Vec<Found> {
+    if let Some(dest) = to {
+        return browse_once(Ipv4Addr::UNSPECIFIED, timeout, dest, false);
+    }
+    let dest = SocketAddrV4::new(MDNS, PORT);
+    for ip in lan_candidates() {
+        let found = browse_once(ip, Duration::from_millis(700), dest, true);
+        if !found.is_empty() {
+            eprintln!("mdns: answer via {ip}");
+            return found;
+        }
+    }
+    let found = browse_once(Ipv4Addr::UNSPECIFIED, timeout, dest, true);
+    if !found.is_empty() {
+        eprintln!("mdns: answer via 0.0.0.0 (OS-chosen interface)");
+    }
+    found
+}
+
+/// One browse attempt: bind `bind_ip` (0.0.0.0 = let the OS choose), ask for the PTR,
+/// follow up on missing SRV/A records, and resolve. Joins the multicast group when the
+/// destination is the mDNS group, so multicast answers on port 5353 are heard too.
+fn browse_once(
+    bind_ip: Ipv4Addr,
+    timeout: Duration,
+    dest: SocketAddrV4,
+    join_group: bool,
+) -> Vec<Found> {
+    let Ok(sock) = UdpSocket::bind((bind_ip, PORT))
+        .or_else(|_| UdpSocket::bind((bind_ip, 0)))
         .or_else(|_| UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)))
     else {
         return Vec::new();
     };
-    let _ = sock.join_multicast_v4(&MDNS, &Ipv4Addr::UNSPECIFIED);
+    if join_group {
+        let _ = sock.join_multicast_v4(&MDNS, &bind_ip);
+    }
     let _ = sock.set_read_timeout(Some(Duration::from_millis(250)));
     let mut recs = Recs::default();
-    exchange(&sock, &query(&[(SERVICE, 12)]), timeout, &mut recs);
+    exchange(&sock, &query(&[(SERVICE, 12)]), timeout, &mut recs, dest);
     let missing: Vec<String> = recs
         .ptr
         .iter()
@@ -190,7 +280,7 @@ pub fn browse(timeout: Duration) -> Vec<Found> {
         .collect();
     if !missing.is_empty() {
         let q: Vec<(&str, u16)> = missing.iter().map(|n| (n.as_str(), 33u16)).collect();
-        exchange(&sock, &query(&q), Duration::from_millis(900), &mut recs);
+        exchange(&sock, &query(&q), Duration::from_millis(900), &mut recs, dest);
     }
     let hosts: Vec<String> = recs
         .srv
@@ -200,7 +290,7 @@ pub fn browse(timeout: Duration) -> Vec<Found> {
         .collect();
     if !hosts.is_empty() {
         let q: Vec<(&str, u16)> = hosts.iter().map(|n| (n.as_str(), 1u16)).collect();
-        exchange(&sock, &query(&q), Duration::from_millis(900), &mut recs);
+        exchange(&sock, &query(&q), Duration::from_millis(900), &mut recs, dest);
     }
     resolve(&recs)
 }
@@ -282,5 +372,48 @@ mod tests {
         assert_eq!(&q[4..6], &1u16.to_be_bytes()); // qd=1
         assert_eq!(*q.last().unwrap(), 0x01); // unicast-response bit in qclass
         assert_eq!(q[12], 7); // first label "_udlink" (7 bytes)
+    }
+
+    #[test]
+    fn lan_candidates_are_unicast_and_deduped() {
+        let v = lan_candidates();
+        let mut seen = std::collections::HashSet::new();
+        for ip in &v {
+            assert!(!ip.is_loopback() && !ip.is_multicast() && !ip.is_unspecified());
+            assert!(seen.insert(*ip), "duplicate candidate {ip}");
+        }
+    }
+
+    /// End-to-end socket path: a loopback "phone" answers one query; browse_with must
+    /// bind, send, receive (unicast), parse and hand back the resolved address.
+    #[test]
+    fn socket_roundtrip_unicast_responder() {
+        use std::net::UdpSocket;
+        let responder = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let SocketAddrV4 { .. } = match responder.local_addr().unwrap() {
+            std::net::SocketAddr::V4(v4) => v4,
+            std::net::SocketAddr::V6(_) => panic!("expected v4"),
+        };
+        let responder_port = responder.local_addr().unwrap().port();
+        responder
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let answer = pkt_with(SERVICE);
+        let t = std::thread::spawn(move || {
+            let mut buf = [0u8; 512];
+            if let Ok((n, from)) = responder.recv_from(&mut buf) {
+                assert!(n > 12, "expected an mDNS query, got {n} bytes");
+                let _ = responder.send_to(&answer, from);
+            }
+        });
+        let found = browse_with(
+            Duration::from_millis(700),
+            Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, responder_port)),
+        );
+        t.join().unwrap();
+        assert_eq!(found.len(), 1, "found={found:?}");
+        assert_eq!(found[0].instance, "unified-desktop._udlink._tcp.local");
+        assert_eq!(found[0].ip, "192.168.1.42");
+        assert_eq!(found[0].port, 47600);
     }
 }

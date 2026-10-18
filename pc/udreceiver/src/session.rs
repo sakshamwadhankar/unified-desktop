@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use rustls::StreamOwned;
 
-use crate::crypto::{cert_fingerprint, fingerprint_hex, pairing_code, PhoneCertVerifier, ReceiverIdentity, ServerPinMode, TLS_SERVER_NAME};
+use crate::crypto::{cert_fingerprint, fingerprint_hex, pairing_code, PhoneCertVerifier, ReceiverIdentity, TLS_SERVER_NAME};
 use crate::protocol::*;
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -49,7 +49,6 @@ impl Session {
 fn tls_connect(
     addr: &str,
     identity: &ReceiverIdentity,
-    pins: Vec<Vec<u8>>,
 ) -> Result<StreamOwned<rustls::ClientConnection, TcpStream>, String> {
     let stream = TcpStream::connect_timeout(
         &addr
@@ -59,12 +58,9 @@ fn tls_connect(
     )
     .map_err(|e| format!("tcp connect {addr}: {e}"))?;
     let _ = stream.set_nodelay(true);
-    let mode = if pins.is_empty() {
-        ServerPinMode::FirstConnect
-    } else {
-        ServerPinMode::Pinned(pins)
-    };
-    let verifier = PhoneCertVerifier::new(mode);
+    // The verifier accepts any valid self-signed phone cert; whether the phone is
+    // already pinned decides silent reconnect vs the pairing step, in connect_and_pair.
+    let verifier = PhoneCertVerifier::new();
     let cfg = verifier.client_config(identity);
     let name = rustls::pki_types::ServerName::try_from(TLS_SERVER_NAME.to_string())
         .map_err(|e| format!("server name: {e}"))?;
@@ -113,23 +109,7 @@ pub fn connect_and_pair(
     store: &crate::crypto::TrustedPhoneStore,
     label: &str,
 ) -> Result<(Session, String), String> {
-    let pins = store.entries();
-    let pinned_fps = pins
-        .iter()
-        .filter_map(|(f, _, _)| {
-            let mut fp = [0u8; 32];
-            if f.len() == 64 && f.chars().all(|c| c.is_ascii_hexdigit()) {
-                for (i, chunk) in f.as_bytes().chunks(2).enumerate() {
-                    fp[i] = u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16)
-                        .unwrap_or(0);
-                }
-                Some(fp.to_vec())
-            } else {
-                None
-            }
-        })
-        .collect();
-    let mut tls = tls_connect(addr, identity, pinned_fps)?;
+    let mut tls = tls_connect(addr, identity)?;
 
     // complete the TLS handshake explicitly so we can read the peer cert out
     tls.conn
@@ -143,6 +123,11 @@ pub fn connect_and_pair(
         .ok_or("phone presented no certificate")?;
     let fp = cert_fingerprint(&phone_cert);
 
+    // A phone already in the trust store reconnects silently; any other phone (new,
+    // second, or re-flashed device) goes through the visible pairing step below instead
+    // of being refused -- even when other phones are pinned. The handshake above only
+    // proved the peer holds a valid self-signed phone cert and its private key; the
+    // trust decision is the user comparing the 6-digit code and tapping Yes on the phone.
     let already_pinned = store.find(&fp).is_some();
     let (description, session) = if already_pinned {
         (
@@ -187,6 +172,22 @@ pub fn connect_and_pair(
 fn wait_pair_confirm(
     tls: &mut StreamOwned<rustls::ClientConnection, TcpStream>,
 ) -> Result<bool, String> {
+    // Tick the socket read so the deadline below is enforced even when the phone sends
+    // nothing while it waits for the user (the phone's pump suspends on the decision).
+    // Restored to blocking afterwards: the bench path manages its own reads.
+    let _ = tls.sock.set_read_timeout(Some(Duration::from_millis(500)));
+    let r = wait_pair_confirm_inner(tls);
+    let _ = tls.sock.set_read_timeout(None);
+    r
+}
+
+fn is_read_tick(e: &str) -> bool {
+    e.starts_with("stalled:")
+}
+
+fn wait_pair_confirm_inner(
+    tls: &mut StreamOwned<rustls::ClientConnection, TcpStream>,
+) -> Result<bool, String> {
     let deadline = Instant::now() + PAIR_CONFIRM_TIMEOUT;
     let mut dec = FrameDecoder::new();
     let mut pending = std::collections::VecDeque::new();
@@ -209,6 +210,7 @@ fn wait_pair_confirm(
                 }
             }
             Ok(None) => return Err("phone closed the connection while pairing".into()),
+            Err(e) if is_read_tick(&e) => continue, // no frame yet; deadline checked above
             Err(e) => return Err(e),
         }
     }
@@ -419,5 +421,17 @@ mod tests {
         let s = r.render("unit-test");
         assert!(s.contains("p50"));
         assert!(s.contains("42.50"));
+    }
+
+    #[test]
+    fn read_timeout_is_a_tick_not_a_pair_failure() {
+        // wait_pair_confirm sets a 500 ms socket read timeout so its 300 s deadline is
+        // enforced even while the phone shows the prompt and sends nothing: a read tick
+        // must continue the loop, any other error must end it.
+        assert!(is_read_tick(
+            "stalled: no inbound data within the socket read timeout"
+        ));
+        assert!(!is_read_tick("tls read: connection reset"));
+        assert!(!is_read_tick("protocol: bad frame"));
     }
 }

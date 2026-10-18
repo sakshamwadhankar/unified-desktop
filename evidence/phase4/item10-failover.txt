@@ -1,0 +1,40 @@
+== item 10: failover smoke - USB tether -> cut -> Wi-Fi -> back to tether ==
+Run 2026-10-19 00:36:00-00:37:30. Phone 2c0f6edc (USB tether + Wi-Fi); laptop Wi-Fi
+192.168.1.13. The phone's USB mode was never changed; adb stayed up throughout.
+
+NOTE ON METHOD: two scripted attempts aborted before step A completed ("STOP: no RNDIS
+adapter" from item10.ps1 at 00:32:56 and 00:34:33 although the adapter was up; the first
+was a pull-timing collision, the second is an open runner question under test). The final
+run drove the same steps directly, one call each, with the USB "pull" done PC-side by an
+elevated helper (owner-approved UAC): Disable-NetAdapter on the RNDIS adapter
+("Ethernet 2", ifIndex 10) mid-bench, re-enable on a signal file (item10-back.flag).
+
+A) Tether up (item 9 run, same link): RTT p50 4.06 / p95 5.20 / p99 6.64 ms
+   (1000 x 64 B, min 2.90 / max 13.43), 8.92 MB/s (5 s, 45 MB echoed) - item9-tether.txt.
+B) Cut (PC-side adapter disable) at 00:36:00.398 (elev-pulled.txt):
+   - PC bench (150 s) had connected over the tether at ~00:35:59.9; it died at 00:36:01.075
+     -> PC noticed the dead link in 0.7 s ("BENCH FAILED: tls read: An established
+     connection was aborted by the software in your host machine. (os error 10053)").
+   - Phone p4.log: accepted 1792350354812 -> "SESSION dead-timeout (no inbound in time)"
+     1792350378804 -> SESSION_END 1792350378805. Session lifetime 24.0 s; the bench was
+     alive ~0.6 s before the cut, so the phone closed the dead session ~23.5 s after the
+     last inbound frame. NO "SESSION force-close" line appears: the close came from the
+     session pump's read tick (15 s socket timeout), not the 15 s watchdog - logged as
+     B-046 (rule <=15 s missed by ~8.5 s in this run).
+   - Default route during B: still ifIndex 11 (Wi-Fi) only (guard readout).
+C) Wi-Fi failover: discover (4 s) -> DISCOVER unified-desktop._udlink._tcp.local
+   192.168.1.16:47600 host=android_swqs3yz9.local, "mdns: answer via 192.168.1.13";
+   bench: RTT p50 16.27 / p95 27.72 / p99 39.22 ms (min 4.64 / max 60.94), 11.46 MB/s
+   (5 s, 58 MB echoed). Phone accepted /192.168.1.13, SESSION_END 22.5 s later.
+D) Back to USB: helper re-enabled the adapter at 00:37:20.799 after 77 s
+   ("elev back ifIndex=10 metric=9999 tether_defaults=0"); guard: default route ifIndex=11
+   (Wi-Fi) only, ping 1.1.1.1 True; bench again over the tether: RTT p50 3.95 / p95 4.97 /
+   p99 6.16 ms (min 3.02 / max 15.69), 12.08 MB/s (5 s, 61 MB echoed).
+
+Routing rule (manager 00:35): when the tether came up, Windows gave the RNDIS adapter
+automatic metric 25 vs Wi-Fi's 30, so the laptop's default route had moved to the phone.
+An elevated one-liner (owner-approved UAC; ACTIVE store only, cleared at reboot) removed
+the tether default route and pinned its metric to 9999 for items 9-10. Every guard
+readout showed the ONLY default route as ifIndex 11 via 192.168.1.1, and ping 1.1.1.1
+True (WARP untouched; public traffic still rides WARP - route lookup for 1.1.1.1 gives
+172.16.0.2 / ifIndex 52). The metric is restored by the same helper at cleanup.

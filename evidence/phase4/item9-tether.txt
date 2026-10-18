@@ -1,0 +1,70 @@
+== item 9: USB tethering fallback ==
+started 00:30:55
+battery before: UsbHwStatus: 0 BatteryHwStatus: 0 BatteryIcStatus: 0 mUsbStatus: 0 status: 2 level: 1 Capacity level: 3
+mCallState=0
+--- phone: start link service via app UI (before any USB reconfig) ---
+start=tapped 'Start link' at 173,577; status=link: running=true live=0 acc=false last=already running
+--- owner: enable Settings > Hotspot and tethering > USB tethering now (script waits up to 120 s) ---
+RNDIS up: ifIndex=10 if=Ethernet 2 desc=Remote NDIS based Internet Sharing Device
+pcIp=10.165.255.217 phoneIp=10.165.255.65
+List of devices attached
+2c0f6edc	device
+
+
+route setup: tether ifIndex=10 metric=9999 applied; no default route on the tether interface; WARNING /32 route not added (needs elevation); on-link 10.165.255.65/24 route still reaches the phone; default route now: ifIndex=11 nexthop=192.168.1.1; all default routes: ifIndex=11via192.168.1.1m0; ping 1.1.1.1: True
+all default routes: ifIndex=11 via 192.168.1.1 metric=0
+ping 10.165.255.65: True
+--- pair over tether 10.165.255.65:47600 (pinned both sides: silent reconnect expected, no tap) ---
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+OK: reconnected silently to pinned phone B20B88AFAB081BF1 (10.165.255.65:47600)
+--- bench over tether (5 s) ---
+PC identity: FAAED033F62353AC (dir unified-desktop-receiver)
+link: reconnected silently to pinned phone B20B88AFAB081BF1 (10.165.255.65:47600)
+=== BENCH (PC -> 10.165.255.65:47600, pinned TLS session) ===
+RTT (1000 samples, 64 B per sample): p50 4.06 ms | p95 5.20 ms | p99 6.64 ms | min 2.90 | max 13.43
+Throughput: 8.92 MB/s over 5 s (45 MB echoed)
+
+--- phone p4.log tail ---
+1792347533673 IDENTITY generated fpr=B20B88AFAB081BF1
+1792347533694 FGS type connectedDevice
+1792347533694 START ok port=47600
+1792347533717 SERVER listening port=47600 factory=com.android.org.conscrypt.OpenSSLServerSocketFactoryImpl@493a955
+1792347533718 SERVER waiting for accept...
+1792347534656 NSD registered unified-desktop
+1792347542431 SERVER accepted connection from /192.168.1.13
+1792347542432 SERVER waiting for accept...
+1792347542470 TLS_UP role=server peer-fpr=FAAED033F62353AC pins=0 proto=TLSv1.3 cipher=TLS_AES_256_GCM_SHA3
+1792347542489 PAIRING prompt code=038762 client-fpr=FAAED033F62353AC
+1792347688246 SESSION io SocketException: Connection reset
+1792347688250 SESSION_END peer=FAAED033F62353AC
+1792347689917 SERVER accepted connection from /192.168.1.13
+1792347689923 SERVER waiting for accept...
+1792347689960 TLS_UP role=server peer-fpr=FAAED033F62353AC pins=0 proto=TLSv1.3 cipher=TLS_AES_256_GCM_SHA3
+1792347689996 PAIRING prompt code=038762 client-fpr=FAAED033F62353AC
+1792348422764 SESSION io SocketException: Connection reset
+1792348422773 SESSION_END peer=FAAED033F62353AC
+1792348526661 SERVER accepted connection from /192.168.1.13
+1792348526668 SERVER waiting for accept...
+1792348526732 TLS_UP role=server peer-fpr=FAAED033F62353AC pins=0 proto=TLSv1.3 cipher=TLS_AES_256_GCM_SHA3
+1792348526800 PAIRING prompt code=038762 client-fpr=FAAED033F62353AC
+1792348534439 PAIR_YES stored fpr=FAAED033F62353AC pins=1
+1792348534447 SESSION_END peer=FAAED033F62353AC
+1792348556868 SERVER accepted connection from /192.168.1.13
+1792348556870 SERVER waiting for accept...
+1792348556904 TLS_UP role=server peer-fpr=FAAED033F62353AC pins=1 proto=TLSv1.3 cipher=TLS_AES_256_GCM_SHA3
+1792348577398 SESSION_END peer=FAAED033F62353AC
+1792348787276 already running
+1792349008251 already running
+1792350070045 already running
+1792350088598 SERVER accepted connection from /10.165.255.217
+1792350088602 SERVER waiting for accept...
+1792350088647 TLS_UP role=server peer-fpr=FAAED033F62353AC pins=1 proto=TLSv1.3 cipher=TLS_AES_256_GCM_SHA3
+1792350088648 SESSION_END peer=FAAED033F62353AC
+1792350089305 SERVER accepted connection from /10.165.255.217
+1792350089307 SERVER waiting for accept...
+1792350089327 TLS_UP role=server peer-fpr=FAAED033F62353AC pins=1 proto=TLSv1.3 cipher=TLS_AES_256_GCM_SHA3
+1792350098561 SESSION_END peer=FAAED033F62353AC
+cleanup: removed /32 route 10.165.255.65; metric still 9999 (restore needs the elevated helper elev_restore.ps1); WARNING leftover tether routes: 10.165.255.255/32|ifIndex=10 10.165.255.217/32|ifIndex=10 10.165.255.0/24|ifIndex=10
+all default routes after cleanup: ifIndex=11 via 192.168.1.1 metric=0
+owner: turn USB tethering off in the phone UI (or leave it for item 10)
+finished 00:31:35

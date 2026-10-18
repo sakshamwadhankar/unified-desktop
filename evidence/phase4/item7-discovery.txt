@@ -1,0 +1,13 @@
+== item 7: mDNS discovery with no IP typed in (fixed binary) ==
+when: 2026-10-19 00:09:06
+command: udreceiver.exe discover --seconds 4
+exit: 0
+discover: browsing mDNS for _udlink._tcp.local (QU to 224.0.0.251:5353 from each local address, 4s)...
+DISCOVER unified-desktop._udlink._tcp.local 192.168.1.16:47600 host=android_swqs3yz9.local
+udreceiver.exe : mdns: answer via 192.168.1.13
+At line:1 char:143
++ ... yyyy-MM-dd HH:mm:ss"; $out = (& $pc discover --seconds 4 2>&1 | Out-S ...
++                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (mdns: answer via 192.168.1.13:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

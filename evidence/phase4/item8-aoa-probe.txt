@@ -1,0 +1,100 @@
+== item 8: AOA go/no-go (phase=probe) ==
+started 00:13:15
+--- phone: start link service via app UI (before the switch) ---
+start=tapped 'Start link' at 173,577; status=link: running=true live=0 acc=false last=already running
+screenshot item8-0-before-aoa.png png=True
+--- phone: USB state before the switch (dumpsys usb head, usb props) ---
+USB MANAGER STATE (dumpsys usb):
+{
+  device_manager={
+    handler={
+      current_functions_applied=true
+      screen_locked=false
+      connected=true
+      configured=true
+      host_connected=false
+      source_power=false
+      sink_power=true
+      usb_charging=true
+      hide_usb_notification=false
+      audio_accessory_connected=false
+      kernel_state=CONFIGURED
+    }
+    USB Event Log=UsbDeviceManager activity
+    USB Event=[
+      10-18 21:23:13:107 USB intent: Intent { act=android.hardware.usb.action.USB_STATE flg=0x31100000 xflg=0x4 (has extras) }
+      10-18 23:28:07:988 USB UEVENT: {SUBSYSTEM=android_usb, SEQNUM=11320, ACTION=change, USB_STATE=CONNECTED, DEVPATH=/devices/virtual/android_usb/android0}
+      10-18 23:28:07:995 USB intent: Intent { act=android.hardware.usb.action.USB_STATE flg=0x31100000 xflg=0x4 (has extras) }
+      10-18 23:28:08:081 USB UEVENT: {SUBSYSTEM=android_usb, SEQNUM=11322, ACTION=change, USB_STATE=CONFIGURED, DEVPATH=/devices/virtual/android_usb/android0}
+      10-18 23:28:08:092 USB intent: Intent { act=android.hardware.usb.action.USB_STATE flg=0x31100000 xflg=0x4 (has extras) }
+    ]
+  }
+  host_manager={
+    num_connects=0
+  }
+  port_manager={
+    is_simulation_active=false
+    usb_ports={
+      port={
+        id=port0
+        supported_modes=dual, audio_acc
+        supports_compliance_warnings=false
+      }
+      status={
+        connected=true
+        current_mode=ufp
+        power_role=sink
+[persist.sys.usb.config]: [adb]
+[persist.sys.usb.plugout]: [true]
+[persist.sys.usb.qmmi.func]: [midi]
+[sys.usb.adb.disabled]: [0]
+[sys.usb.config]: [adb]
+[sys.usb.configfs]: [1]
+[sys.usb.controller]: [4e00000.dwc3]
+[sys.usb.mtp.batchcancel]: [1]
+[sys.usb.mtp.device_type]: [3]
+[sys.usb.state]: [adb]
+--- PC: driver store (usb/android/google/winusb) - the Q5 driver story ---
+Original Name:      icelakeusbfunctioncontroller.inf
+Original Name:      tigerlakepch-lpusbfunctioncontroller.inf
+Original Name:      vmusb.inf
+Original Name:      ibtusb.inf
+Original Name:      ibtusb.inf
+Original Name:      ibtusb.inf
+Original Name:      ibtusb.inf
+Original Name:      ibtusb.inf
+Original Name:      ibtusb.inf
+Original Name:      ibtusb.inf
+Original Name:      ibtusb.inf
+Original Name:      ibtusb.inf
+Original Name:      intcusb.inf
+Original Name:      intcusb.inf
+--- PC: aoa list + probe (adb server is NOT killed - manager rule; the phone's ADB interface is skipped by description) ---
+AOA LIST 5 USB device interface(s) present
+AOA ENUM "USB Input Device" \\?\usb#vid_046d&pid_c077#5&274d72c6&0&6#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM "USB Composite Device" \\?\usb#vid_3277&pid_0036#0x0001#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM "USB Input Device" \\?\usb#vid_0b05&pid_19b6#5&274d72c6&0&3#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM "Intel(R) Wireless Bluetooth(R)" \\?\usb#vid_8087&pid_0033#5&274d72c6&0&14#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM "WinUsb Device" \\?\usb#vid_22d9&pid_2769#2c0f6edc#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM skip (WinUSB open failed): "USB Input Device" \\?\usb#vid_046d&pid_c077#5&274d72c6&0&6#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM skip (WinUSB open failed): "USB Composite Device" \\?\usb#vid_3277&pid_0036#0x0001#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM skip (WinUSB open failed): "USB Input Device" \\?\usb#vid_0b05&pid_19b6#5&274d72c6&0&3#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM skip (WinUSB open failed): "Intel(R) Wireless Bluetooth(R)" \\?\usb#vid_8087&pid_0033#5&274d72c6&0&14#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM skip (WinUSB open failed): "WinUsb Device" \\?\usb#vid_22d9&pid_2769#2c0f6edc#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA none: no USB device interface answered GET_PROTOCOL (51)
+
+--- probe --vid 18d1 (Google) ---
+aoa probe exit=1
+AOA PROBE NO-GO: no WinUSB-openable interface answered GET_PROTOCOL (51).
+AOA driver story: the switch needs a USB interface of the phone that (a) exists with USB debugging OFF and (b) has a WinUSB-based driver bound. Windows' own MTP/charger drivers do not qualify; the phone's ADB interface does but is excluded by rule. Two shippable options a user could accept: (1) the phone exposes a vendor interface with a Microsoft OS descriptor asking for WinUSB - then Windows binds WinUSB with no driver install at all; (2) our installer ships a signed one-time WinUSB INF for that vendor interface (asks for admin once). Without either, USB falls back to tethering (item 9).
+
+--- probe all VIDs (the phone may present a vendor id in normal mode, e.g. OnePlus 2a70) ---
+AOA ENUM skip (WinUSB open failed): "USB Input Device" \\?\usb#vid_046d&pid_c077#5&274d72c6&0&6#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM skip (WinUSB open failed): "USB Composite Device" \\?\usb#vid_3277&pid_0036#0x0001#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM skip (WinUSB open failed): "USB Input Device" \\?\usb#vid_0b05&pid_19b6#5&274d72c6&0&3#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM skip (WinUSB open failed): "Intel(R) Wireless Bluetooth(R)" \\?\usb#vid_8087&pid_0033#5&274d72c6&0&14#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA ENUM skip (WinUSB open failed): "WinUsb Device" \\?\usb#vid_22d9&pid_2769#2c0f6edc#{a5dcbf10-6530-11d2-901f-00c04fb951ed}
+AOA PROBE NO-GO: no WinUSB-openable interface answered GET_PROTOCOL (51).
+AOA driver story: the switch needs a USB interface of the phone that (a) exists with USB debugging OFF and (b) has a WinUSB-based driver bound. Windows' own MTP/charger drivers do not qualify; the phone's ADB interface does but is excluded by rule. Two shippable options a user could accept: (1) the phone exposes a vendor interface with a Microsoft OS descriptor asking for WinUSB - then Windows binds WinUSB with no driver install at all; (2) our installer ships a signed one-time WinUSB INF for that vendor interface (asks for admin once). Without either, USB falls back to tethering (item 9).
+
+finished 00:13:31

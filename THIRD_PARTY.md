@@ -68,3 +68,4 @@ AGPL needs a DECISIONS.md entry first, because it affects how the app may be shi
 | Mesa Turnip | MIT | Vulkan driver for Adreno |
 | winget-pkgs manifests | MIT | Windows app catalog data |
 | Safe Exam Browser | MPL-2.0 (check) | study only for the PC lock; no code copied |
+| UsbDk (daynix) | Apache-2.0 (repo license read at github.com/daynix/UsbDk, 2026-10-19; re-read the LICENSE file bytes before shipping) | planned AOA-round route (SKIPS.md "AOA round"): gives user mode direct USB access by detaching the device from its current driver (MTP/WPD or none), needed to send AOA control requests 51/52/53 from the debugging-OFF user state; MSI installer, driver signed, admin once | https://github.com/daynix/UsbDk |

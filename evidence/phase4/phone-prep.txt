@@ -1,0 +1,75 @@
+== phone prep ==
+started 23:31:32
+apk: C:\Users\Asus\Documents\GitHub\unified-desktop\android\app\build\outputs\apk\debug\app-debug.apk
+serial: 2c0f6edc
+--- adb install -r -d ---
+Performing Streamed Install
+Success
+--- revoke POST_NOTIFICATIONS (so the real dialog appears on open) ---
+adb.exe : 
+At C:\Users\Asus\AppData\Local\Temp\opencode\p4\phone_prep.ps1:17 char:11
++ $log += ((& $global:P4ADB -s $s shell pm revoke dev.unifieddesktop.ap ...
++           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Exception occurred while executing 'revoke':
+java.lang.SecurityException: revokeRuntimePermission: Neither user 2000 nor current process has 
+android.permission.REVOKE_RUNTIME_PERMISSIONS.
+	at android.app.ContextImpl.enforce(ContextImpl.java:2493)
+	at android.app.ContextImpl.enforceCallingOrSelfPermission(ContextImpl.java:2521)
+	at 
+com.android.server.permission.access.permission.PermissionService.setRuntimePermissionGranted(PermissionService.kt:839)
+	at com.android.server.permission.access.permission.PermissionService.setRuntimePermissionGranted$default(PermissionSer
+vice.kt:788)
+	at com.android.server.permission.access.permission.PermissionService.revokeRuntimePermission(PermissionService.kt:760)
+	at 
+com.android.server.pm.permission.PermissionManagerService.revokeRuntimePermission(PermissionManagerService.java:634)
+	at android.permission.PermissionManager.revokeRuntimePermissionInternal(PermissionManager.java:758)
+	at android.permission.PermissionManager.revokeRuntimePermission(PermissionManager.java:716)
+	at com.android.server.pm.PackageManagerShellCommand.runGrantRevokePermission(PackageManagerShellCommand.java:2760)
+	at com.android.server.pm.PackageManagerShellCommand.onCommand(PackageManagerShellCommand.java:329)
+	at com.android.modules.utils.BasicShellCommandHandler.exec(BasicShellCommandHandler.java:97)
+	at android.os.ShellCommand.exec(ShellCommand.java:38)
+	at com.android.server.pm.PackageManagerService$IPackageManagerImpl.onShellCommand(PackageManagerService.java:7148)
+	at android.os.Binder.shellCommand(Binder.java:1164)
+	at android.os.Binder.onTransact(Binder.java:966)
+	at android.content.pm.IPackageManager$Stub.onTransact(IPackageManager.java:4734)
+	at com.android.server.pm.PackageManagerService$IPackageManagerImpl.onTransact(PackageManagerService.java:7132)
+	at android.os.Binder.execTransactInternal(Binder.java:1444)
+	at android.os.Binder.execTransact(Binder.java:1378)
+--- app version + permission state ---
+    versionName=0.1
+    lastUpdateTime=2026-10-18 23:31:42
+      android.permission.POST_NOTIFICATIONS
+      com.google.android.gms.permission.POST_NOTIFICATIONS
+      android.permission.QUERY_ADVANCED_PROTECTION_MODE: granted=true
+      android.permission.DOWNLOAD_WITHOUT_NOTIFICATION: granted=true
+      com.google.android.c2dm.permission.RECEIVE: granted=true
+      android.permission.RESTART_PACKAGES: granted=true
+      android.permission.USE_CREDENTIALS: granted=true
+      android.permission.MODIFY_AUDIO_SETTINGS: granted=true
+      com.google.android.providers.gsf.permission.READ_GSERVICES: granted=true
+      android.permission.MANAGE_ACCOUNTS: granted=true
+--- device info ---
+build: 16 sdk=36 model=CPH2619
+wlan:     inet 192.168.1.16/24 brd 192.168.1.255 scope global dynamic wlan0
+route to mDNS: multicast 224.0.0.251 dev wlan0 table 1027 src 192.168.1.16 uid 2000  |     cache <local,mc> 
+--- call state (LESSONS: mCallState must be 0 before touching the screen) ---
+    mCallState=0
+--- keep the screen on (ColorOS freezer freezes the app ~30 s after screen-off; test-harness state control, not a service start) ---
+
+stayon: 15
+--- wake + dismiss keyguard (owner: unlock if a PIN is set) ---
+screen:   mWakefulness=Awake
+--- laptop LAN (must be the same subnet as wlan0 above) ---
+
+IPAddress    InterfaceAlias                    
+---------    --------------                    
+172.27.128.1 vEthernet (WSL (Hyper-V firewall))
+192.168.1.13 Wi-Fi                             
+
+
+
+screenshot phone-prep-screen.png png=True
+finished 23:31:50

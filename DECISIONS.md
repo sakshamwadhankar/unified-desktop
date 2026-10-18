@@ -160,6 +160,19 @@ phase's gate passes.
   LGPL duties.
 - **Revisit:** if WinUSB cannot drive Android Open Accessory without a driver hack (ARCHITECTURE Q5).
 
+### D17: Phase 4 closes on Wi-Fi + USB tethering; AOA gets its own round
+- **Decided:** 2026-10-19, by the manager (the PLAN gate reads "USB (AOA, or tethering)").
+- **Decision:** Phase 4 is closed as PASS on the real phone with Wi-Fi (mDNS discovery, no IP
+  typed in) and USB tethering, both with 6-digit pairing and the app's own user path. AOA is
+  NOT PROVEN (B-043) and is moved to a separate short "AOA round" (SKIPS.md). That round tries
+  UsbDk (Apache-2.0, signed, admin once) with USB debugging off, and needs the owner at the
+  laptop. Until AOA is proven, the USB link is tethering (D8).
+- **Why:** tethering measured RTT p50 4.06 ms vs Wi-Fi 14.88 ms, at similar throughput
+  (8.9-12.1 vs 8.7-11.5 MB/s). That is enough for Phase 5 video (10-20 Mbps). AOA needs one
+  UAC click and a physical USB-debugging toggle that nobody could do overnight.
+- **Revisit:** after the AOA round. If AOA works, it becomes the default USB link; if it needs
+  more than one signed, installer-shippable driver, drop AOA and keep tethering.
+
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never
   invent a name; `unified-desktop` is a codename.

@@ -1,0 +1,18 @@
+== item 7 forensics: what pressed Yes in the 00:05 pairing ==
+Source: adb -s 2c0f6edc logcat -d -v time (buffer captured 00:35), window 00:05:26.7-00:05:34.7;
+lines quoted below; one other app's package name is replaced by <another app> (privacy rule).
+
+Phone p4.log (item7-pair-retry.txt): PAIRING prompt 00:05:26.800 -> PAIR_YES stored 00:05:34.439 (7.64 s).
+Our script (pair_now.ps1) had exactly one tap attempt and it sent nothing (dump had no text=Yes node):
+  item7-pair-retry.txt line: 'tap: NOT FOUND: Yes'. No other input command ran in that window.
+
+--- logcat lines ---
+10-19 00:05:26.781 D/NotificationService--OplusNotificationFixHelper( 2200): fixAppIcon: pkg=dev.unifieddesktop.app
+10-19 00:05:27.063 I/WindowManager( 2200): addWindow: New client android.os.BinderProxy@cbdef9b : window=Window{5fc9b11 u0 NotificationHeadsUp}
+10-19 00:05:27.123 I/WindowManager( 2200): Window{5fc9b11 u0 NotificationHeadsUp} state from READY_TO_SHOW to HAS_DRAWN; reason: performShowLocked
+10-19 00:05:27.330 I/VibratorManagerServiceExtImpl( 2200): vibrate is uid=1000, pid=2200, opPkg=android, effect=Mono{mEffect=Composed{segments=[Step{amplitude=0.0, frequencyHz=0.0, duration=0}, Step{amplitude=-1.0, frequencyHz=0.0, duration=100}, Step{amplitude=0.0, frequencyHz=0.0, duration=200}, Step{amplitude=-1.0, frequencyHz=0.0, duration=0}], repeat=-1}}, attributes=VibrationAttributes{mUsage=NOTIFICATION, mAudioUsage= USAGE_NOTIFICATION, mFlags=0}, reason=Notification (dev.unifieddesktop.app 10476) (Delayed), token=193823929
+10-19 00:05:33.379 I/WindowManager( 2200): Window{5fc9b11 u0 NotificationHeadsUp} state from HAS_DRAWN to NO_SURFACE; reason: destroySurface
+10-19 00:05:34.095 I/WindowManager( 2200): Window{a6a3af u0 NotificationShade} state from NO_SURFACE to DRAW_PENDING; reason: resetDrawState
+10-19 00:05:34.151 I/WindowManager( 2200): Window{a6a3af u0 NotificationShade} state from READY_TO_SHOW to HAS_DRAWN; reason: performShowLocked
+10-19 00:05:34.189 V/WindowManager( 2200): Changing focus from Window{70edf38 u0 <another app>} to Window{a6a3af u0 NotificationShade},diplayid=0
+10-19 00:05:34.166 I/VibratorManagerServiceExtImpl( 2200): cancelVibrate uid=1000, pid=2200, usageFilter=-15, token=193823929

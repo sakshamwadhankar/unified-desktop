@@ -1,0 +1,13 @@
+== phone: real POST_NOTIFICATIONS dialog (reinstall resets it; pm revoke + pm clear blocked by ColorOS) ==
+started 23:47:52
+uninstall: Success
+install: Performing Streamed Install Success
+granted after install: 
+launch: Starting: Intent { cmp=dev.unifieddesktop.app/.HarnessActivity }
+screenshot item7-0-perm-dialog.png png=True
+dialog texts: Allow Unified Desktop Phase 1 to send you notifications? | Allow | Don't allow
+tap: tapped 'Allow' at 1253,780
+granted after tap: android.permission.POST_NOTIFICATIONS: granted=true, flags=[ USER_SET|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+app status: (no status line)
+screenshot item7-0b-after-allow.png png=True
+finished 23:48:27 (35 s)

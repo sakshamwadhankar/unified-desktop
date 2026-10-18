@@ -1,26 +1,34 @@
 //! AOA (Android Open Accessory) switch over WinUSB (item 8), Windows-only.
 //!
-//! The PC is the USB host: it opens the phone's USB device interface that WinUSB
-//! accepts (the Google ADB driver is WinUSB-based; vendor control transfers on any
-//! interface of the composite device go to endpoint 0, so the ADB interface works),
-//! probes GET_PROTOCOL (control 51), sends the accessory strings with SEND_STRING (52;
-//! index 0 = manufacturer, 1 = model - must match res/xml/usb_accessory_filter.xml),
+//! The PC is the USB host: it opens a USB interface of the phone that WinUSB accepts and
+//! that exists WITHOUT developer mode (a vendor/OS-descriptor interface with a WinUSB
+//! driver), probes GET_PROTOCOL (control 51), sends the accessory strings with SEND_STRING
+//! (52; index 0 = manufacturer, 1 = model - must match res/xml/usb_accessory_filter.xml),
 //! then START (53); the phone re-enumerates as an accessory (VID 18D1, PID 2D00/2D01).
 //!
+//! Manager's rule (Phase-4 prompt, item 8): the phone's ADB interface must NOT be used for
+//! this - it exists only with developer mode on, which would make the gate meaningless.
+//! Interfaces whose device description contains "ADB" are skipped (`is_adb_interface`),
+//! and so is every interface whose descriptor matches the ADB class triple FF/42/01
+//! (`is_adb_triple`; Windows often names it only "WinUsb Device").
+//! The adb server is never killed or started.
+//!
 //! Scope (item 8 go/no-go): list / probe / start. The accessory DATA path (open the
-//! 18D1 accessory, bulk pump, TLS) is not implemented yet; the phone side now starts
-//! the link service and adopts the accessory FD (manager 21:55), so what remains is
-//! the transport, not the attach path.
+//! 18D1 accessory, bulk pump, TLS) is not implemented yet; the phone side starts the
+//! link service and adopts the accessory FD (manager 21:55), so what remains is the
+//! transport, not the attach path.
 
 use windows::core::PCWSTR;
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
     SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW,
-    SetupDiGetDeviceInterfaceDetailW, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT,
-    SP_DEVICE_INTERFACE_DATA, SP_DEVICE_INTERFACE_DETAIL_DATA_W,
+    SetupDiGetDeviceInterfaceDetailW, SetupDiGetDeviceRegistryPropertyW, DIGCF_DEVICEINTERFACE,
+    DIGCF_PRESENT, HDEVINFO, SPDRP_DEVICEDESC, SP_DEVICE_INTERFACE_DATA,
+    SP_DEVICE_INTERFACE_DETAIL_DATA_W, SP_DEVINFO_DATA,
 };
 use windows::Win32::Devices::Usb::{
-    WinUsb_ControlTransfer, WinUsb_Free, WinUsb_Initialize, GUID_DEVINTERFACE_USB_DEVICE,
-    WINUSB_INTERFACE_HANDLE, WINUSB_SETUP_PACKET,
+    WinUsb_ControlTransfer, WinUsb_Free, WinUsb_Initialize, WinUsb_QueryInterfaceSettings,
+    GUID_DEVINTERFACE_USB_DEVICE, USB_INTERFACE_DESCRIPTOR, WINUSB_INTERFACE_HANDLE,
+    WINUSB_SETUP_PACKET,
 };
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
@@ -77,6 +85,42 @@ pub fn vid_matches(path: &str, vid_hex: &str) -> bool {
     path.to_ascii_lowercase().contains(&format!("vid_{v}"))
 }
 
+/// Manager's rule: never use the phone's ADB interface for the AOA switch (it exists only
+/// with developer mode on). Matches the SetupAPI function description, e.g. "ADB
+/// Interface", "Android Composite ADB Interface".
+pub fn is_adb_interface(desc: &str) -> bool {
+    desc.to_ascii_uppercase().contains("ADB")
+}
+
+/// The Android ADB interface is USB class 0xFF / subclass 0x42 / protocol 0x01. The
+/// SetupAPI description is often only the generic driver name ("WinUsb Device"), so the
+/// class triple read from the interface descriptor is the reliable signal.
+pub fn is_adb_triple(class: u8, subclass: u8, protocol: u8) -> bool {
+    class == 0xFF && subclass == 0x42 && protocol == 0x01
+}
+
+fn decode_utf16_z(buf: &[u8]) -> String {
+    let units: Vec<u16> = buf
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .take_while(|&u| u != 0)
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
+/// USB function description (SPDRP_DEVICEDESC); empty when the driver does not provide one.
+fn device_description(hdev: HDEVINFO, di: &SP_DEVINFO_DATA) -> String {
+    let mut buf = [0u8; 512];
+    unsafe {
+        if SetupDiGetDeviceRegistryPropertyW(hdev, di, SPDRP_DEVICEDESC, None, Some(&mut buf), None)
+            .is_err()
+        {
+            return String::new();
+        }
+    }
+    decode_utf16_z(&buf)
+}
+
 struct UsbDev {
     path: String,
     handle: HANDLE,
@@ -119,6 +163,15 @@ fn open_winusb(path: &str) -> Option<UsbDev> {
 }
 
 impl UsbDev {
+    /// USB interface descriptor (alternate setting 0): (class, subclass, protocol).
+    fn interface_triple(&self) -> Option<(u8, u8, u8)> {
+        let mut d = USB_INTERFACE_DESCRIPTOR::default();
+        unsafe {
+            WinUsb_QueryInterfaceSettings(self.winusb, 0, &mut d).ok()?;
+        }
+        Some((d.bInterfaceClass, d.bInterfaceSubClass, d.bInterfaceProtocol))
+    }
+
     /// GET_PROTOCOL (control 51): device-to-host vendor read of 2 bytes, little-endian.
     fn get_protocol(&self) -> Result<u16, String> {
         let mut resp = [0u8; 2];
@@ -168,7 +221,8 @@ impl UsbDev {
     }
 }
 
-fn enumerate_usb_interfaces() -> Vec<String> {
+/// Enumerate USB device interfaces as (device path, function description).
+fn enumerate_usb_interfaces() -> Vec<(String, String)> {
     let mut out = Vec::new();
     unsafe {
         let Ok(hdev) = SetupDiGetClassDevsW(
@@ -192,8 +246,17 @@ fn enumerate_usb_interfaces() -> Vec<String> {
             let mut buf = [0u8; 1024];
             let detail = buf.as_mut_ptr() as *mut SP_DEVICE_INTERFACE_DETAIL_DATA_W;
             (*detail).cbSize = std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32;
-            if SetupDiGetDeviceInterfaceDetailW(hdev, &ifd, Some(detail), buf.len() as u32, None, None)
-                .is_err()
+            let mut di: SP_DEVINFO_DATA = std::mem::zeroed();
+            di.cbSize = std::mem::size_of::<SP_DEVINFO_DATA>() as u32;
+            if SetupDiGetDeviceInterfaceDetailW(
+                hdev,
+                &ifd,
+                Some(detail),
+                buf.len() as u32,
+                None,
+                Some(&mut di),
+            )
+            .is_err()
             {
                 continue;
             }
@@ -204,7 +267,8 @@ fn enumerate_usb_interfaces() -> Vec<String> {
             }
             let path = String::from_utf16_lossy(std::slice::from_raw_parts(path_ptr, n));
             if !path.is_empty() {
-                out.push(path);
+                let desc = device_description(hdev, &di);
+                out.push((path, desc));
             }
         }
         let _ = SetupDiDestroyDeviceInfoList(hdev);
@@ -213,31 +277,50 @@ fn enumerate_usb_interfaces() -> Vec<String> {
 }
 
 /// Enumerate, open what WinUSB accepts, probe GET_PROTOCOL; returns AOA-capable ones.
+/// The ADB interface is skipped (manager rule; see `is_adb_interface`).
 fn find_aoa(vid_hex: &str, quiet: bool) -> Vec<(UsbDev, u16)> {
     let mut found = Vec::new();
-    for path in enumerate_usb_interfaces() {
+    for (path, desc) in enumerate_usb_interfaces() {
         if !vid_matches(&path, vid_hex) {
+            continue;
+        }
+        if is_adb_interface(&desc) {
+            if !quiet {
+                println!(
+                    "AOA ENUM skip (ADB interface - developer-mode only, not usable for the \
+                     gate): {desc:?} {path}"
+                );
+            }
             continue;
         }
         let Some(dev) = open_winusb(&path) else {
             if !quiet {
-                println!("AOA ENUM skip (WinUSB open failed): {path}");
+                println!("AOA ENUM skip (WinUSB open failed): {desc:?} {path}");
             }
             continue;
         };
+        if dev.interface_triple().map(|(c, s, p)| is_adb_triple(c, s, p)).unwrap_or(false) {
+            if !quiet {
+                println!(
+                    "AOA ENUM skip (ADB class FF/42/01 - developer-mode only, not usable for \
+                     the gate): {desc:?} {path}"
+                );
+            }
+            continue;
+        }
         match dev.get_protocol() {
             Ok(v @ 1..=2) => {
-                println!("AOA GO: protocol={v} {path}");
+                println!("AOA GO: protocol={v} {desc:?} {path}");
                 found.push((dev, v));
             }
             Ok(v) => {
                 if !quiet {
-                    println!("AOA ENUM not-AOA (GET_PROTOCOL={v}): {path}");
+                    println!("AOA ENUM not-AOA (GET_PROTOCOL={v}): {desc:?} {path}");
                 }
             }
             Err(e) => {
                 if !quiet {
-                    println!("AOA ENUM probe failed ({e}): {path}");
+                    println!("AOA ENUM probe failed ({e}): {desc:?} {path}");
                 }
             }
         }
@@ -248,8 +331,18 @@ fn find_aoa(vid_hex: &str, quiet: bool) -> Vec<(UsbDev, u16)> {
 pub fn cmd_list(vid_hex: &str) {
     let paths = enumerate_usb_interfaces();
     println!("AOA LIST {} USB device interface(s) present", paths.len());
-    for p in &paths {
-        println!("AOA ENUM {p}");
+    for (p, d) in &paths {
+        let adb = is_adb_interface(d)
+            || open_winusb(p)
+                .and_then(|dev| dev.interface_triple())
+                .map(|(c, s, pr)| is_adb_triple(c, s, pr))
+                .unwrap_or(false);
+        let mark = if adb {
+            " [ADB - excluded by rule]"
+        } else {
+            ""
+        };
+        println!("AOA ENUM {d:?}{mark} {p}");
     }
     let found = find_aoa(vid_hex, false);
     if found.is_empty() {
@@ -265,11 +358,14 @@ pub fn cmd_probe(vid_hex: &str) -> bool {
     }
     println!("AOA PROBE NO-GO: no WinUSB-openable interface answered GET_PROTOCOL (51).");
     println!(
-        "AOA driver story: Windows must bind a WinUSB-based driver to one of the phone's \
-         USB interfaces; the Google ADB driver is WinUSB-based, so an adb-connected phone \
-         normally qualifies. If NO-GO: use a data-capable cable, unlock the phone, and stop \
-         other tools that may hold the device. Do not install or replace any USB driver \
-         without the owner's explicit consent."
+        "AOA driver story: the switch needs a USB interface of the phone that (a) exists \
+         with USB debugging OFF and (b) has a WinUSB-based driver bound. Windows' own \
+         MTP/charger drivers do not qualify; the phone's ADB interface does but is \
+         excluded by rule. Two shippable options a user could accept: (1) the phone \
+         exposes a vendor interface with a Microsoft OS descriptor asking for WinUSB - then \
+         Windows binds WinUSB with no driver install at all; (2) our installer ships a \
+         signed one-time WinUSB INF for that vendor interface (asks for admin once). \
+         Without either, USB falls back to tethering (item 9)."
     );
     false
 }
@@ -339,5 +435,27 @@ mod tests {
         assert!(vid_matches(p, "0x18D1"));
         assert!(!vid_matches(p, "046d"));
         assert!(vid_matches(p, ""));
+    }
+
+    #[test]
+    fn adb_interface_is_excluded() {
+        // Manager rule: never switch the phone through its ADB interface.
+        assert!(is_adb_interface("ADB Interface"));
+        assert!(is_adb_interface("Android Composite ADB Interface"));
+        assert!(is_adb_interface("oneplus adb interface"));
+        assert!(!is_adb_interface("MTP"));
+        assert!(!is_adb_interface("USB Composite Device"));
+        assert!(!is_adb_interface("RNDIS"));
+        assert!(!is_adb_interface(""));
+    }
+
+    #[test]
+    fn adb_class_triple_is_excluded() {
+        // Windows names the phone's ADB interface only "WinUsb Device"; the descriptor
+        // triple (class FF, subclass 42, protocol 01) is the reliable ADB signal.
+        assert!(is_adb_triple(0xFF, 0x42, 0x01));
+        assert!(!is_adb_triple(0xFF, 0x42, 0x02));
+        assert!(!is_adb_triple(0x06, 0x01, 0x01)); // PTP/MTP
+        assert!(!is_adb_triple(0xFF, 0x00, 0x00)); // generic vendor interface
     }
 }
