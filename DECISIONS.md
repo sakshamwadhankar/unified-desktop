@@ -135,6 +135,31 @@ phase's gate passes.
   offer the matching source: decide that then, with a new entry.
 - **Revisit:** before the first Google Play release (legal check), or if we start re-hosting.
 
+### D15: Full-speed tools come from Termux/TUR Android builds (Phase 3)
+- **Decided:** 2026-10-18, by the manager (Phase 3 passed on the emulator and the phone).
+- **Decision:** Node.js (TUR `nodejs-24`) and code-server (TUR `code-server`) are taken from
+  the Termux/TUR Android builds, pinned by URL + SHA-256. Every native file (node, its libs,
+  the Android-built `.node` modules) ships inside the APK as `lib*.so`
+  (`android/vscode/fetch-native.sh`). code-server's JavaScript is data: the app downloads
+  the same pinned deb at run time and unpacks only non-ELF files.
+- **Why:** building Node.js for Android ourselves costs hours and a lot of RAM; the TUR
+  builds are bionic-native, 16 KB-aligned and match each other's Node ABI. Google Play forbids
+  downloaded native code, so native code comes only from the APK (D6).
+- **Revisit:** if a pinned URL disappears (then re-host or build), or before the first Play
+  release (license check of the shipped set, THIRD_PARTY.md).
+
+### D16: PC receiver in Rust, no LGPL USB library
+- **Decided:** 2026-10-18, by the manager (D10 left the language to Phase 4).
+- **Decision:** the Windows receiver is written in Rust (a new top-level `pc/` folder). USB
+  goes through Windows' own WinUSB API (the `windows` crate), not libusb (LGPL-2.1).
+  Encryption and pairing use a standard, maintained construction (for example TLS 1.3 with
+  pinned self-signed keys, or the Noise protocol through a maintained library); no
+  home-made cryptography.
+- **Why:** PRD R10 (small, native, low-level Windows APIs for the lock); Rust 1.95 and the
+  MSVC build tools are already on the laptop. Avoiding libusb keeps the receiver free of
+  LGPL duties.
+- **Revisit:** if WinUSB cannot drive Android Open Accessory without a driver hack (ARCHITECTURE Q5).
+
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never
   invent a name; `unified-desktop` is a codename.
