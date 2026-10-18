@@ -264,3 +264,92 @@ Xvfb 10/10), but no wine window maps (B-026): the NPP run self-dies 1.5 s in and
 the capture is bit-identical to the black reference, so items 5-7 were skipped
 (SKIPS.md). Everything else in this round passed with numbers.
 
+## Round 5 (2026-10-18, phone): B-026 fix attempts F1/F2/F3 - all failed
+
+Goal: fix B-026 (no wine window) by turning wine's SUD on (F1), by the box64
+synthetic-restorer patch (F2) and by a box64 bridge/vsyscall exemption (F3); plus the
+manager-ordered A/Bs, live mem dumps and the recipe-vs-baseline check.
+
+| What | Result |
+|---|---|
+| Items 1-2 (watchdog, B-029 reaper) | reaper (`reapLeftoverProcesses`) + 5 unit tests; watchdog = native PowerShell loop; caps back to 40 procs / 600 MB; the final killall left 0 processes of our uid |
+| Item 3 A/B, lib 006841B5 | 2 untraced NPP runs: alive 180 s / 167 s, c0000005 = 0, captures bit-identical to the black ref `527F19E0...` (5336 B); verdict KEEP 006841B5 |
+| F1 (wine SUD store patch) | phone: SIGSYS loop at 0x3f0004974c, no window -> removed from the site list |
+| F2 (box64 restorer patch, lib `244A0424`) | mechanical effect proven (SUD range check passes); phone: c0000005 storm 1248-1250/60 s, ~84% burn, black capture |
+| Live mem dumps (F69 run, pid 12389) | `0x6004_xxxx` = box64 bricks (`cc 53 43`); `0x60000020` = box64 vsyscall stub (`B8 60 00 00 00 0F 05 C3`); `0x30110000` = `FF 25` thunks -> brick: manager's brick lead CONFIRMED, round-3b "raw NtClose" RETRACTED |
+| F3 (bridge-brick exemption, lib `613AA82D`) | gates green; phone: storm unchanged (fault=1457, ~78% burn), does not fix B-026; patch kept + documented |
+| F1-off A/B (`613AA82D` + 2-site wine = `c378cd70`) | same storm (fault=1198, ~83%) -> F1 does not help; `NTDLL_PATCHED_SHA` = `c378cd70...` |
+| Recipe vs baseline | `006841B5` vs `F69ACC14`: same size (22,388,728 B), 2,663 identical dynsym addresses, 577,476 byte diffs - wrapper layer: `.rodata` blob 0x430000-0x4C0000 (~548 KB, "Calling linkfunc_..." strings shifted), `.rela.dyn` ~14 KB, `.text` 15,463 B over 1,446/3,069 pages (unwrap*Gtk/Gst* + ELF-loader names) => the current recipe does NOT reproduce 006841B5 |
+| sub1f hypothesis (manager) | refuted as a build test: disabling the two sub1f memcpy replacements does not compile (signals.c:1423 array-not-assignable, :1498 incompatible); `006841B5` (main 27860e6a + the B-020 glibc layout) must have contained an equivalent of sub1f |
+| Items 5-8 | no window under any lib -> items 5-7 [-] (SKIPS.md); item 8 clean-install flow re-proven on the final config (uninstall -> install -> broadcasts only; cold boot ~5:16; xeyes 9442 B `ED2D1311...`; NPP attempt black 5336 B `527F19E0...`) |
+| Items 9-11 | gradle rc=0 twice (APK 23,477,301 B; embedded lib = jniLibs `613AA82D`); docs updated; stayon false; 0 procs left; watchdogs stopped |
+
+**PHASE 2 GATE: FAIL** - the gate needs a Notepad++ window PNG plus "hello from phase 2"
+typed into it and a 10-minute survival. F1/F2/F3 and the F1-off A/B all storm identically
+(c0000005 syscall-handler storm; every capture = the black reference), so no wine window
+has ever mapped. New lead: the known-good lib `006841B5` is not reproducible from the
+current recipe - the two builds differ in the *generated wrapper layer* (577,476 bytes);
+bisect that before judging any further B-026 patch.
+
+## Round 5b (2026-10-18, phone, manager note 3): Wine 11.0 - still no window
+
+Hypothesis: 11.0 predates syscall user dispatch (added 11.5), so box64's legacy SUD
+emulation does not apply there; round 3 tested 11.0 *before* the fontconfig-stub fix
+(that failure was B-022).
+
+| What | Result |
+|---|---|
+| pin + fetch | `pin:11.0` + `fetchwine`: `DL wine-11.0-amd64.tar.xz bytes=75453392 ms=17965 sha=632f2c8e9150841c26d277000e76b82c425cd4564bfb050780705b9d37b2567f`; unpacked 750,242,503 B; no 11.19-only ntdll patches (site list is per pin) |
+| first boot | FAILED - `x86_64-unix/ntdll.so` needs `libgcc_s.so.1`, absent from the whole 11.0 tree (the 11.19 ntdll does not need it); staged manually into `<wine>/lib64/` (the dir the app prepends to LD_LIBRARY_PATH) |
+| second boot | `PREFIX_BOOT_OK wineboot -i exit 0` in 25 s on lib `006841B5` + the fontconfig stub |
+| NPP runs (4, untraced) | process runs and reaches UI init (plugin DLLs parsed, uxtheme `BufferedPaintStopAllAnimations` fixmes, `NtUserLockWindowUpdate`), then exits by itself with **code 159**: ms=22535 / 9155 / 15041 / 14569 |
+| `+seh` run | `c0000005 = 0`, `SIGSYS = 0` - the 11.19 storm signature is ABSENT on 11.0; the SUD mismatch is not the only no-window cause |
+| capture | live mid-run capture (t~9 s, `notepad++.exe` pid 13247, CPU 2 s) = 5336 B, sha `527F19E0C37F93A2060574F4162D7EAFC016FAFB91DB4B3B7A1FBBF8FA6669A6` - BIT-IDENTICAL to the black reference: the window never appears at any point |
+| process safety | max 9 procs of our uid; cap 40 never fired; no explorer chain; watchdog live throughout |
+| verdict | **11.0 does not fix B-026**; code default stays 11.19; `libgcc_s.so.1` provisioning needed if 11.0 is ever a candidate (SKIPS.md round-5 row) |
+
+**PHASE 2 GATE: FAIL** (unchanged) - no wine window under any pin/lib tested
+(11.19 x {`006841B5`, `F69ACC14`, `244A0424`, `613AA82D`}, 11.0 x `006841B5`);
+items 5-7 stay blocked (SKIPS.md T6/T7).
+
+## Round 5c (2026-10-18, phone): B-026 SOLVED - the gate items close
+
+Root cause (B-026, closing): the guest **SysV shared-memory path** (winex11's XShm) under box64.
+The `fetch-box64.sh` F4 block now intercepts it on both guest routes: (a) the wrapped-libc
+`my_shmget/shmat/shmctl/shmdt` stubs (`box64-glibcshim/glibcshim.c` + `GO->GOM` rewrite) and
+(b) the raw guest syscalls 29/30/31/67 in `x64Syscall_linux`. Which path fired: **a raw-only
+build removed the `exit=159` (128+31 = SIGSYS) deaths** but the process stayed black at ~100%
+CPU; **adding (a) produced the window**. `COMCTL32.dll.381 aborting` was logged before the
+SIGSYS death pre-fix (wine's abort path releases the kill) and is gone after F4. The shipping
+`jniLibs` lib is the F4 build; the recipe is **not reproducible** (three shas; BUGS B-030) -
+the tested bytes are the artifact, backed up outside the repo (`vendor/`, gitignored).
+
+| What | Number / result | When / where |
+|---|---|---|
+| shipping lib | `jniLibs/arm64-v8a/libbox64.so` 22,390,072 B sha256 `e1c21ed2ab1c337cea3cd06fb47af141c4453c588477211e6dcca6bd6aa06e92`; embedded in the APK verified (B-010) | APK 23,479,603 B, 10:38 |
+| Xvfb | live cmdline `:0 -screen 0 1280x720x24 ... -extension MIT-SHM`; raw QueryExtension proof: XTEST opcode 131 / BIG-REQUESTS 132 / SHAPE 129+64 / MIT-SHM absent (zeros) | 10:42, p2r5 |
+| clean install (item 8) | uninstall + install (uid u0_a475); then broadcasts ONLY: `pin:11.19`, `fetchwine` 101,940,736 B ms=25,459 (unpack 61,802), `fetchall` (96 pkgs + bundle + NPP); F1 OFF verified in the live logs (2-site ntdll `c378cd70...`) | 10:39-10:44 |
+| first boot, fresh prefix | wineboot 10:44:5x -> `PREFIX_BOOT_OK` before 10:50:48 (~5 min, as in round 4); warm re-boot after killall: 4 s | `files/phase2/wine.log` |
+| NPP window PNG | `evidence/phase2/npp-window-clean-install.png` 17,998 B sha `B8535120...` (byte-identical to the round-5 empty-document state); F4 window proof from the earlier runs: `npp-window-11.19.png` 18,001 B sha `047AD40B...` (run 2 identical) | 10:52 / 10:03 |
+| typed text via the APP (item 6) | broadcast `type:hello from phase 2` -> `XTEST present=1 opcode=131`, `TYPED 18 chars`; `npp-typed-clean-install.png` shows "hello from phase 2", length 18; **30-s-later capture unchanged** (`npp-typed-clean-install-30s.png`; the two files differ only in the caret-blink state `A42E0D66...`/`30F55E37...`) | 10:53 |
+| launch-to-first-frame (item 5) | process visible **+4.4 s**; first window paint **+27.0 s**; settled (caret blink) +29.9 s - baseline-diff watcher, 120 ms polls, valid black baseline (laptop Python = diagnostic only) | 10:57 |
+| process count / PSS (item 5) | 8 procs: app 45,983 kB, `:black`, Xvfb 58,667, wineserver 17,894, notepad++ 191,814 (RSS 46,524), 2x services.exe, explorer | 10:51 |
+| idle CPU (item 5) | 60 s: notepad++ +2 s, wineserver +1 s, Xvfb +1 s, others 0 (~6.7% of one core total); the stuck-key flood signature (~47%) is gone | 10:58-10:59 |
+| survival (item 7) | 10 min 26 s with the window + text up, same PIDs, CPU advancing, no LMK in that run; end capture `npp-window-11.19-10min.png` byte-identical to the typed frame (`30F55E37...`); one earlier LMK kill (10:11:50) is B-033 | 10:15:47-10:26:13 |
+| second-session restore | after killall -> wineboot -> npp, NPP's session snapshot restored the typed text (`npp-typed-restored-second-session.png`, 18,534 B `1D590EA2...`) | 10:58 |
+| B-029 reaper | `REAP tag=boot candidates=1 killed=0`; `REAP tag=killall candidates=10 killed=9 pids=[17425,17446,17454,17463,17476,17524,17660,19792,20627]`; after killall only app + `:black` | 10:54 |
+| race (B-031) | cold first-client npp **5/5 dies** (ms 5330/5131/9379/5033/4177); wineboot-first then npp **5/5 OK** | 09:49-10:57 |
+| stuck-key (B-032) | flood found 10:31 (4,168 chars, ~47% CPU) -> `sweepKeys` fix ships; post-fix idle ~2-4% and the 30-s capture unchanged | 10:31-10:59 |
+| build gates (item 9) | final triple BUILD SUCCESSFUL (up-to-date; last full execution 10:38, zero code changes since); APK 23,479,603 B; embedded lib = jniLibs (B-010) | 11:05 |
+| cleanup (item 11) | killall -> 0 leftovers; force-stop -> 0 procs of our uid; `svc power stayon false`; `/data/local/tmp/libgcc_s.so.1` removed; adb forward removed; all watchdog instances stopped | 11:00-11:06 |
+
+Note: the dev watchdog instance from round 5 cached uid u0_a467 and read `procs=0` through all
+round-5c runs (LESSONS re-learned: restart it after every reinstall; the in-app guard 40/600 was
+the only live cap). The laptop-side bench PNGs are diagnostics, not gate evidence.
+
+**PHASE 2 GATE: PASS** - a Notepad++ window PNG from our Xvfb plus "hello from phase 2" typed
+through the app's own XTEST path (both from a clean install, text unchanged 30 s later), a
+10-min 26-s survival, launch-to-first-frame 27.0 s, and the per-process numbers (8 procs;
+notepad++ PSS 191,814 kB; idle ~6.7% of one core). Nothing missing; manager verification of the
+evidence is the remaining step.
+

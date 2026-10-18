@@ -68,13 +68,14 @@ class Phase2WinePinTest {
 
     @Test fun elevenNineteenKeepsTheRoundTwoSites() {
         val (client, server) = Phase2Wine.wineSitesFor("11.19")
-        assertEquals(2, client.size)
+        assertEquals(2, client.size)          // round 2/3 sites; F1 SUD site removed (B-026)
         assertEquals(1, server.size)
         val assertSite = client.first { it.note.contains("0xff8") }
         assertArrayEquals(Phase2WineTestUtil.hex("f7c6f80f00000f85"), assertSite.old)
         assertArrayEquals(Phase2WineTestUtil.hex("f7c6000000000f85"), assertSite.next)
-        validate(client[client.size - 1], "/tmp/.wine-%u/server-%llx-%llx")
+        validate(client.first { it.note.contains("prefix-relative") }, "/tmp/.wine-%u/server-%llx-%llx")
         validate(server[0], "/tmp/.wine-%u")
+        assertTrue(client.none { it.note.contains("SUD: keep") })
     }
 
     /** old = the full literal, next = "/tmp/" dropped, tail NUL-padded, equal length. */

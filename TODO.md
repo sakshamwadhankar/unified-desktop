@@ -1,24 +1,67 @@
-# Phase 2 final round: to-do
+# Phase 2 round 5c: to-do (B-026 fix -> items 5-11)
 
-Done 8 of 12 | Skipped 4 | Updated 03:28 | Now: final report
+Done 8 of 8 | Updated 11:12 | B-026 SOLVED (window + typed text + soak + clean install, all phone-verified); closing out
 
 Rule: after EACH item tick it ([x] only if it truly works; [-] plus a one-line reason),
-update the top line, THEN start the next item. Keep every command's output under ~40 lines.
-Session start: 2026-10-18 00:30. Hard stop 06:30.
+update the top line, THEN start the next item. Past a time box: write by how much and why.
+HARD STOP: 12:30. Safety: in-app guard 40 procs / 600 MB live during every run; killall +
+am force-stop after every run; phone kept usable. (Laptop watchdog: the round-5 instance had
+gone stale - it cached uid u0_a467 and logged procs=0 all round; the in-app guard was the only
+live cap. Noted in the report; LESSONS.md updated. It was stopped at cleanup.)
 
-Note (03:17): item 9's NPP sub-deliverable (window PNG) is blocked by B-026: no window, the
-capture is bit-identical to the black reference. Items 5–7 were skipped for the same reason.
-Everything else in item 9 passed with numbers (fetch times, Xvfb 10/10, xeyes PNG).
-
-- [x] 1. Watchdog running and tested once (p2r3\watchdog.sh). [5 min] — done 00:30: watchdog-final.log (10 s samples, user u0_a463); fire path tested with the procs>0 variant (wdtest.sh): `WATCHDOG FIRED procs=2 ... rc=0` at 00:29:58.
-- [x] 2. B-026 test H1, heap pointer tagging: `android:allowNativeHeapPointerTagging="false"` in AndroidManifest; uninstall, install, boot, NPP. Window maps? boot-time c0000005 faults gone? Keep only if it helps. [20 min] — Done 00:57: attribute present in the built APK (aapt2), fresh install + full re-fetch (8.7 min, numbers in PHASE2_RESULT), stub re-staged, boot reached `PREFIX_BOOT_OK`; NPP runs (pid 31297, 14 ticks) but the capture is BIT-IDENTICAL to the round-3b black screen (sha256 527f19e0...); +seh boot still shows the 4 c0000005 at 0x3f00049876 (ntdll.so+0x49876). **H1 does not help; attribute reverted.** Side find: fresh-prefix first boot leaves 8 frozen wine procs (wineboot/rundll32/control + 4x services) that survive wineserver death -> will be logged as a new bug.
-- [x] 3. B-026 test H2 (only if still no window): code at 0x6004229c (maps during the run); NT call 0xf in Wine 11.19 (dlls/ntdll/ntsyscalls.h only). If guest `syscall` eax=0xf reaches Box64 as Linux 15 (rt_sigreturn), fix in Box64 source/guarded byte patch. [90 min] — fix built (fetch-box64.sh patch block; lib sha D4C63FC2…, APK rebuilt+installed) and tested: boot OK (warm boot 4 s, PREFIX_BOOT_OK, marker written). NPP window STILL absent: 2 untraced starts → deterministic death ~1.5 s in, at comdlg32.dll load: `virtual_setup_exception stack overflow 1984 bytes addr 0x7fffe34632 stack 0x80000840`, exit=1; the pre-patch lib got FURTHER (plugins mimeTools/NppConverter + uxtheme fixmes, wine-h2seh.log) → the patch changes the failure mode but does not fix B-026. Side findings (full detail in PHASE2_RESULT.md round 4): (a) Android app-freezer froze the app cgroup mid-boot (do_freezer_trap, screen off) → wine IPC deadlock after thaw → runs need stayon + foreground; (b) in-app SAFETY_GUARD (40 procs) killed NPP 8 s in at procs=49 → retuned to 160/400 MB; (c) laptop watchdog 40-proc cap killed an NPP run at 2 s → raised to 200.
-- [-] 4. B-026 test H3 (only if still no window): Box64 signal/syscall/wine settings from its own docs/USAGE.md, one at a time. [30 min] — rewritten in place to diagnostics (no blind settings sweep; there is no setting for this). Root cause proven: wine 11.19 cannot enable SUD ("could not find library containing signal restorer trampoline" -> syscall_dispatch_enabled=FALSE); box64's synth-SIGSYS path is its intended SUD emulation, but wine's !enabled branch answers every guest-syscall-derived NT call with c0000005 (this also feeds the B-022 explorer storm). Final untraced NPP run with retuned guards (160/400): boot OK, NPP still self-dies ~1.5 s in at comdlg32.dll load (virtual_setup_exception stack overflow), no window; guards confirmed NOT the blocker (they were, before retune). Full detail -> B-026.
-- [-] 5. Notepad++ window PNG from our Xvfb; NPP launch-to-first-frame ms. [20 min] — no window exists (items 3/4), so no PNG and no first-frame timing are possible this round; the Xvfb display path itself is proven by the xeyes PNG in item 9.
-- [-] 6. Type "hello from phase 2" via XTEST (mCallState=0 first); PNG showing the text. [20 min] — nothing to type into (no NPP window); XTEST-with-real-text stays unproven this round.
-- [-] 7. 10-minute survival with the NPP window up (stayon true, watchdog running): same PIDs, CPU advancing, window in the end capture. [15 min] — no window to keep alive; survival soak not run. Watchdog guards stay live for item 9.
-- [x] 8. Wire the fontconfig stub into the app: build.sh writes it to android/app/src/main/assets/win86/libfontconfig.so.1 (gitignored); the app copies it into rootfs/usr/lib/x86_64-linux-gnu/ with SHA-256 check, keeping the real lib aside. Unit test. [30 min] — done 02:50: ensureFontconfigStub now called from fetchRuntime (right after the udsh line, so a clean install stages it), Phase2Wine.boot and Phase2Wine.startNpp (both before ensurePrefixBinaries); keeps the real lib at libfontconfig.so.1.udreal; unit test Phase2DataFontconfigStubTest (3 cases: stub sha effective, real sha re-staged, symlink never effective) green; `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` BUILD SUCCESSFUL 15 s (log p2r4\gradle-r4c.log).
-- [x] 9. Clean install proof (B-019, B-018): adb uninstall; install the debug APK; ONLY harness broadcasts after that. App fetches and sets up everything itself → xeyes PNG and Notepad++ window PNG. Xvfb 10/10. Remaining manual steps listed in B-019. [60 min] — done 03:16: uninstall 02:53:29 + install; libbox64.so in the new install sha256 f69acc14… (B-010 check); broadcasts only (new `fetchall` action; no push / no run-as copy). App fetched itself: runtime 96 pkgs / 75.8 MB / 40.7 s, udsh ok, fontconfig stub auto-staged (FCSTUB_INSTALL wasRegular=false sha=0e967100…, the symlink was replaced, real lib file untouched), bundle 34.4 MB / 290 files / 11.1 s, wine 11.19 101.9 MB → 871.9 MB tree / 59.6 s, NPP 8.25 MB / 4.9 s. wineboot 03:00:5x → PREFIX_BOOT_OK, marker 03:06 (first init ~5 min), no explorer storm. Xvfb 10/10 re-verified: all attempt=1, XVFB_STABLE total_ms 2823–2830, GAVE_UP=0. xeyes PNG 9442 B 1280x720 sha ED2D1311…, eyes visibly rendered (image inspected) — display path proven. NPP: dies 1.5 s at comdlg32.dll (virtual_setup_exception stack overflow 1984 bytes), no window; capture npp-r4-final.png = BIT-IDENTICAL to the black reference (5336 B, sha 527F19E0…). No manual staging steps remain: B-019 satisfiable (harness broadcasts are the debug driver, not staging).
-- [x] 10. Build gates: :app:testDebugUnitTest :app:lintDebug :app:assembleDebug pass; APK size. [10 min] — done 03:18: BUILD SUCCESSFUL (exit 0, 4 s incremental; full runs earlier this session at p2r4\gradle-r4c.log/r4d.log after the last code change), 101 tasks; APK app-debug.apk = 23,477,543 B (22.39 MiB). Six unit test classes green (incl. the new Phase2DataFontconfigStubTest 3 cases) — test-results XMLs inspected.
-- [x] 11. Docs: BUGS.md (B-026, B-019, B-018, B-024 with this round's evidence), docs/PHASE2_RESULT.md (results table + "Phase 2 gate" line), THIRD_PARTY.md if a pin changed, SKIPS.md. [15 min] — done 03:26: BUGS.md — B-026 round-4 update (H2 tried+reverted, SUD root cause, guards retuned, clean-install reproduction), B-018 (clean-install 10/10 evidence), B-019 (clean-install proof, no staging left), B-024 (no re-test this round, noted); three new rows B-027 (app-freezer deadlock, platform hazard), B-028 (activity-intent replay quirk), B-029 (orphan wine children survive wineserver death + killall). PHASE2_RESULT.md — H2 placeholder filled, new sections "Round 4: H3 diagnostics", "Round 4: clean-install proof", "Round 4 results table" + **PHASE 2 GATE: FAIL** line (window missing; display path proven). SKIPS.md — T6 row extended, hardening row annotated (clean install DONE), new rows: T7 survival soak, H3 settings sweep, frozen-children reaper (B-029). THIRD_PARTY.md: no change needed (no pin changed; the box64 patch is back to its previously committed state; stub/udsh are our own code).
-- [x] 12. svc power stayon false; 0 of our processes left; STATE.md LAST; final report + PHASE 2 GATE line. [10 min] — done 03:27: watchdog stopped (WSL, log frozen 21:52:45 WSL-clock); phone: killall broadcast + `run-as sh -c 'kill -9 -1'` (one :black WebView respawned, cleared with `am force-stop`), verified ZERO processes of u0_a466 twice 8 s apart; `svc power stayon false` (stay_on_while_plugged_in=0); battery 100%; no probe scripts existed after the clean install; evidence copied to evidence/phase2/ (xeyes-r4-clean-install.png 9442 B bit-identical sha ED2D1311… to round 3b, npp-r4-final.png 5336 B black sha 527F19E0…, round4_clean_install.txt with the numbers); temp helper scripts removed; app stays installed (as found) with the round-4 evidence under files/phase2/. STATE.md updated last. PHASE 2 GATE: FAIL (B-026 window missing).
+- [x] 4. B-026 fix. DONE 11:00 - root cause: the guest SysV-shared-memory path (winex11's XShm).
+  F4 block in `android/win86/fetch-box64.sh` intercepts it on both guest routes: (a) the
+  wrapped-libc `my_shmget/shmat/shmctl/shmdt` stubs (+`GO->GOM` rewrite) and (b) the raw guest
+  syscalls 29/30/31/67 in `x64Syscall_linux`. Which path fired: (b) alone removed the `exit=159`
+  (128+31 = SIGSYS) deaths (process then lived but stayed black at ~100% CPU), (a) produced the
+  window. `COMCTL32.dll.381 aborting` was logged BEFORE the SIGSYS on pre-fix builds (the abort
+  path releases the kill) and is gone after F4. Shipping lib = F4 `e1c21ed2...` (22,390,072 B)
+  in jniLibs, embedded sha verified in the APK (B-010). The recipe is NOT reproducible (three
+  shas: `e1c21ed2`/`a8f3f177`/`80b20b76`, 745,057 differing bytes vs shipped) -> BUGS B-030; the
+  tested bytes are the artifact, backups in gitignored `vendor/` + the p2r5 dir. XTEST fixed on
+  the way: QueryExtension +2 pad bytes, reply present@8/opcode@9 (+ mainline fallback), FakeInput
+  36 B; stuck-key flood fixed with the KEYMAP release sweep (B-032). [~170 min incl. the
+  manager-ordered box64 rebuild check]
+- [x] 5. Notepad++ window PNG + numbers. DONE 10:00 / 11:00 - window renders: `evidence/phase2/`
+  `npp-window-11.19.png` (18,001 B, `047AD40B...`, run 2 byte-identical) and from the clean
+  install `npp-window-clean-install.png` (17,998 B, `B8535120...`). Launch-to-first-frame:
+  process visible +4.4 s, first window paint **+27.0 s**, settled (caret blink) +29.9 s -
+  baseline-diff watcher against a valid black baseline, 120 ms polls (laptop Python = diagnostic
+  only). PSS: app 45,983 kB, Xvfb 58,667, wineserver 17,894, notepad++ 191,814 (RSS 46,524),
+  2x services.exe, explorer = **8 procs** of our uid. Idle CPU over 60 s: notepad++ +2 s,
+  wineserver +1 s, Xvfb +1 s, rest 0 (~6.7% of one core). [~50 min]
+- [x] 6. Type "hello from phase 2" via XTEST. DONE 10:53 - app-side `type:` broadcast (mCallState=0
+  checked first), `XTEST present=1 opcode=131` + `TYPED 18 chars` in x11.log;
+  `npp-typed-clean-install.png` shows "hello from phase 2", length 18, Ln 1 Col 19; a second
+  capture 30 s later is unchanged (`npp-typed-clean-install-30s.png`; the two files differ only
+  in the caret-blink state). The laptop-bench PNG (`npp-typed-hello.png`) is recorded as a
+  DIAGNOSTIC, not gate evidence. Stuck-key flood (B-032) found + fixed in this same path. [~40 min]
+- [x] 7. 10-minute survival. DONE 10:26 - 10 min 26 s with the window + typed text up, same PIDs
+  (npp pid 26264 from 10:15:47), CPU advancing, no LMK kill in the run; end capture
+  `npp-window-11.19-10min.png` byte-identical to the typed frame (`30F55E37...`). One earlier run
+  was LMK-killed at 10:11:50 (B-033, acceptable `[-]` per manager note 6; product answer = the
+  Phase 4 foreground service, B-027). [~15 min soak + monitoring]
+- [x] 8. Clean install (broadcast-only). DONE 10:52 - uninstall -> install (uid u0_a475) -> ONLY
+  harness broadcasts: `pin:11.19`, `fetchwine` (101,940,736 B, ms=25,459, unpack 61,802),
+  `fetchall` (96 pkgs + bundle + NPP); F1 OFF verified in the live logs (2-site ntdll
+  `c378cd70...`); F4 lib in jniLibs with its sha recorded in `fetch-box64.sh` + THIRD_PARTY.md
+  (recipe-rebuild check done - NOT reproducible, stated plainly, B-030); Xvfb `-extension MIT-SHM`
+  verified in the live cmdline; NPP window PNG + typed PNG come from exactly this install; fresh
+  first boot ~5 min, warm re-boot 4 s. B-029 reaper verified: `REAP tag=killall candidates=10
+  killed=9` - only app + `:black` left. [~40 min]
+- [x] 9. Build gates. DONE 11:05 - `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug`
+  BUILD SUCCESSFUL (up-to-date; the last full execution was 10:38 on the same code - zero code
+  changes since; 7 classes / 21 tests + the round-5 test additions all green); APK 23,479,603 B;
+  embedded `libbox64.so` sha verified = the jniLibs file (B-010). [~10 min]
+- [x] 10. Docs. DONE 11:12 - BUGS.md: B-026 close-out (F4 a/b + which path fired + COMCTL32 order
+  + XTEST wire bugs + race + LMK), B-029 update (reaper verified), NEW rows B-030 (box64 not
+  reproducible, 3 shas), B-031 (cold-start death race, 5/5 vs 5/5), B-032 (stuck-key flood,
+  fixed, manager to verify), B-033 (LMK kill 10:11:50); THIRD_PARTY.md + `fetch-box64.sh` record
+  the shipped sha + non-reproducibility + vendor backup; SKIPS.md rows updated (T6/T7 solved-on-
+  phone, round-5 row re-scoped); LESSONS.md round-5c facts; `docs/PHASE2_RESULT.md` round-5c
+  table + gate line; STATE.md updated LAST. [~20 min]
+- [x] 11. Cleanup + report. DONE 11:06 - killall -> 0 leftovers; force-stop -> 0 processes of our
+  uid; `svc power stayon false`; `/data/local/tmp/libgcc_s.so.1` removed; `adb forward` removed;
+  all watchdog instances stopped; no git commits (manager owns git); no binaries in the repo
+  (evidence PNGs live in gitignored `evidence/phase2/`; the p2r5 dir keeps the round logs).
+  Final report sent; final line "PHASE 2 GATE: PASS". [~15 min]

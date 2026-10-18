@@ -10,7 +10,26 @@ set -euo pipefail
 # Pin (default: upstream main @ 27860e6aee72dd33c2588d081652d6e9becc1089, 2026-10-17).
 # That revision is what the verified artifact is built from: jniLibs libbox64.so
 # sha256 006841b5f01a59bae2b10db95a5d5d707087db487ab7d740a734caba3abc604e boots
-# wine on the phone (docs/PHASE2_RESULT.md round 3b, fixes for B-020/B-022). The
+# wine on the phone (docs/PHASE2_RESULT.md round 3b, fixes for B-020/B-022).
+# 2026-10-18 round 5c: the artifact that SHIPS (and was phone-verified) is
+#   app/src/main/jniLibs/arm64-v8a/libbox64.so, 22,390,072 B,
+#   sha256 e1c21ed2ab1c337cea3cd06fb47af141c4453c588477211e6dcca6bd6aa06e92
+# built by this recipe with the F4 block below (SysV shared memory never reaches
+# the kernel: raw-syscall path AND wrapped-libc path). Verified on the phone:
+# Notepad++ renders (evidence/phase2/npp-window-11.19.png) and XTEST-typed text
+# lands in it (evidence/phase2/npp-typed-hello.png, 2026-10-18). A canonical copy
+# of these exact bytes is kept OUTSIDE the repo (gitignored
+# vendor/libbox64-27860e6a-f4-e1c21ed2.so).
+# NOT reproducible: two clean rebuilds of this recipe produced
+#   a8f3f177e4ce27c9839f7fc311711bb2787a48e6b4655f0965d162d9abc07112 and
+#   80b20b76f1eec67021ded41557a8db2d9c321b3f180166fcf35732009264daa7
+# (same size; 745,057 bytes differ from the shipped file), so a rebuild cannot be
+# sha-checked - ship the tested bytes. Bug: BUGS.md B-030.
+# 2026-10-18 round 5: builds from this recipe (with the F2/F3 patch blocks below)
+# do NOT reproduce 006841b5 byte-for-byte - 577,476 differing bytes sit in the
+# GENERATED wrapper layer (src/wrapped/generated/, rebuilt during the build), and
+# every rebuilt lib storms on the phone (BUGS.md B-026). Reproduce the baseline
+# bytes before trusting any further A/B on this recipe. The
 # patch section below keeps the older v0.4.4 tag buildable; to build another
 # revision, override all three, e.g.:
 #   BOX64_REV=v0.4.4 \
@@ -369,6 +388,212 @@ grep -q "retry-no-exec" "$SRC/src/wrapped/wrappedlibc.c" || { echo "ERROR: mprot
 # make wine's SUD setup succeed ("could not find library containing signal
 # restorer trampoline" keeps syscall_dispatch_enabled=FALSE) or execute
 # rt_sigreturn with the guest stack; neither is in this patch series.
+# ---------------------------------------------------------------------------
+# unified-desktop patch (2026-10-18, BUGS B-026 F2): wine's syscall user
+# dispatch setup scans dl_iterate_phdr() for the library containing the signal
+# restorer trampoline, which it reads from sigaction(SIGSYS, NULL, &act).
+# Guest glibc answers that GET with __restore_rt inside libc.so.6, and wine
+# then uses that library's range as the SUD allow-range. box64 wraps the
+# sigaction symbol (GOWM(sigaction, iFEipp) -> my_sigaction) and its GET fill
+# ends with `oldact->sa_restorer = NULL; // no handling for now...`, so wine
+# warns "could not find library containing signal restorer trampoline",
+# disables syscall dispatch (the F1 ntdll patch keeps it on) and prctls an
+# empty allow-range (0,0). Report a synthetic restorer address inside a loaded
+# guest ELF (prefer libc.so.6) for SIGSYS when running a wine guest, so the
+# scan succeeds and wine prctls the real library range. The value is never
+# executed - it only selects the library whose range becomes the allow-range.
+python3 - "$SRC/src/libtools/signals.c" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+
+inc = '#include "box64context.h"'
+assert s.count(inc) == 1, "include anchor not found (box64context.h)"
+s = s.replace(inc, inc + '\n#include "elfloader.h" // unified-desktop: elf list for the wine restorer fixup', 1)
+
+anchor = "int EXPORT my_sigaction(x64emu_t* emu, int signum, const x64_sigaction_t *act, x64_sigaction_t *oldact)"
+assert s.count(anchor) == 1, "my_sigaction anchor not found"
+helper = '''// unified-desktop (B-026 F2): see the fetch-box64.sh patch note. Returns an
+// address inside a loaded guest ELF (libc.so.6 preferred) to serve as the
+// synthetic signal restorer for wine's syscall-dispatch library scan.
+static void* get_wine_restorer_address(void)
+{
+    if (!my_context) return NULL;
+    elfheader_t* best = NULL;
+    for (int i = 0; i < my_context->elfsize; ++i) {
+        elfheader_t* h = my_context->elfs[i];
+        if (!h) continue;
+        const char* n = ElfName(h);
+        if (!n || !n[0]) continue;
+        if (strstr(n, "libc.so")) { best = h; break; }
+        if (!best) best = h;
+    }
+    if (!best) return NULL;
+    uintptr_t base = (uintptr_t)GetElfDelta(best);
+    return base ? (void*)(base + 0x1000) : NULL;
+}
+
+'''
+s = s.replace(anchor, helper + anchor, 1)
+
+old = "oldact->sa_restorer = NULL; // no handling for now..."
+assert s.count(old) == 1, "sa_restorer NULL anchor not found"
+new = ("oldact->sa_restorer = (box64_wine && signum == X64_SIGSYS) ? get_wine_restorer_address() : NULL; "
+       "// unified-desktop B-026 F2: wine's SUD setup needs an ELF-hosted restorer")
+s = s.replace(old, new, 1)
+open(p, "w").write(s)
+print("patched", p)
+PYEOF
+grep -q "get_wine_restorer_address" "$SRC/src/libtools/signals.c" || { echo "ERROR: signals.c wine restorer patch did not land"; exit 1; }
+grep -q 'include "elfloader.h"' "$SRC/src/libtools/signals.c" || { echo "ERROR: elfloader.h include did not land"; exit 1; }
+if grep -q "sa_restorer = NULL; // no handling" "$SRC/src/libtools/signals.c"; then echo "ERROR: old sa_restorer NULL line still present"; exit 1; fi
+
+# ---------------------------------------------------------------------------
+# unified-desktop patch (2026-10-18, BUGS B-026 F3): box64's own bridge bricks
+# and vsyscall stubs run as guest code. On this 39-bit phone the vsyscall
+# emulation (AddVSyscall writes "B8 <num> 0F 05 C3" = mov eax,num; syscall;
+# ret) lands in a brick - observed live during NPP: 0x60000020 = B8 60 00 00 00
+# 0F 05 C3 (gettimeofday), with PE-side FF 25 thunks at 0x30110000 jumping
+# there; the surrounding pages (0x6004_xxxx) are CC 'S' 'C' brick entries.
+# With wine's syscall user dispatch active (F1/F2), every syscall box64 itself
+# executes from such a stub was fed into wine's SUD path and mistreated: the
+# NPP session logged 1248-1658 handle_syscall_fault/c0000005 lines per minute
+# (wine retrying the same fault forever; no window). A syscall whose call
+# address is inside box64's own bricks is box64's own and must never become a
+# SIGSYS: run it natively. Exempted in both my_syscall_user_dispatch (the SUD
+# path) and the legacy x64Syscall SIGSYS hack (SUD-off path).
+python3 - "$SRC/src/tools/bridge.c" "$SRC/src/include/bridge.h" "$SRC/src/libtools/syscall_user_dispatch.c" "$SRC/src/emu/x64syscall.c" <<'PYEOF'
+import sys
+
+# 1) bridge.c: add the stub detector next to isBridgeAddress.
+p = sys.argv[1]
+s = open(p).read()
+anchor = "void init_bridge_helper()"
+assert s.count(anchor) == 1, "init_bridge_helper anchor not found"
+helper = '''// unified-desktop B-026 F3: see the fetch-box64.sh patch note. addr is the
+// call address box64 reports for a guest syscall (R_RIP-2, i.e. the address of
+// the 0F 05 opcode). Detect box64's own vsyscall stubs ("B8 <num> 0F 05 C3").
+int isBridgeSyscallStub(uintptr_t addr)
+{
+    uint8_t* p;
+    if(addr < 5) return 0;
+    if(!memExist(addr) || !memExist(addr + 2)) return 0;
+    if(!(getProtection(addr) & PROT_READ)) return 0;
+    if(!memExist(addr - 5) || !(getProtection(addr - 5) & PROT_READ)) return 0;
+    p = (uint8_t*)(addr - 5);
+    return (p[0] == 0xB8 && ((uint8_t*)addr)[0] == 0x0F && ((uint8_t*)addr)[1] == 0x05 && ((uint8_t*)addr)[2] == 0xC3);
+}
+
+'''
+s = s.replace(anchor, helper + anchor, 1)
+open(p, "w").write(s)
+print("patched", p)
+
+# 2) bridge.h: declare it.
+p = sys.argv[2]
+s = open(p).read()
+anchor = "int isBridgeAddress(uintptr_t addr);"
+assert s.count(anchor) == 1, "isBridgeAddress decl anchor not found"
+s = s.replace(anchor, anchor + "\nint isBridgeSyscallStub(uintptr_t addr); // unified-desktop B-026 F3", 1)
+open(p, "w").write(s)
+print("patched", p)
+
+# 3) syscall_user_dispatch.c: exempt bricks/stubs before the selector check.
+p = sys.argv[3]
+s = open(p).read()
+inc = '#include "custommem.h"'
+assert s.count(inc) == 1, "custommem.h include anchor not found"
+s = s.replace(inc, inc + '\n#include "bridge.h" // unified-desktop B-026 F3: brick/stub syscall exemption', 1)
+anchor = "    if(call_addr - emu->sud_offset < emu->sud_len)\n        return 0;\n\n    if(emu->sud_selector) {"
+assert s.count(anchor) == 1, "sud dispatch anchor not found"
+new = ("    if(call_addr - emu->sud_offset < emu->sud_len)\n        return 0;\n\n"
+       "    // unified-desktop B-026 F3: a syscall executed inside box64's own bridge\n"
+       "    // bricks (vsyscall stubs) is box64's code - run it natively, never a\n"
+       "    // guest SIGSYS.\n"
+       "    if(isBridgeAddress(call_addr) || isBridgeSyscallStub(call_addr))\n        return 0;\n\n"
+       "    if(emu->sud_selector) {")
+s = s.replace(anchor, new, 1)
+open(p, "w").write(s)
+print("patched", p)
+
+# 4) x64syscall.c: same exemption in the legacy SIGSYS hack (SUD-off path).
+p = sys.argv[4]
+s = open(p).read()
+if '#include "bridge.h"' not in s:
+    inc = '#include "debug.h"'
+    assert s.count(inc) == 1, "debug.h include anchor not found"
+    s = s.replace(inc, inc + '\n#include "bridge.h" // unified-desktop B-026 F3', 1)
+old = "        if(/*ret_addr<0x700000000000LL &&*/ (my_context->signals[X64_SIGSYS]>2) && !FindElfAddress(my_context, ret_addr)) {"
+assert s.count(old) == 1, "legacy sigsys hack anchor not found"
+new = ("        if(/*ret_addr<0x700000000000LL &&*/ (my_context->signals[X64_SIGSYS]>2) && !FindElfAddress(my_context, ret_addr)\n"
+       "            && !isBridgeAddress(ret_addr) && !isBridgeSyscallStub(ret_addr)) { // unified-desktop B-026 F3")
+s = s.replace(old, new, 1)
+open(p, "w").write(s)
+print("patched", p)
+PYEOF
+grep -q "isBridgeSyscallStub" "$SRC/src/tools/bridge.c" || { echo "ERROR: bridge.c stub detector did not land"; exit 1; }
+grep -q "isBridgeSyscallStub" "$SRC/src/include/bridge.h" || { echo "ERROR: bridge.h declaration did not land"; exit 1; }
+grep -q 'include "bridge.h"' "$SRC/src/libtools/syscall_user_dispatch.c" || { echo "ERROR: sud bridge.h include did not land"; exit 1; }
+grep -q "isBridgeSyscallStub(call_addr)" "$SRC/src/libtools/syscall_user_dispatch.c" || { echo "ERROR: sud exemption did not land"; exit 1; }
+grep -q 'include "bridge.h"' "$SRC/src/emu/x64syscall.c" || { echo "ERROR: x64syscall bridge.h include did not land"; exit 1; }
+grep -q "isBridgeSyscallStub(ret_addr)" "$SRC/src/emu/x64syscall.c" || { echo "ERROR: legacy hack exemption did not land"; exit 1; }
+
+# ---------------------------------------------------------------------------
+# unified-desktop patch (2026-10-18, BUGS B-026 F4): Android's app seccomp policy
+# kills any process that calls the host syscalls behind SysV shared memory
+# (arm64 194 = shmget; logcat of every wine 11.0 NPP run: "Fatal signal 31
+# (SIGSYS), code 1 (SYS_SECCOMP), syscall 194 in tid ... (notepad++.exe)").
+# Wine's X11 driver uses MIT-SHM for window surfaces; the client-side shmget
+# fires before any server-side check, so disabling the extension on Xvfb is not
+# enough. Guest SysV shm can never work on Android, so stop forwarding the
+# guest's shmget/shmat/shmctl (x86_64 nrs 29/30/31) to the host and answer
+# -ENOSYS instead - the same shape as a kernel built without SysV IPC; XShm
+# clients fall back to plain XPutImage. The check sits before the syscallwrap
+# table in x64Syscall_linux.
+python3 - "$SRC/src/emu/x64syscall.c" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+hdr = "void EXPORT x64Syscall_linux(x64emu_t *emu)"
+h = s.index(hdr)  # raises if the 64-bit dispatcher moved
+j = s.index("// check wrapper first", h)  # first one after the 64-bit header
+add = '''    // unified-desktop (B-026 F4): never let guest SysV shared memory reach the
+    // host - Android's seccomp filter kills the process (SIGSYS/SYS_SECCOMP,
+    // measured for arm64 nr 194 = shmget). X11 MIT-SHM clients (winex11) then
+    // fall back to plain XPutImage.
+    if (s == 29 || s == 30 || s == 31) {  // shmget / shmat / shmctl
+        S_RAX = -ENOSYS;
+        return;
+    }
+'''
+s = s[:j] + add + s[j:]
+open(p, "w").write(s)
+print("patched", p)
+PYEOF
+grep -q "never let guest SysV shared memory reach the" "$SRC/src/emu/x64syscall.c" || { echo "ERROR: x64syscall.c shm interception did not land"; exit 1; }
+
+# F4(b): the wrapped-libc path. Bionic's own shmget/shmat/shmctl/shmdt wrappers
+# make the forbidden host syscall directly (in HOST code, where box64 cannot
+# intercept); route the guest symbols through the glibcshim's my_ stubs
+# (glibcshim.c, -ENOSYS) instead. Measured 2026-10-18: the raw-SYSCALL path was
+# the one that fired in the wine NPP runs, but both are covered so any caller
+# shape is safe.
+python3 - "$SRC/src/wrapped/wrappedlibc_private.h" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+for old, new in [("GO(shmat, pFipi)", "GOM(shmat, pFipi)"),
+                 ("GO(shmctl, iFiip)", "GOM(shmctl, iFiip)"),
+                 ("GO(shmdt, iFp)", "GOM(shmdt, iFp)"),
+                 ("GO(shmget, iFiLi)", "GOM(shmget, iFiLi)")]:
+    assert s.count(old) == 1, "GO anchor not found: " + old
+    s = s.replace(old, new, 1)
+open(p, "w").write(s)
+print("patched shm GO->GOM in", p)
+PYEOF
+grep -q "GOM(shmget, iFiLi)" "$SRC/src/wrapped/wrappedlibc_private.h" || { echo "ERROR: shmget GOM did not land"; exit 1; }
+grep -q "my_shmget" "$SRC/glibcshim.c" || { echo "ERROR: glibcshim.c shm stubs missing"; exit 1; }
+
 # ---------------------------------------------------------------------------
 
 rm -rf "$BUILD"

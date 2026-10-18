@@ -306,6 +306,15 @@ object Phase2X11 {
             // 2026-10-17). -dumbSched is xorg's own switch to disable it
             // (os/utils.c sets InputThreadEnable=FALSE and SmartScheduleSignalEnable=FALSE).
             "-dumbSched",
+            // Android's app seccomp filter kills any process that calls shmget
+            // (arm64 syscall 194) with SIGSYS. Wine's X11 driver uses MIT-SHM
+            // (XShmCreateImage -> shmget) for window surfaces; every NPP run
+            // under wine 11.0 died this way (logcat: "Fatal signal 31 (SIGSYS),
+            // code 1 (SYS_SECCOMP), syscall 194 in tid ... (notepad++.exe)").
+            // Disable the extension so clients fall back to plain XPutImage.
+            // xeyes never used XShm, which is why it always rendered.
+            // Measured 2026-10-18 (B-026, round 5b, manager note 4).
+            "-extension", "MIT-SHM",
         )
         val env = baseEnv(ctx).toMutableMap()
         val t0all = System.currentTimeMillis()
@@ -550,12 +559,30 @@ object Phase2X11 {
         fun initXtest() {
             val name = "XTEST".toByteArray()
             put(OP_QUERY_EXTENSION); put(0); putShort(2 + (pad4(name.size) / 4))
-            putShort(name.size); out.write(name)
+            // 2 pad bytes sit between name-length and the name (core spec) -
+            // without them the request is 14 bytes while its length says 16,
+            // the server waits for the rest and the client times out on the
+            // reply (phone 2026-10-18, SocketTimeoutException).
+            putShort(name.size); putShort(0)
+            out.write(name)
             repeat(pad4(name.size) - name.size) { put(0) }
             out.flush()
             val rep = readFully(32)
-            val present = rep[8].toInt() and 0xff
+            // Two reply layouts are in the wild for QueryExtension:
+            // this Xvfb puts present at [8] and major-opcode at [9] (verified by
+            // raw queries 2026-10-18: BIG-REQUESTS 132, XTEST 131, SHAPE
+            // 129 with first-event 64 at [10], MIT-SHM absent -> all zero);
+            // mainline xorg puts present at [1] and major-opcode at [8].
+            // Accept whichever yields a valid extension opcode (>=128).
+            var present = rep[8].toInt() and 0xff
             xtestOp = rep[9].toInt() and 0xff
+            if (present != 1 || xtestOp < 128) {
+                if ((rep[1].toInt() and 0xff) == 1 && (rep[8].toInt() and 0xff) >= 128) {
+                    present = 1
+                    xtestOp = rep[8].toInt() and 0xff
+                }
+            }
+            require(present == 1 && xtestOp >= 128) { "XTEST extension missing" }
             say("XTEST present=$present opcode=$xtestOp")
             // length field 0; remaining padding discarded implicitly by readFully(32)
             require(present == 1) { "XTEST extension missing" }
@@ -593,8 +620,15 @@ object Phase2X11 {
         }
 
         private fun fakeInput(evtype: Int, detail: Int) {
-            put(xtestOp); put(2); putShort(4) // minor 2 = FakeInput; 16 bytes total
+            // XTestFakeInput is 36 bytes (spec length 1+(1*8)=9 words): header +
+            // type/detail/unused + delay + root + 8 unused + x/y + 8 unused. A
+            // 16-byte body draws BadLength and no event is ever simulated.
+            put(xtestOp); put(2); putShort(9)
             put(evtype); put(detail); put(0); put(0)
+            putInt(0)                          // delay = CurrentTime
+            putInt(0)                          // root = None
+            repeat(8) { put(0) }
+            putShort(0); putShort(0)           // x, y (motion only)
             repeat(8) { put(0) }
             out.flush()
         }
@@ -606,6 +640,13 @@ object Phase2X11 {
 
         fun typeText(text: String) {
             findShift()
+            // A synthetic KeyRelease can be dropped by this Xvfb when the same
+            // keycode is pressed twice inside the auto-repeat delay (660 ms):
+            // the key then stays down and the server auto-repeats it forever.
+            // Observed on the phone 2026-10-18: one "type:" run left 'h' held
+            // and the document grew to 4,168 stuck chars at ~47% CPU until the
+            // key was released. Sweep every keycode before and after typing.
+            sweepKeys(1)
             for (ch in text) {
                 val sym = when (ch) {
                     ' ' -> 0x20
@@ -621,7 +662,13 @@ object Phase2X11 {
                 fakeInput(3 /*Key Release*/, kc.first)
                 if (kc.second) fakeInput(3, shiftCode)
             }
+            sweepKeys(2)
             say("TYPED ${text.length} chars")
+        }
+
+        /** Release every keycode [minKeycode..maxKeycode], [passes] times. */
+        private fun sweepKeys(passes: Int) {
+            repeat(passes) { for (kc in minKeycode..maxKeycode) fakeInput(3 /*Key Release*/, kc) }
         }
 
         fun close() { try { sock.close() } catch (_: Throwable) { } }

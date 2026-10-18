@@ -78,6 +78,13 @@ object Phase2Wine {
     //   ntdll.so   26c76dc2.. -> c378cd70..
     //   wineserver d40f733c.. -> d01d4f75..
     private const val NTDLL_ORIG_SHA = "26c76dc28af8578b4fe127ef03f934e704893fec86a0b693e23480a6cf899c14"
+    // round 5 (B-026): the F1 SUD site (sudKeepEnabledSite) briefly took this to
+    // c7757b35..., then was removed from the list for the manager's F1 on/off
+    // A/B (see BUGS.md B-026): with the F2 box64 restorer patch active the
+    // restorer scan always succeeds, so F1's store branch is unreachable and the
+    // patch is inert (both F2/F3-run logs show the "could not find library"
+    // WARN count 0). The 2-site value c378cd70... is measured on-device
+    // (restore the byte at 0x51938 to 0) and matches the pristine-file model.
     private const val NTDLL_PATCHED_SHA = "c378cd70685ac1fbf01034aef2b95f3d1bfbb6bf94b4447aa2389a5d867387af"
     private const val WSRV_ORIG_SHA = "d40f733c90aca3f1e8d4bf86b9b2a5c3ec8c5f4fa12f1b061c0adc6422d52e01"
     private const val WSRV_PATCHED_SHA = "d01d4f7516661cc7de0729dae6c3b66ee3b7a2cd0af85cfe7666b217fd7d07ea"
@@ -125,6 +132,35 @@ object Phase2Wine {
             prefixRelSite(CLIENT_STR_10PLUS, "server dir -> prefix-relative"),
         ) to listOf(prefixRelSite(SERVER_STR, "server dir -> prefix-relative"))
     }
+
+    /** B-026 F1 (round 5): keep syscall-user-dispatch ENABLED when wine's
+     *  restorer-trampoline check fails. Wine 11.19 init_signal_tls (source:
+     *  dlls/ntdll/unix/signal_x86_64.c:2860-2874) reads
+     *  sigaction(SIGSYS,NULL,&act).sa_restorer and, when no loaded ELF holds it,
+     *  stores FALSE into the static syscall_dispatch_enabled. Under box64 the
+     *  reported restorer is 0 (box64 has no guest SA_RESTORER), so that ALWAYS
+     *  happens: the "could not find library containing signal restorer
+     *  trampoline" WARN, SUD off, and box64's legacy "SIGSYS for every guest
+     *  syscall outside an ELF" hack then answers every guest-syscall-derived NT
+     *  call with c0000005 (B-026; round-3b/4 logs).
+     *
+     *  Disassembly of the pinned 11.19 ntdll.so (pristine sha 26c76dc2...) shows
+     *  BOTH failure branches ("failed to retrieve signal restorer trampoline"
+     *  and "could not find library containing signal restorer trampoline")
+     *  compile onto ONE shared store at 0x51932:
+     *      51932: c7 05 54 cf 25 00 00 00 00 00  mov DWORD PTR [rip+0x25cf54],0
+     *  (both the "debug off" shortcuts and the post-WARN jumps reach it). The
+     *  site flips the immediate 0 (FALSE) to 1 (TRUE): SUD then turns on with an
+     *  empty allowed range (libc_addr=libc_size=0), which box64's wrapped prctl
+     *  accepts (syscall_user_dispatch.c accepts offset=0 len=0) and whose SIGSYS
+     *  path hands the raw syscall to wine's own SIGSYS handler instead of the
+     *  c0000005 retry. The "could not find..." WARN still prints (by design).
+     *  Verified on the pristine file: occurrence count 1; the 2-site sha256
+     *  still equals the pre-round-5 NTDLL_PATCHED_SHA (c378cd70...) and the
+     *  3-site sha256 is the pinned NTDLL_PATCHED_SHA (c7757b35...). */
+    internal fun sudKeepEnabledSite(): Site = hexSite(
+        "c70554cf250000000000", "c70554cf250001000000",
+        "SUD: keep syscall_dispatch_enabled TRUE when no restorer trampoline")
 
     private fun sha256Hex(b: ByteArray): String {
         val d = MessageDigest.getInstance("SHA-256").digest(b)
@@ -325,14 +361,15 @@ object Phase2Wine {
     // tree before that can happen again. The decision is a pure function so it
     // is unit-tested.
     //
-    // 2026-10-18 (round 4): 40/600 was too tight for a REAL app run: a Notepad++
-    // launch legitimately reached 49 processes (wine services + explorer swarm)
-    // and MemAvailable ~1.2 GB eight seconds in, and the guard killed every
-    // launch mid-init (SAFETY_GUARD TRIP procs=49; earlier round: procs=47).
-    // Raised to 160 procs / 400 MB: still kills a real fork storm (B-022 hit
-    // 333) while leaving normal wine sessions alone.
-    internal const val SAFETY_MAX_PROCS = 160
-    internal const val SAFETY_MIN_MEM_MB = 400
+    // 2026-10-18 (round 5): back to 40/600 per the manager's correction. Round 4
+    // raised it to 160/400 because NPP "reached 49 procs" - that was the B-022
+    // explorer-swarm pattern, not a normal session (normal: ~8-10 procs). The
+    // guard must never be loosened to push a failing run further. With the B-029
+    // reaper in place (boot/killall) the counts start clean every run; if a run
+    // with NO swarm still needs more, raise to the smallest number that fits and
+    // attach the `ps` list as evidence.
+    internal const val SAFETY_MAX_PROCS = 40
+    internal const val SAFETY_MIN_MEM_MB = 600
 
     internal fun safetyCapTrips(procCount: Int, memAvailableMb: Int): Boolean =
         procCount > SAFETY_MAX_PROCS || memAvailableMb < SAFETY_MIN_MEM_MB
@@ -357,7 +394,7 @@ object Phase2Wine {
     } catch (_: Throwable) { Int.MAX_VALUE }
 
     /** SIGKILL every process of our uid except this one (the watchdog's
-     *  `kill -9 -1`, but in-app so the log survives). */
+     *  `kill -9 -1`, but in-app so the log survives). Panic path (guard trip). */
     fun killAllOurProcesses() {
         val uid = android.os.Process.myUid()
         val me = android.os.Process.myPid()
@@ -366,6 +403,54 @@ object Phase2Wine {
                 val pid = d.name.toInt()
                 if (pid != me && readUid(d) == uid) android.os.Process.killProcess(pid)
             } catch (_: Throwable) { }
+        }
+    }
+
+    // ---- B-029 reaper ---------------------------------------------------------
+    //
+    // Wine's internally spawned children (wineboot/services/explorer/rundll32/
+    // control) survive the wineserver's death and the app's tracked kills; one
+    // set accumulated per boot. `killall` (harness) and every boot now first
+    // reap every process of our uid EXCEPT the app's own process family (the
+    // main process and sandboxed children like :black - their cmdline starts
+    // with the package name; wine/Xvfb processes never do, argv[0] is their
+    // binary name or an absolute path under files/). The decision is a pure
+    // function so it is unit-tested.
+
+    /** The identifying facts of one /proc entry for the reaper. */
+    internal class ProcFact(val pid: Int, val uid: Int, val cmdlineHead: String)
+
+    /** Pure selection (unit-tested): every process of our uid except our own pid
+     *  and the app's own process family. An empty cmdline (kernel threads,
+     *  races) contains no package name, so such a same-uid entry is reaped. */
+    internal fun reapSelection(me: Int, myUid: Int, packageName: String, procs: List<ProcFact>): List<Int> =
+        procs.filter { p -> p.uid == myUid && p.pid != me && !p.cmdlineHead.startsWith(packageName) }
+            .map { it.pid }
+
+    private fun cmdlineHead(dir: File): String = try {
+        val b = File(dir, "cmdline").readBytes()
+        val end = b.indexOf(0.toByte()).let { if (it < 0) b.size else it }
+        String(b, 0, end, Charsets.UTF_8)
+    } catch (_: Throwable) { "" }
+
+    /** Reap B-029 leftovers now (call before a boot and from `killall`). Keeps
+     *  the app's own process family; kills everything else of our uid. */
+    fun reapLeftoverProcesses(ctx: Context, tag: String) {
+        try {
+            val uid = android.os.Process.myUid()
+            val me = android.os.Process.myPid()
+            val facts = mutableListOf<ProcFact>()
+            File("/proc").listFiles { f -> f.name.all { it.isDigit() } }?.forEach { d ->
+                try {
+                    val pid = d.name.toInt()
+                    if (pid != me && readUid(d) == uid) facts.add(ProcFact(pid, uid, cmdlineHead(d)))
+                } catch (_: Throwable) { }
+            }
+            val kills = reapSelection(me, uid, ctx.packageName, facts)
+            for (pid in kills) android.os.Process.killProcess(pid)
+            say("REAP tag=$tag candidates=${facts.size} killed=${kills.size} pids=$kills")
+        } catch (t: Throwable) {
+            say("REAP_FAIL tag=$tag $t")
         }
     }
 
@@ -670,6 +755,7 @@ object Phase2Wine {
     }
 
     fun boot(ctx: Context, winedebug: String? = null) {
+        reapLeftoverProcesses(ctx, "boot")   // B-029: one orphan set per boot no more
         Phase2X11.ensureXvfb(ctx)
         // B-021: kill the server BEFORE touching the hives. A live server keeps
         // the registry in memory and re-saves system.reg while the heal deletes

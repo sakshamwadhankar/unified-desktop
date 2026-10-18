@@ -45,7 +45,7 @@ object Phase2Dispatch {
                     "type" -> Phase2X11.typeViaXtest(ctx, arg)
                     "wineexec" -> Phase2Wine.execTree(ctx, arg)
                     "wsrv" -> Phase2Wine.ensureWineserver(ctx)
-                    "killall" -> { Phase2Wine.killWine(); Phase2X11.killXvfb() }
+                    "killall" -> { Phase2Wine.reapLeftoverProcesses(ctx, "killall"); Phase2Wine.killWine(); Phase2X11.killXvfb() }
                     "runbin" -> Phase2X11.runGuestShell(ctx, arg)
                     else -> Phase2X11.say("PHASE2X unknown [$what] codes=${what.map { it.code }.take(12)}")
                 }

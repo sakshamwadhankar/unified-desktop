@@ -135,3 +135,72 @@ these facts.** Re-verify anything critical: Android changes.
   agent checked instead of trusting it, and that saved a full session. Always verify.
 - A strict rule (any screen wake voids a test) made an agent loop all night. Rules must say
   what is being tested and when to stop.
+
+## 7. Phase 2 round 5 (2026-10-18)
+
+- **Pulling binary evidence off the phone:** `adb exec-out run-as <pkg> cat <file>` through
+  `cmd /c` (PowerShell `>` corrupts binary output). Device file names are case-sensitive and
+  the harness writes some captures WITHOUT an extension (`NoF1npp`, 5336 B); a 57-byte "file"
+  is an error message, not a capture. Compare captures by SHA-256: every no-window frame so
+  far equals the black reference `527F19E0...` (5336 B); a real render differs (xeyes 9442 B).
+- **`sh -c` quoting through PowerShell -> adb -> device-shell collapses:** `run-as pkgs
+  sh -c "…'…'…"` ran only the first word as the script (a bare `find` listed the data dir).
+  Pipe a here-string instead: `@'…'@ | adb shell run-as <pkg> sh`.
+- **Reinstall changes the app uid:** restart EVERY watchdog instance (it caches
+  `run-as id -un` at start) and re-check that none is left after cleanup.
+- **Cold boot of a fresh install** burns ~5:00-5:17 (wineboot + prefix heal); a warm re-boot
+  is < 15 s. Do not kill early.
+- **The ntdll patch applies at BOOT, not at fetch:** verify the on-device `ntdll.so` sha
+  AFTER a boot.
+- **Box64's `src/wrapped/generated/` is regenerated at build time** (`rebuild_wrappers.py`):
+  two builds from the same source can differ there (~577 KB), so "same source" != "same
+  binary". Reproduce the baseline bytes before trusting any patch A/B.
+- **Binary recipe checks that worked:** `readelf -sW` (dynsym identity), `cmp -l` (byte
+  diffs), `objcopy -O binary --only-section=...` to localize diffs per section; map a
+  stripped lib via an unstripped twin of the same build.
+- **B-020's glibc-shaped `sa_mask`** (ANDROID branch of `src/include/signals.h`) makes plain
+  `sa_mask`/`sigset_t` assignments uncompilable without the `sub1f` size-aware copies - proof
+  that a build without sub1f cannot be the ancestor of the shipped lib (the hypothesis died
+  on compile errors, before any phone time).
+- **Wine 11.0 needs `libgcc_s.so.1`** for `x86_64-unix/ntdll.so`: absent from the 11.0 tree
+  and the runtime-lib set; 11.19 does not need it. The app prepends `<wine>/lib64` to
+  LD_LIBRARY_PATH - a staging spot. 11.0 predates SUD, and its runs show the 11.19
+  c0000005/SIGSYS storm signature NOT at all - but NPP still never shows a window (exits by
+  itself, code 159, in 9-23 s), so the no-window bug is not the SUD mismatch alone.
+- **Untraced vs `+seh` runs are different experiments** (timing changes): only compare like
+  with like.
+
+### Round 5c (B-026 solved: the SysV-shared-memory path)
+
+- **The real B-026 root cause was the shm path, not SUD:** winex11 wants SysV shared memory
+  (XShm) and box64 must intercept it on BOTH routes - the raw guest syscalls (29/30/31/67)
+  AND the wrapped-libc stubs (`my_shm*`). Raw-only builds stop the `exit=159` deaths but stay
+  black at ~100% CPU (window blocker); libc-only builds still die. Both are needed (F4).
+- **`exit=159` = 128+31 = SIGSYS** - a seccomp kill of a guest syscall box64 forwarded
+  unhandled. `COMCTL32.dll.381 aborting` was logged BEFORE the SIGSYS death (the abort path
+  releases the kill); it disappeared once F4 landed - so that line was a symptom, not the cause.
+- **Xvfb must run `-extension MIT-SHM`**: proven by a raw `QueryExtension` (MIT-SHM absent ->
+  all-zero reply; the flag verifiably disables it). XTEST stays enabled.
+- **XTest wire format on this Xvfb (raw protocol, phone-verified):** the `QueryExtension`
+  request needs its 2 pad bytes (a 14-byte request deadlocks -> SocketTimeoutException); the
+  reply carries `present` at byte 8 and the major opcode at byte 9 (mainline is 1/8 - keep the
+  fallback; this server pads 3 extra bytes at the end); first-event is byte 10. A 16-byte
+  `FakeInput` draws BadLength and types nothing; 36 bytes (all 4 event slots) works. Synthetic
+  keycodes must be >= 8.
+- **Stuck-key flood (B-032):** a synthetic KeyRelease can be lost when the same key is pressed
+  twice within the 660 ms auto-repeat delay; the server then repeats the key forever (observed:
+  4,168 `h`, ~47% CPU). Always sweep `KeyRelease` across all keycodes before and after typing.
+- **Typing into the wine window needs no focus work** with focus=PointerRoot: with the pointer
+  over the window, synthetic events route to it.
+- **Cold-start race (B-031):** NPP launched as the first wine client of an app generation dies
+  in ~4-5 s (loader stack overflow); `wineboot` first, then NPP - 5/5 stable both ways.
+- **The laptop raw-protocol bench is a DIAGNOSTIC only.** Gate evidence must come from the
+  app's own broadcast path; label bench results as diagnostics in the report.
+- **The dev watchdog caches the app uid at start:** the round-5 instance (start user=u0_a467,
+  06:31) was still alive in round 5c (uids u0_a472-475) and read `procs=0` the whole time.
+  After every reinstall, restart it and check the log's `start user=` line - the in-app guard
+  may be the only live cap otherwise.
+- **LMK on this phone:** MemFree sits at ~50-70 MB even with MemAvailable ~2.5 GB, so a kill
+  can land when MemFree dips (`lowmemorykiller ... free 18160` at 10:11:50), taking app + wine
+  children + Xvfb down together. A documented clean kill is acceptable for the survival item;
+  the product answer is the Phase 4 foreground service (B-027).

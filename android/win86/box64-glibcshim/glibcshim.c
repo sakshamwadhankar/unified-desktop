@@ -340,6 +340,39 @@ SHIM_RETAIN void* my_popen(void* emu, const char* cmd, const char* type) {
     return f;
 }
 
+/* shmget/shmat/shmctl/shmdt: Android's app seccomp policy kills any process
+ * that issues the SysV-IPC syscalls (measured: "Fatal signal 31 (SIGSYS), code
+ * 1 (SYS_SECCOMP), syscall 194" = arm64 shmget). A guest can therefore never
+ * have SysV shared memory here. Box64's wrapped libc binds these symbols to
+ * Bionic's own shmget wrappers, which make the host syscall directly, so route
+ * them through these my_ stubs instead: fail like a kernel built without SysV
+ * IPC (ENOSYS). X11 MIT-SHM clients (winex11) fall back to plain XPutImage.
+ * The raw guest-syscall path is intercepted separately in x64syscall.c (F4). */
+SHIM_RETAIN int my_shmget(void* emu, int key, unsigned long size, int shmflg) {
+    (void)emu; (void)key; (void)size; (void)shmflg;
+    if (getenv("UD_SHIM_TRACE")) SHIM_LOG("shmget(%d, %lu, %d) -> ENOSYS", key, size, shmflg);
+    errno = ENOSYS;
+    return -1;
+}
+
+SHIM_RETAIN void* my_shmat(void* emu, int shmid, const void* shmaddr, int shmflg) {
+    (void)emu; (void)shmid; (void)shmaddr; (void)shmflg;
+    errno = ENOSYS;
+    return (void*)-1;
+}
+
+SHIM_RETAIN int my_shmctl(void* emu, int shmid, int cmd, void* buf) {
+    (void)emu; (void)shmid; (void)cmd; (void)buf;
+    errno = ENOSYS;
+    return -1;
+}
+
+SHIM_RETAIN int my_shmdt(void* emu, void* shmaddr) {
+    (void)emu; (void)shmaddr;
+    errno = ENOSYS;
+    return -1;
+}
+
 /* glibc sigset emptiness probe: buffers are the caller's glibc-sized set; we
    scan a conservative 128 bytes like glibc's own C-locale ABI size. */
 SHIM_RETAIN int sigisemptyset(void* set) {

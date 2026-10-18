@@ -6,40 +6,40 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 2 of 13. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Phase 2's
-  runtime is now proven from a **clean install** (round 4, item 9): broadcasts only, the app
-  alone fetched and staged everything (runtime + udsh + fontconfig stub, bundle, Wine 11.19,
-  Notepad++), booted the prefix (`PREFIX_BOOT_OK`), started Xvfb 10/10 (all first attempt,
-  ~2.83 s) and rendered xeyes (PNG bit-identical to round 3b). The one remaining GUI blocker
-  is **B-026**: no wine window ever maps. Round-4 root cause: wine 11.19 cannot enable
-  syscall-user-dispatch here ("could not find library containing signal restorer trampoline"
-  -> `syscall_dispatch_enabled=FALSE`) and box64's synthesized-SIGSYS SUD emulation then
-  makes every guest-syscall-derived NT call return c0000005 — NPP self-dies 1.5 s in at
-  `comdlg32.dll` load and the capture is bit-identical to the black reference (5336 B,
-  527F19E0…); xeyes renders on the same server.
-- **Last updated:** 2026-10-18, agent, round 4 (session 00:30-06:30; this update 03:28).
-  Tried and REVERTED this round: H1 `allowNativeHeapPointerTagging=false` (no effect), H2
-  box64 rt_sigreturn-synthesis patch (a host-side rt_sigreturn cannot consume the guest
-  sigframe; deterministic crash — patch block in `fetch-box64.sh` marked REVERTED, lib at
-  sha `F69ACC14…`). H3 became diagnostics (root cause above); the two real fix directions are
-  in docs/PHASE2_RESULT.md "Round 4". Guards retuned: in-app cap 160 procs/400 MB, laptop
-  watchdog 200 (they had been killing fair NPP tests at 44-49 procs). Clean-install proof
-  done: B-019 evidence (no staging steps left), B-018 re-verified 10/10. Window PNG / typed
-  text / survival stayed SKIPPED (SKIPS.md T6/T7). New bugs: B-027 (app-freezer deadlock —
-  platform hazard; runs need stayon + foreground), B-028 (activity-intent replay quirk),
-  B-029 (orphan wine children survive wineserver death + killall). Gates pass (6 classes /
-  16 tests, 0 failures; APK 23,477,543 B). **PHASE 2 GATE: FAIL** (the window is the gap).
-- **Next action:** manager decides B-026: (a) make wine's SUD setup succeed (restorer visible
-  to `dl_iterate_phdr`) or (b) a box64-side guest-stack-correct SUD/rt_sigreturn
-  implementation; a different candidate pin remains an option (B-024 `bin/wine` re-test still
-  open). Then the window PNG + typed-text + survival gate. Smaller opens: B-029 reaper
-  (`killWine()` via the existing `killAllOurProcesses`), B-028 launch-intent fix,
-  scratch-script pass + D13/D4/ARCHITECTURE refresh (SKIPS.md).
+- **Phase:** 2 of 13. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Phase 2: the
+  GUI gate is **CLOSED on the phone** (round 5c): **B-026 is SOLVED** - the no-window cause was
+  the guest **SysV-shared-memory path** (winex11's XShm); the F4 block in
+  `android/win86/fetch-box64.sh` intercepts it on both routes (wrapped-libc `my_shm*` and raw
+  syscalls 29/30/31/67) and Xvfb runs `-extension MIT-SHM`. Clean install, broadcasts only
+  (uid u0_a475): window PNG (`evidence/phase2/npp-window-clean-install.png`), "hello from
+  phase 2" typed through the app (`npp-typed-clean-install.png`, length 18, unchanged 30 s
+  later), 10-min 26-s survival (`npp-window-11.19-10min.png`), launch-to-first-frame 27.0 s,
+  8 procs, notepad++ PSS 191,814 kB, idle ~6.7% of one core. **PHASE 2 GATE: PASS**, verified by
+  the manager 2026-10-18 11:15 (PNGs viewed, 24 unit tests green, phone at 0 processes, no seccomp kill since 09:37). **Phase 2 is CLOSED.** Shipping lib = the F4 build `e1c21ed2...` (jniLibs +
+  APK); the box64 recipe is NOT reproducible (B-030) - the tested bytes are the artifact
+  (gitignored `vendor/` + the p2r5 dir).
+- **Last updated:** 2026-10-18, agent, round 5c (session ~09:45-11:12; this update 11:12).
+  Round 5c: **B-026 fixed** (F4: the raw-syscall block stopped the `exit=159` SIGSYS deaths; the
+  wrapped-libc shm stubs produced the window; `COMCTL32.dll.381 aborting` was a pre-fix symptom,
+  gone after F4). XTEST typing fixed end-to-end (QueryExtension +2 pad bytes; reply present@8 /
+  opcode@9 with a mainline fallback; FakeInput 36 B) and the stuck-key flood fixed with a
+  keycode release sweep (B-032). Every gate item re-proven from a clean install (numbers + PNGs
+  above); B-029 reaper verified (`REAP tag=killall candidates=10 killed=9`, only app + `:black`
+  left); early-death race counted 5/5 cold vs 5/5 warm (B-031); box64 rebuild check gave three
+  shas from one recipe -> B-030 (ship the tested bytes); LMK kill 10:11:50 documented (B-033);
+  build gates green; 0 processes left; all watchdogs stopped (the round-5 instance had gone
+  stale at uid u0_a467 - the in-app guard was the live cap). **PHASE 2 GATE: PASS**.
+- **Next action:** the owner decides when to start Phase 3 (PLAN.md: full-speed tools, i.e.
+  Node.js + code-server/VS Code shipped as `lib*.so`). Manager-side: D13 (box64/wine pins +
+  F4), D4 and ARCHITECTURE.md H6/H7 notes for Phase 2; a safe off-laptop copy of the tested
+  box64 lib (B-030). Open Phase 2 follow-ups: B-031 (first-launch race), B-030, B-033. Deferred
+  rows in SKIPS.md: 11.0's `libgcc_s.so.1` staging, the `android/win86` scratch-script pass.
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
-  `svc power stayon true` + the harness activity in the foreground (B-027), the retuned app
-  cap (160/400) and the laptop watchdog (200 / 400 MB floor; restart it after every install,
-  it caches the uid — LESSONS.md §5).
+  `svc power stayon true` + the harness activity in the foreground (B-027), the app
+  cap (40/600) and the laptop watchdog (40 procs / 600 MB floor; restart it after every install,
+  it caches the uid — LESSONS.md §5; 2026-10-18 the instance had gone stale at u0_a467: check the
+  log's `start user=` line, a stale watchdog reads 0 and cannot fire).
 
 ## Done (verified on the phone, 2026-10-14)
 
