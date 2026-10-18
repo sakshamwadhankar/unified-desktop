@@ -9,11 +9,14 @@
  <application
      android:name="dev.unifieddesktop.app.EngineApplication"
      android:label="Unified Desktop Phase 1"
+     android:networkSecurityConfig="@xml/ud_network_security_config"
      android:theme="@style/AppTheme"
      tools:replace="android:label">
   <activity android:name=".HarnessActivity" android:screenOrientation="landscape" android:exported="true">
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
   </activity>
   <activity android:name=".SelfTestActivity" android:exported="false"/>
+  <activity android:name=".Phase3CodeActivity" android:exported="false" android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"/>
  </application>
 </manifest>

@@ -16,6 +16,12 @@ import android.content.Intent
  */
 class HarnessReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
+        val p3 = intent.getStringExtra("phase3x")
+        if (p3 != null) {
+            android.util.Log.i("Phase3", "BROADCAST $p3")
+            Phase3Dispatch.runX(ctx.applicationContext, p3)
+            return
+        }
         val what = intent.getStringExtra("phase2x") ?: return
         android.util.Log.i("Phase2", "BROADCAST $what")
         Phase2Dispatch.runX(ctx.applicationContext, what)

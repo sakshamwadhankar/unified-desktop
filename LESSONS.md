@@ -123,6 +123,24 @@ these facts.** Re-verify anything critical: Android changes.
   quoting (empty samples in the log, no error). The watchdog also caches the app uid at
   start (`run-as <pkg> id -un`) — restart it after every reinstall, or it counts zero
   processes forever.
+- **PowerShell 5.1 strips embedded double quotes when passing arguments to adb** (Phase 3,
+  2026-10-18 15:2x): `adb shell input text '"echo x > term.txt"'` reached the device shell
+  UNQUOTED, so the device shell parsed `> term.txt` as its own redirect (cwd `/` ->
+  `can't create term.txt: Read-only file system` on the host console) and the text never
+  reached the terminal IME. Delivery recipe that avoids the whole class: **no quotes, no
+  spaces** - spaces as `%s` (adb `input text` converts them), shell metacharacters
+  backslash-escaped (`\>`, `\;`), then `input keyevent 66` for Enter. Same trap class as
+  the screenshot `>` corruption (LESSONS 7): PowerShell and adb both re-interpret what you
+  meant to pass through. (BUGS B-040.)
+- **Emulator under low host RAM hangs, it does not fail** (Phase 3, 2026-10-18): with
+  0.5-1.2 GB free (owner's browser holds ~6.5 GB), every relaunch froze before adb
+  registration - qemu WS pinned at ~192 MB, TotalProcessorTime frozen (sample twice, 8 s
+  apart, before declaring anything), 21-24 threads; later attempts paged the whole process
+  out (WS 28-48 MB). A killed emulator leaves `Pixel_8_Pro.avd/hardware-qemu.ini.lock` (a
+  DIRECTORY) and `multiinstance.lock` behind - delete both before relaunch or the next
+  start may hang on the lock. Policy: start the emulator only above 3 GB free with
+  `-memory 3072 -no-boot-anim -no-snapshot-load`, one launch, no relaunch loops; every
+  hang goes to the incident log in docs/PHASE3_RESULT.md.
 
 ## 6. How past sessions went wrong
 

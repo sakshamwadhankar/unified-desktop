@@ -129,6 +129,11 @@ class HarnessActivity : Activity() {
             Phase2Dispatch.runX(this, i!!.getStringExtra("phase2x")!!)
             return
         }
+        // Phase 3: full-speed tools (node/code-server from nativeLibraryDir).
+        if (i?.getStringExtra("phase3x") != null) {
+            Phase3Dispatch.runX(this, i!!.getStringExtra("phase3x")!!)
+            return
+        }
         if (i?.getBooleanExtra("selftest", false) == true) {
             main.postDelayed({ runSelfTest(i.getIntExtra("caps", 4)) }, 800)
             return

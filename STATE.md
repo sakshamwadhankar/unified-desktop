@@ -6,40 +6,46 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 2 of 13. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Phase 2: the
-  GUI gate is **CLOSED on the phone** (round 5c): **B-026 is SOLVED** - the no-window cause was
-  the guest **SysV-shared-memory path** (winex11's XShm); the F4 block in
-  `android/win86/fetch-box64.sh` intercepts it on both routes (wrapped-libc `my_shm*` and raw
-  syscalls 29/30/31/67) and Xvfb runs `-extension MIT-SHM`. Clean install, broadcasts only
-  (uid u0_a475): window PNG (`evidence/phase2/npp-window-clean-install.png`), "hello from
-  phase 2" typed through the app (`npp-typed-clean-install.png`, length 18, unchanged 30 s
-  later), 10-min 26-s survival (`npp-window-11.19-10min.png`), launch-to-first-frame 27.0 s,
-  8 procs, notepad++ PSS 191,814 kB, idle ~6.7% of one core. **PHASE 2 GATE: PASS**, verified by
-  the manager 2026-10-18 11:15 (PNGs viewed, 24 unit tests green, phone at 0 processes, no seccomp kill since 09:37). **Phase 2 is CLOSED.** Shipping lib = the F4 build `e1c21ed2...` (jniLibs +
-  APK); the box64 recipe is NOT reproducible (B-030) - the tested bytes are the artifact
-  (gitignored `vendor/` + the p2r5 dir).
-- **Last updated:** 2026-10-18, agent, round 5c (session ~09:45-11:12; this update 11:12).
-  Round 5c: **B-026 fixed** (F4: the raw-syscall block stopped the `exit=159` SIGSYS deaths; the
-  wrapped-libc shm stubs produced the window; `COMCTL32.dll.381 aborting` was a pre-fix symptom,
-  gone after F4). XTEST typing fixed end-to-end (QueryExtension +2 pad bytes; reply present@8 /
-  opcode@9 with a mainline fallback; FakeInput 36 B) and the stuck-key flood fixed with a
-  keycode release sweep (B-032). Every gate item re-proven from a clean install (numbers + PNGs
-  above); B-029 reaper verified (`REAP tag=killall candidates=10 killed=9`, only app + `:black`
-  left); early-death race counted 5/5 cold vs 5/5 warm (B-031); box64 rebuild check gave three
-  shas from one recipe -> B-030 (ship the tested bytes); LMK kill 10:11:50 documented (B-033);
-  build gates green; 0 processes left; all watchdogs stopped (the round-5 instance had gone
-  stale at uid u0_a467 - the in-app guard was the live cap). **PHASE 2 GATE: PASS**.
-- **Next action:** the owner decides when to start Phase 3 (PLAN.md: full-speed tools, i.e.
-  Node.js + code-server/VS Code shipped as `lib*.so`). Manager-side: D13 (box64/wine pins +
-  F4), D4 and ARCHITECTURE.md H6/H7 notes for Phase 2; a safe off-laptop copy of the tested
-  box64 lib (B-030). Open Phase 2 follow-ups: B-031 (first-launch race), B-030, B-033. Deferred
-  rows in SKIPS.md: 11.0's `libgcc_s.so.1` staging, the `android/win86` scratch-script pass.
+- **Phase:** 3 of 13. Phase 2 is **CLOSED, PASS** (2026-10-18, verified on the phone by the
+  manager; details in `docs/PHASE2_RESULT.md`; shipping box64 lib = `e1c21ed2...`, recipe not
+  reproducible, B-030). Phase 3 (VS Code/code-server in a WebView): **gate flows PASS on the
+  emulator** (`emulator-5554`, Android 17 API 37, 16 KB pages) - node+code-server run from
+  `nativeLibraryDir` (healthz 200; cold 7.9 s / warm 2.8 s), the full gate flow runs from the
+  WebView with injected taps+IME (folder via the `?folder=` deep link; hello.txt edit+Ctrl+S
+  save verified on disk by `run-as`; terminal command files `pwd.txt/term.txt/machine.txt`
+  verified on disk), plus item-9 numbers (APK 88.2 MiB universal, libnode 79.4/78.9 MiB per
+  ABI, app PSS 132.5 MiB + node 21.8 + worker 53.0, family 14 procs steady ~11, idle
+  0.15%/core, `files/phase3` 580.1 MiB) and the Open VSX stretch (indent-rainbow 8.3.1
+  installed through the marketplace UI, on-disk `extensions.json`; MIT verified in the
+  unpacked tree). Full record: `docs/PHASE3_RESULT.md` (items 1-12, every PNG header-checked
+  in `evidence/phase3/`). Build gates green 16:0x (`:app:testDebugUnitTest :app:lintDebug
+  :app:assembleDebug`, build28, 48 unit tests green). **The phone round is owed** (2c0f6edc
+  never connected; SKIPS.md "Phase 3 phone gate" row has the exact chain).
+- **Last updated:** 2026-10-18 ~16:10, agent, phase-3 emulator round (session ~11:00-16:10).
+  Mid-session the host killed the emulator in an OOM storm (PowerShell OOM, ~15:2x); the
+  emulator is now owned by the agent and its hang/crash recovery is codified (BUGS B-041,
+  incident log in docs/PHASE3_RESULT.md, LESSONS §5: relaunch only above 3 GB free at
+  `-memory 3072 -no-boot-anim -no-snapshot-load`, delete stale `hardware-qemu.ini.lock`).
+  New bugs: **B-039** (keyboard events injected by the app never reach the WebView page -
+  all dispatch routes return true, zero page keydowns; system-path `input keycombination`
+  works after the WebView focus fix: Ctrl+S saved a file; Phase-5 PC-keyboard decision
+  owed), B-040 (PowerShell->adb quoting trap; spaces via `%s`, metas via `\> \;`), B-041
+  (host RAM/emulator hangs). Harness additions: `cs-gofolder` deep-link action,
+  focusable WebView, `boxes` DOM probe v4 (menus/quick-input/editor lines/terminal/
+  activity bar/extension rows).
+- **Next action:** the manager reviews Phase 3 (docs/PHASE3_RESULT.md + PNGs) and then
+  decides: (a) run the phone gate when 2c0f6edc is available (SKIPS.md row), (b) B-039's
+  Phase-5 keyboard-input decision, (c) extension-shipping policy (THIRD_PARTY row -
+  indent-rainbow added as runtime-installed, not shipped). Phase 4 (PC link/stream) per
+  PLAN.md; its input plan must start from B-039's findings.
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app
   cap (40/600) and the laptop watchdog (40 procs / 600 MB floor; restart it after every install,
-  it caches the uid — LESSONS.md §5; 2026-10-18 the instance had gone stale at u0_a467: check the
-  log's `start user=` line, a stale watchdog reads 0 and cannot fire).
+  it caches the uid - LESSONS.md §5; 2026-10-18 the instance had gone stale at u0_a467: check the
+  log's `start user=` line, a stale watchdog reads 0 and cannot fire). Emulator policy and
+  the PowerShell->adb input recipes are in LESSONS.md §5 (emulator owned by the agent since
+  ~15:0x 2026-10-18).
 
 ## Done (verified on the phone, 2026-10-14)
 

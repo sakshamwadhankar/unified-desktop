@@ -19,6 +19,23 @@ import java.util.zip.ZipInputStream
  * downloaded from pinned URLs, SHA-256-checked, and unpacked with pure-Java readers.
  * Nothing in this tree is ever executed by Android; libbox64.so reads it as data.
  */
+/**
+ * Per-member policy for [Phase2Data.readTar]: where a wanted member lands, and why an
+ * unwanted one is dropped. Phase 2 passes none (every member is written as-is); Phase 3
+ * (item 5, code-server) passes one that maps the deb's Termux prefix away, skips
+ * native/ELF members and peeks the first bytes of every file (the ELF guard).
+ */
+internal interface TarPolicy {
+    /** Destination path relative to the target dir, or null = this member is not wanted. */
+    fun mapName(name: String): String?
+    /** Reason to drop a regular file of [size] bytes, or null to keep it. */
+    fun skipReason(name: String, size: Long): String? = null
+    /** Reason to drop a symlink, or null to create it as-is. */
+    fun skipLink(name: String, target: String): String? = null
+    /** First bytes of an otherwise-kept file; false = drop it (reported by the policy). */
+    fun keepBytes(name: String, head: ByteArray, size: Long): Boolean = true
+}
+
 object Phase2Data {
     const val TAG = "Phase2"
     const val LOG_NAME = "t3.log"
@@ -135,13 +152,27 @@ object Phase2Data {
         return md.joinToString("") { "%02x".format(it) }
     }
 
-    private fun download(ctx: Context, url: String, sha: String, name: String): File {
-        val dir = downloadsDir(ctx); dir.mkdirs()
+    private fun download(ctx: Context, url: String, sha: String, name: String): File =
+        download(downloadsDir(ctx), url, sha, name)
+
+    /**
+     * Download [url] into [dir] as [name] with a cache + SHA-256 check. Phase 2 (win86)
+     * and Phase 3 (code-server, item 5) share this; [log] keeps each phase's evidence in
+     * its own log file (Phase 2 passes nothing, Phase 3 passes Phase3Native::say).
+     */
+    internal fun download(
+        dir: File,
+        url: String,
+        sha: String,
+        name: String,
+        log: (String) -> Unit = { say(it) },
+    ): File {
+        dir.mkdirs()
         val out = File(dir, name)
         if (out.exists() && out.length() > 0) {
             val got = sha256(out)
-            if (got == sha) { say("DL $name cached sha ok"); return out }
-            say("DL $name cached sha MISMATCH -> redownload")
+            if (got == sha) { log("DL $name cached sha ok"); return out }
+            log("DL $name cached sha MISMATCH -> redownload")
             out.delete()
         }
         val t = System.currentTimeMillis()
@@ -150,7 +181,7 @@ object Phase2Data {
         }
         val got = sha256(out)
         val ms = System.currentTimeMillis() - t
-        say("DL $name bytes=${out.length()} ms=$ms sha=$got")
+        log("DL $name bytes=${out.length()} ms=$ms sha=$got")
         check(got == sha) { "sha mismatch for $url: got $got want $sha" }
         return out
     }
@@ -167,11 +198,39 @@ object Phase2Data {
         }
     }
 
-    private class TarEntry(val name: String, val size: Long, val link: String?, val type: Char)
+    /** The payload of a GNU 'L'/'K' member: the path/link, NUL-terminated. */
+    private fun readStringPayload(input: InputStream, size: Long): String {
+        if (size <= 0L || size > 65_536L) return ""
+        val b = ByteArray(size.toInt())
+        var got = 0
+        while (got < b.size) {
+            val n = input.read(b, got, b.size - got)
+            if (n <= 0) break
+            got += n
+        }
+        val end = b.indexOfFirst { it.toInt() == 0 }.let { if (it < 0) b.size else it }
+        return String(b, 0, end, Charsets.UTF_8)
+    }
 
-    private fun readTar(input: InputStream, target: File, label: String) {
+    /**
+     * Minimal tar reader for deb data.tar.{xz,gz} members and root-level tarballs.
+     * With [policy] (Phase 3) each member goes through mapName/skipReason/skipLink and,
+     * for kept files, a 4-byte head peek (keepBytes); without it every member is written.
+     *
+     * GNU long names matter here: the pinned code-server deb stores every path over 100
+     * bytes as an @LongLink ('L') member followed by a header whose name field is the
+     * *truncated* 100-byte prefix of the real path. Skipping 'L' silently writes the
+     * truncated names (measured: .../configuration-editing/images/ came out as the file
+     * "images" and killed the unpack with EISDIR). 'L'/'K' are honoured below, and a name
+     * that fills the whole 100-byte field is logged as TAR_NAME full - the tell-tale of a
+     * missed long name (docs/PHASE3_RESULT.md item 5).
+     */
+    internal fun readTar(input: InputStream, target: File, label: String, policy: TarPolicy? = null) {
         val buf = ByteArray(512)
         var hdrNo = 0
+        var nameFull = 0
+        var pendingName: String? = null
+        var pendingLink: String? = null
         while (true) {
             var off = 0
             while (off < 512) {
@@ -185,10 +244,9 @@ object Phase2Data {
                 if (zeros) return
             }
             hdrNo++
-            val rawName = String(buf, 0, 100).trimEnd('\u0000', ' ')
+            val nameField = String(buf, 0, 100)
+            val rawName = nameField.trimEnd('\u0000', ' ')
             val prefix = String(buf, 345, 155).trimEnd('\u0000', ' ')
-            val fullName = if (prefix.isNotEmpty()) "${stripGnuMagic(prefix)}/${stripGnuMagic(rawName)}" else stripGnuMagic(rawName)
-            if (fullName.isEmpty()) continue
             val sizeStr = String(buf, 124, 12).trimEnd('\u0000', ' ')
             val size = try {
                 if (sizeStr.isEmpty()) 0L else java.lang.Long.parseLong(sizeStr.trim(), 8)
@@ -198,31 +256,97 @@ object Phase2Data {
                 throw IllegalStateException("bad tar size <$sizeStr>", t)
             }
             val type = buf[156].toInt().toChar()
-            val link = String(buf, 157, 100).trimEnd('\u0000', ' ')
-            val entry = TarEntry(fullName, size, link, type)
 
+            // GNU long name / long link: the payload is the real value for the NEXT member.
+            if (type == 'L' || type == 'K') {
+                val payload = readStringPayload(input, size)
+                if (type == 'L') pendingName = payload else pendingLink = payload
+                val pad = ((512 - (size % 512)) % 512).toInt()
+                if (pad > 0) copyExactly(input, nullOut, pad.toLong())
+                continue
+            }
+
+            if (pendingName == null && nameField.length == 100 && !nameField.contains('\u0000')) {
+                nameFull++
+                if (nameFull <= 3) {
+                    say("TAR_NAME 100B name=$rawName (exactly 100 bytes, no @LongLink: legal - GNU tar" +
+                            " only adds 'L' when the path does not fit; same shape as a missed long name) " +
+                            "$label hdr#$hdrNo")
+                }
+            }
+            var fullName = rawName
+            if (prefix.isNotEmpty()) fullName = "${stripGnuMagic(prefix)}/${stripGnuMagic(rawName)}"
+            pendingName?.let { fullName = it; pendingName = null }
+            if (fullName.isEmpty()) continue
+            val linkField = String(buf, 157, 100).trimEnd('\u0000', ' ')
+            val link = pendingLink ?: linkField
+            pendingLink = null
             val cleaned = San.name(fullName)
-            val f = if (cleaned.isEmpty()) null else File(target, cleaned)
+            // Phase 3 maps the deb's Termux prefix away; null = member not wanted.
+            val dest = if (policy == null || cleaned.isEmpty()) cleaned
+                       else policy.mapName(cleaned)?.let { San.name(it) }
+            val f = if (dest == null || dest.isEmpty()) null else File(target, dest)
+            val reason: String? =
+                if (policy == null || f == null) null
+                else if (type == '0' || type == '\u0000') policy.skipReason(dest!!, size)
+                else if (type == '2') policy.skipLink(dest!!, link)
+                else null
+
             when (type) {
                 '0', '\u0000' -> {
-                    f?.parentFile?.mkdirs()
-                    if (f == null) copyExactly(input, nullOut, size)
-                    else FileOutputStream(f).use { dst -> copyExactly(input, dst as java.io.OutputStream, size) }
+                    if (f == null || reason != null) {
+                        copyExactly(input, nullOut, size)
+                    } else {
+                        var head = ByteArray(0)
+                        if (policy != null && size > 0L) {
+                            head = ByteArray(minOf(4L, size).toInt())
+                            var got = 0
+                            while (got < head.size) {
+                                val n = input.read(head, got, head.size - got)
+                                if (n <= 0) break
+                                got += n
+                            }
+                            if (got < head.size) head = head.copyOf(got)
+                        }
+                        if (policy != null && head.isNotEmpty() && !policy.keepBytes(dest!!, head, size)) {
+                            copyExactly(input, nullOut, size - head.size)
+                        } else {
+                            f.parentFile?.mkdirs()
+                            FileOutputStream(f).use { dst ->
+                                if (head.isNotEmpty()) dst.write(head)
+                                copyExactly(input, dst as java.io.OutputStream, size - head.size)
+                            }
+                        }
+                    }
                 }
-                '5' -> f?.mkdirs()
+                '5' -> if (f != null && reason == null) f.mkdirs()
                 '1' -> { // hard link
-                    if (f == null) return
-                    val src = File(target, San.name(link))
-                    if (src.isFile) { f.parentFile?.mkdirs(); src.copyTo(f, overwrite = true) }
-                    else say("TAR hardlink source missing $fullName -> $link")
+                    if (f == null) {
+                        if (policy == null) return
+                    } else if (reason == null) {
+                        val srcRel = if (policy == null) San.name(link)
+                                     else policy.mapName(San.name(link))?.let { San.name(it) }
+                        val src = if (srcRel == null) null else File(target, srcRel)
+                        if (src != null && src.isFile) { f.parentFile?.mkdirs(); src.copyTo(f, overwrite = true) }
+                        else say("TAR hardlink source missing $fullName -> $link")
+                    }
                 }
                 '2' -> { // symlink
-                    if (f == null) return
-                    f.parentFile?.mkdirs()
-                    try {
-                        f.delete()
-                        Files.createSymbolicLink(f.toPath(), java.nio.file.Paths.get(San.name(link)))
-                    } catch (t: Throwable) { say("SYMLINK FAIL $fullName -> $link: $t") }
+                    if (f == null) {
+                        if (policy == null) return
+                    } else if (reason == null) {
+                        f.parentFile?.mkdirs()
+                        if (!linkTargetInside(target, f, link)) {
+                            say("TAR_LINK_ESCAPE $fullName -> $link (resolves outside the unpack root)")
+                        } else {
+                            try {
+                                f.delete()
+                                Files.createSymbolicLink(f.toPath(), java.nio.file.Paths.get(link))
+                            } catch (t: Throwable) { say("SYMLINK FAIL $fullName -> $link: $t") }
+                        }
+                    } else {
+                        say("TAR_LINK_SKIP $fullName reason=$reason target=$link")
+                    }
                 }
                 else -> { // unknown types: skip
                     say("TAR_SKIP type=$type name=$fullName")
@@ -235,6 +359,30 @@ object Phase2Data {
     }
 
     private fun stripGnuMagic(raw: String): String = raw
+
+    /**
+     * Symlink targets from the archive must stay inside the unpack root. Absolute
+     * targets are left to the policy (Phase 3 drops them as abs-link, Phase 2 keeps
+     * them); a *relative* target is resolved against the link's own directory and must
+     * not climb out of the tree. (Before this check the reader ran the target through
+     * the traversal guard meant for member names, which silently dropped the 22
+     * legitimate node_modules/.bin links of the code-server deb, all of the shape
+     * "../pkg/bin.js".)
+     */
+    private fun linkTargetInside(root: File, linkFile: File, link: String): Boolean {
+        val p = try {
+            java.nio.file.Paths.get(link)
+        } catch (_: Throwable) {
+            return false
+        }
+        if (p.isAbsolute) return true
+        val base = linkFile.parentFile?.toPath() ?: root.toPath()
+        return try {
+            base.resolve(p).normalize().startsWith(root.toPath().normalize())
+        } catch (_: Throwable) {
+            false
+        }
+    }
 
     private fun hexOf(b: ByteArray, off: Int, len: Int): String =
         b.drop(off).take(len).joinToString("") { "%02x".format(it) }
@@ -258,7 +406,7 @@ object Phase2Data {
     }
 
     /** Unpack a Debian .deb (ar archive) into rootfs, only data.tar members. */
-    fun unpackDeb(deb: File, target: File) {
+    internal fun unpackDeb(deb: File, target: File, policy: TarPolicy? = null) {
         FileInputStream(deb).use { ff ->
             // readFully: FileInputStream may legally return short reads
             fun rd(b: ByteArray) {
@@ -290,7 +438,7 @@ object Phase2Data {
                     val raw = if (entryName.endsWith(".xz")) XZInputStream(ff)
                         else if (entryName.endsWith(".gz")) GZIPInputStream(ff)
                         else throw IllegalStateException("unsupported data.tar: $entryName in $deb")
-                    readTar(raw, target, "$deb:$entryName")
+                    readTar(raw, target, "$deb:$entryName", policy)
                     return // data.tar is the last member of a .deb
                 }
                 copyExactly(ff, nullOut, size)

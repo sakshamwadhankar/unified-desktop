@@ -131,3 +131,6 @@ android/win86/xvfbstrings.py
 # Built by android/win86/fontconfig-stub/build.sh (x86-64 binary: never committed)
 android/win86/fontconfig-stub/libfontconfig.so.1
 android/app/src/main/assets/win86/libfontconfig.so.1
+
+# Kotlin compiler cache (Gradle 9 / Kotlin 2), never committed
+android/.kotlin/
