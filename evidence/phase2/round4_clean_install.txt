@@ -1,0 +1,43 @@
+Phase 2 round 4, clean-install proof (item 9) - phone, 2026-10-18.
+Device 2c0f6edc, uid u0_a466, APK app-debug.apk 23,477,543 B (build earlier today).
+Method: adb uninstall + fresh install; ONLY harness broadcasts after that
+(am broadcast -n dev.unifieddesktop.app/.HarnessReceiver --es phase2x <action>).
+No adb push, no run-as copy of any data (B-019).
+
+Fetch, done by the app alone (files/win86/t3.log):
+  runtime:   96 debs, 75,807,204 B, 40.7 s; udsh ok; fontconfig stub auto-staged
+             (FCSTUB_INSTALL wasRegular=false bytes=5640 sha=0e967100...e; the tar's
+             symlink was replaced; real 1.12.0 file left untouched) -> "FONTCONFIG stub ok"
+  bundle:    34,368,070 B, 290 files, 11.1 s
+  wine:      101,940,736 B -> 871,873,917 B tree, 59.6 s (pin 11.19, direct loader)
+  npp:       8,250,001 B, 4.9 s
+Boot: wineboot broadcast ~03:00:5x -> PREFIX_BOOT_OK, marker .ud-boot-ok mtime 03:06
+  (fresh-prefix first init ~5 min); no explorer storm (B-022 fix holds from clean install).
+
+Xvfb 10/10 (B-018 re-verify, 03:08-03:10, files/phase2/x11.log):
+  10 cycles of killall+xvfb; every start succeeded on attempt=1;
+  XVFB_READY waited_ms 255-264; XVFB_STABLE total_ms 2823-2830; XVFB_GAVE_UP = 0.
+
+xeyes display proof: files/phase2/xeyes.png 9442 B, 1280x720,
+  sha256 ED2D1311CA08ACF0993EB9265469836B21EAF6FC9B5C513544C9EAD1BA3BCF39
+  (byte-identical to evidence/phase2/xeyes.png from round 3b).
+
+NPP window attempt (B-026, still blocked):
+  NPP spawns, self-dies 1.5 s in at comdlg32.dll load:
+  "virtual_setup_exception stack overflow 1984 bytes addr 0x7fffe34632 stack 0x80000840"
+  WINE_EOF exit=1 ms=1511 (files/phase2/wine.log).
+  Capture files/phase2/npp-r4-final.png = 5336 B,
+  sha256 527F19E0C37F93A2060574F4162D7EAFC016FAFB91DB4B3B7A1FBBF8FA6669A6
+  = BIT-IDENTICAL to the round-3b black reference. No window.
+
+Safety: in-app guard 160 procs/400 MB never tripped; laptop watchdog 200 procs/400 MB floor
+  live the whole time (steady procs=10, MemAvailable ~2.2 GB). No explorer chain.
+Leftovers, new bug B-029: after boot + killall, 5 wine children (wineboot.exe 21246,
+  services.exe 21248, explorer.exe 21263, rundll32.exe 21297, control.exe 21327, all S<s)
+  still alive; a second services.exe 22789 spawned afterwards.
+
+Build gates (item 10): :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+  BUILD SUCCESSFUL (log p2r4/gradle-r4e-gate.log); 6 test classes / 16 tests, 0 failures.
+
+PHASE 2 GATE: FAIL - NPP window PNG + typed-text PNG + survival not produced (B-026);
+  everything else above passed with numbers.

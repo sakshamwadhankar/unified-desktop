@@ -113,10 +113,7 @@ class HarnessActivity : Activity() {
                         "bundle" -> Phase2Data.fetchBundle(this)
                         "npp" -> Phase2Data.fetchNpp(this)
                         "all" -> {
-                            Phase2Data.fetchRuntime(this)
-                            Phase2Data.fetchBundle(this)
-                            Phase2Data.fetchWine(this)
-                            Phase2Data.fetchNpp(this)
+                            Phase2Data.fetchAll(this)
                         }
                     }
                     Phase2Data.say("PHASE2_T3_DONE what=$what")

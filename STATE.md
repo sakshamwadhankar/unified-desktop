@@ -6,29 +6,40 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 2 of 13. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Phase 2
-  is close to done for the runtime: Linux x86-64 apps render (xeyes); Wine 11.19 boots a
-  prefix in ~8 s, `create_winstation`/`create_desktop` succeed and the B-022 explorer chain
-  is gone (functional no-op fontconfig stub in the rootfs). The one remaining GUI blocker is
-  **B-026**: no wine window ever maps under Xvfb (`NtUserShowWindow` -> c0000005 inside
-  wine's syscall dispatcher while win-proc callbacks run; xeyes on the same server renders).
-- **Last updated:** 2026-10-18, agent, round 3b (hard stop 01:38). Phone-verified: B-022
-  FIXED (fresh boot 8.1 s; `PREFIX_BOOT_OK`; `NtUserInitializeClientPfnArrays
-  retval=00000000`; 0 NULL-calls; 6 procs at rest, no explorer chain). NPP launches and
-  stays alive (9.9 s to visible in `ps`) but shows no window (B-026) - window PNG and typed
-  text stayed SKIPPED (SKIPS.md T6). 10-minute survival passed (same 8 PIDs, CPU
-  advancing). Gates pass on a forced rerun (13 tests, 0 failures; APK 23,477,499 B).
-  `fetch-box64.sh` default pin is now main `27860e6a` (was v0.4.4; overrides documented,
-  all anchors dry-run-validated); `fontconfig-stub/build.sh` reproduces the stub
-  bit-identical. Details: docs/PHASE2_RESULT.md round 3b.
-- **Next action:** decide B-026 (another box64/wine pin or upstream: dispatcher fault under
-  nested win-proc calls) - then the window PNG + typed text gate. For a clean install the
-  fontconfig stub must also be wired into the in-app rootfs fetch (Phase2Data): this round
-  deployed it phone-side only. Hardening (B-019 clean install, scratch scripts, docs) stays
-  in SKIPS.md.
+- **Phase:** 2 of 13. Phase 1 (hidden Android app) is **CLOSED, GO** (2026-10-16). Phase 2's
+  runtime is now proven from a **clean install** (round 4, item 9): broadcasts only, the app
+  alone fetched and staged everything (runtime + udsh + fontconfig stub, bundle, Wine 11.19,
+  Notepad++), booted the prefix (`PREFIX_BOOT_OK`), started Xvfb 10/10 (all first attempt,
+  ~2.83 s) and rendered xeyes (PNG bit-identical to round 3b). The one remaining GUI blocker
+  is **B-026**: no wine window ever maps. Round-4 root cause: wine 11.19 cannot enable
+  syscall-user-dispatch here ("could not find library containing signal restorer trampoline"
+  -> `syscall_dispatch_enabled=FALSE`) and box64's synthesized-SIGSYS SUD emulation then
+  makes every guest-syscall-derived NT call return c0000005 — NPP self-dies 1.5 s in at
+  `comdlg32.dll` load and the capture is bit-identical to the black reference (5336 B,
+  527F19E0…); xeyes renders on the same server.
+- **Last updated:** 2026-10-18, agent, round 4 (session 00:30-06:30; this update 03:28).
+  Tried and REVERTED this round: H1 `allowNativeHeapPointerTagging=false` (no effect), H2
+  box64 rt_sigreturn-synthesis patch (a host-side rt_sigreturn cannot consume the guest
+  sigframe; deterministic crash — patch block in `fetch-box64.sh` marked REVERTED, lib at
+  sha `F69ACC14…`). H3 became diagnostics (root cause above); the two real fix directions are
+  in docs/PHASE2_RESULT.md "Round 4". Guards retuned: in-app cap 160 procs/400 MB, laptop
+  watchdog 200 (they had been killing fair NPP tests at 44-49 procs). Clean-install proof
+  done: B-019 evidence (no staging steps left), B-018 re-verified 10/10. Window PNG / typed
+  text / survival stayed SKIPPED (SKIPS.md T6/T7). New bugs: B-027 (app-freezer deadlock —
+  platform hazard; runs need stayon + foreground), B-028 (activity-intent replay quirk),
+  B-029 (orphan wine children survive wineserver death + killall). Gates pass (6 classes /
+  16 tests, 0 failures; APK 23,477,543 B). **PHASE 2 GATE: FAIL** (the window is the gap).
+- **Next action:** manager decides B-026: (a) make wine's SUD setup succeed (restorer visible
+  to `dl_iterate_phdr`) or (b) a box64-side guest-stack-correct SUD/rt_sigreturn
+  implementation; a different candidate pin remains an option (B-024 `bin/wine` re-test still
+  open). Then the window PNG + typed-text + survival gate. Smaller opens: B-029 reaper
+  (`killWine()` via the existing `killAllOurProcesses`), B-028 launch-intent fix,
+  scratch-script pass + D13/D4/ARCHITECTURE refresh (SKIPS.md).
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
-  Phase 4/5. The agent keeps `TODO.md` ("Done X of Y") for the owner, and every phone run
-  needs the watchdog plus the app cap (B-022).
+  Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
+  `svc power stayon true` + the harness activity in the foreground (B-027), the retuned app
+  cap (160/400) and the laptop watchdog (200 / 400 MB floor; restart it after every install,
+  it caches the uid — LESSONS.md §5).
 
 ## Done (verified on the phone, 2026-10-14)
 

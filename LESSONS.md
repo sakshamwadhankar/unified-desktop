@@ -31,6 +31,15 @@ these facts.** Re-verify anything critical: Android changes.
   Settings > Apps > (app) > Battery usage > **Allow background activity**. No public API sets
   it, so onboarding must guide the user there. With it on, a heavy workload ran 30 minutes
   screen-off without freezing.
+  **2026-10-18 (Phase 2):** this same freezer hit our app mid-`wineboot` while the screen
+  was Dozing — the app cgroup (wine children included) froze, and after the screen woke the
+  wine IPC was deadlocked (`do_freezer_trap` wchan, children unkillable until thaw) and the
+  boot never completed. Rule for dev runs: `svc power stayon true` PLUS the harness activity
+  kept in the foreground (BUGS B-027).
+- **Killing all our processes on the phone (2026-10-18):** `adb shell "run-as <pkg> sh -c
+  'kill -9 -1'"` with the whole kill line single-quoted as ONE device-shell argument kills
+  the uid cleanly. After killing a *foreground* app the system respawns a `:black` WebView
+  process within seconds — follow with `am force-stop <pkg>` to settle at zero processes.
 - **Memory killing (ColorOS "Osense"):** kills memory-hungry processes
   (`am_kill ... Cached(lowmem)`), even a foreground service. A busy process is killed far
   sooner than an idle one. Watch logcat for `am_kill` and `OsenseKillAction`.
@@ -106,6 +115,14 @@ these facts.** Re-verify anything critical: Android changes.
   redirect drops replies, so UDP/QUIC to the emulator does not work: use TCP, or the phone.
 - ffmpeg: `C:\Users\Asus\AppData\Local\CapCut\Apps\9.1.0.3879\ffmpeg.exe`.
 - The `gh` CLI is not installed.
+- **Starting a WSL background watchdog from PowerShell (Phase 2, 2026-10-18):** the script
+  must use `/mnt/c/...` paths (`/c/...` did not exist in the Ubuntu distro that day), and it
+  must be started through a **script file** (`wsl.exe -e bash /mnt/c/.../launcher.sh` where
+  the launcher does `nohup setsid bash watchdog.sh <log> &`). Passing the whole command via
+  `wsl.exe -e bash -c "..."` or `Start-Process -ArgumentList ...` silently mangles the
+  quoting (empty samples in the log, no error). The watchdog also caches the app uid at
+  start (`run-as <pkg> id -un`) — restart it after every reinstall, or it counts zero
+  processes forever.
 
 ## 6. How past sessions went wrong
 

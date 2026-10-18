@@ -146,3 +146,121 @@ wiring the stub into the in-app rootfs fetch (Phase2Data) is left for the next r
 Remaining blocker: B-026 (no wine window maps under Xvfb; `NtUserShowWindow` -> c0000005 in
 wine's syscall dispatcher during win-proc callbacks). Skipped items 4-5 (window PNG, typed
 text) are recorded in SKIPS.md T6 with the same cause.
+
+## Round 4 notes (2026-10-18): B-026 root cause (H2) and the rt_sigreturn fix
+
+Round-4 goal: make a wine window map (B-026), then close the Phase 2 GUI gate (window
+PNG + typed-text PNG + numbers). Plan in TODO.md (12 items, session 00:30-06:30).
+
+- H1 `android:allowNativeHeapPointerTagging="false"`: no effect. Attribute verified in
+  the built APK, fresh install + full re-fetch (8.7 min), stub re-staged, boot reached
+  `PREFIX_BOOT_OK`; NPP ran (pid 31297) but the capture is bit-identical to round 3b
+  (`npp-r3b.png`, sha256 527f19e0...); +seh boot still shows the boot-time `c0000005`
+  writes at ntdll.so+0x49876. Attribute reverted.
+- H2 root cause, from wine 11.19 sources + the round-3b NPP log (`wine12.log`,
+  2026-10-17 22:23, the only run that reached ShowWindow):
+  - wine 11.19 cannot enable syscall user dispatch here ("could not find library
+    containing signal restorer trampoline", dlls/ntdll/unix/signal_x86_64.c:2860-2873)
+    -> `syscall_dispatch_enabled=FALSE`; RT syscalls run through the call-based
+    dispatcher instead: NtClose/NtUser* calls work (wine12.log L628, L5673).
+  - The only guest `syscall` instructions left are `rt_sigreturn` (rax=15), executed by
+    signal-return trampolines living in anon-exec pages in the guest address space
+    (`/proc/pid/maps`: 4 KB `rwxp` pages at 0x6000_0000 + 0x10000*N, e.g.
+    0x6004_229c during the failing call).
+  - box64 main 27860e6a, x64syscall.c:533-547 (legacy pre-SUD compat hack, "simulate
+    SECCMP") synthesizes SIGSYS for every guest syscall whose return address is not
+    inside a loaded ELF - and those trampoline pages are not ELFs (`FindElfAddress`
+    fails), so every `rt_sigreturn` gets turned into a synthetic SIGSYS.
+  - wine's `sigsys_handler` takes the `!syscall_dispatch_enabled` branch
+    (signal_x86_64.c:2630-2635): `prctl(SUD_OFF); RIP -= 2; /* retry the syscall */`.
+    That branch exists for foreign *raw* Linux syscalls; for `rt_sigreturn` the rewind
+    lands mid-instruction and each retry re-trips the same synthetic path:
+    wine12.log L13207-13217: SIGSYS rax=0xf rip=0x600422a0 -> SIGSYS rax=0xf
+    rip=0x6004229e -> SIGSEGV write to [0xf] at ip=0x6004229c -> `handle_syscall_fault`
+    -> the interrupted NtUser call returns `c0000005`.
+  - Window consequence: `NtUserShowWindow(00010132,1)` right after
+    `NtUserCallHwndParam` (user-mode callback, L13203/L13253) fails with c0000005
+    (L13217); an earlier `NtUserShowWindow(0x1003c,0)` succeeded (L5673). Any callback
+    path that pops one of these trampolines dies, so no window ever maps. This matches
+    the round-3b symptom "the desktop window cannot be created on demand" (that path is
+    also callback-driven).
+- Fix (android/win86/fetch-box64.sh, new verified patch block): never synthesize SIGSYS
+  for rt_sigreturn - the synth condition in x64syscall.c:537 gains
+  `&& (R_EAX&0xffff)!=15`, so restorer trampolines reach box64's normal rt_sigreturn
+  handling (the same path non-wine guests use). Everything else (PE-stub dispatch when
+  SUD is effective, boot SEH handler returns whose restorers live in an ELF) is
+  unchanged.
+- Rebuilt libbox64.so: 22388728 B, sha256
+  `D4C63FC2C0E29FB0C92771EF7F19E8797B57EEFC23FC392534563D3F1B8E97DD` (previous
+  `006841b5...`). Phone test result (02:00-02:35): boot OK (warm boot 4 s,
+  `PREFIX_BOOT_OK`, marker written), NPP window STILL ABSENT: 3/3 untraced starts
+  self-die ~1.5 s in at `comdlg32.dll` load with
+  `virtual_setup_exception stack overflow 1984 bytes addr 0x7fffe34632 stack
+  0x80000840 (0x80000000-0x80001000-0x80100000)`, `WINE_EOF exit=1`; the PRE-patch
+  lib got further (round-3b-style plugin traffic, mimeTools/NppConverter + uxtheme
+  fixmes in `wine-h2seh.log`). The patch changes the failure mode but does not fix
+  B-026. **Verdict: REVERTED** (`fetch-box64.sh` patch block replaced by a
+  "REVERTED - do not re-add as-is" comment; lib rebuilt from the reverted source,
+  sha256 `F69ACC142391A6A8A389D4DA50A2EB8CBA882870E7DAFA03B81F59D8A0AA3246`,
+  22388728 B; WSL grep confirmed the patch is absent from the build tree).
+  Why re-adding this patch as-is cannot work: box64's normal rt_sigreturn handling
+  executes the host `rt_sigreturn` syscall from a C stack frame, so the guest
+  sigframe on the guest stack is never consumed - letting the synthesized SIGSYS
+  fall through to it produced the earlier deterministic crash instead of a fix.
+
+## Round 4: H3 diagnostics (what the real blocker is)
+
+The H3 "Box64 settings" sweep was rewritten into diagnostics, because the H2 work
+showed there is no setting for this: wine 11.19 cannot enable
+syscall-user-dispatch here ("could not find library containing signal restorer
+trampoline" -> `syscall_dispatch_enabled=FALSE`), and box64's synthesized SIGSYS is
+box64's *intended* SUD emulation for that case. Wine's `!syscall_dispatch_enabled`
+branch then answers guest-syscall faults by returning `c0000005` to the NT caller -
+which is exactly the `NtUserShowWindow`/`NtUserInitializeClientPfnArrays` failure
+family of B-026 AND the per-process `explorer.exe /desktop` restarts of B-022 (each
+guest-syscall-derived NT call failing sends the init path down its failure branch).
+Two candidate real fixes for the next round, both outside a settings sweep:
+(a) make wine's SUD setup succeed (the restorer must be visible to
+`dl_iterate_phdr`, signal_x86_64.c:2859-2875), or (b) make box64 execute
+`rt_sigreturn` with the guest stack/guest sigframe semantics (wine writes its
+dispatcher pointer at USR+0x1000; a box64-side implementation of the SUD contract
+would be the emulation-correct path).
+
+Guard retuning (the guards had been confounding every "settings" test):
+the in-app SAFETY cap killed a real Notepad++ run 8 s in at `procs=49`
+(`SAFETY_GUARD TRIP procs=49 memMB=1262` 02:28:37) and the laptop watchdog killed
+one at 2 s (`procs=44` 02:06:10). Retuned: in-app guard 40 procs/600 MB -> **160
+procs/400 MB** (`Phase2Wine.kt` + `Phase2WineSafetyCapTest.kt`), laptop watchdog
+40 -> **200 procs**/400 MB floor (`p2r3/watchdog.sh`). With the retuned guards the
+NPP self-death reproduces unchanged, so the guards are proven NOT to be the blocker.
+
+## Round 4: clean-install proof (item 9, 03:05-03:16)
+
+`adb uninstall` + fresh install (libbox64.so in the install verified:
+sha256 `f69acc14...`, B-010); afterwards ONLY harness broadcasts (new `fetchall`
+action; no `adb push`, no `run-as` copy of any data). The app fetched and staged
+everything itself; then: boot, Xvfb 10/10 (B-018 re-verified), xeyes PNG, NPP
+attempt. No manual staging steps remain (B-019).
+
+## Round 4 results table (2026-10-18, phone, clean install)
+
+| What | Number / result | When / where |
+|---|---|---|
+| fetch runtime | 96 pkgs, 75,807,204 B, 40.7 s; `SHELL ... udsh ok`; `FCSTUB_INSTALL wasRegular=false ... sha=0e967100...e` + `FONTCONFIG stub ok` | 02:54-02:55, `files/win86/t3.log` |
+| fetch bundle / wine / NPP | bundle 34,368,070 B / 290 files / 11.1 s; wine 101,940,736 B -> 871,873,917 B tree / 59.6 s; NPP 8,250,001 B / 4.9 s | same |
+| first boot (fresh prefix) | wineboot broadcast ~03:00:5x -> `PREFIX_BOOT_OK`, marker 03:06 (~5 min first init); no explorer storm | `files/phase2/wine.log`, marker mtime |
+| Xvfb 10/10 (B-018 re-verify) | 10 cycles killall+xvfb: all `attempt=1`, `XVFB_READY waited_ms` 255-264, `XVFB_STABLE total_ms` 2823-2830, `XVFB_GAVE_UP`=0 | 03:08-03:10, `files/phase2/x11.log` |
+| xeyes (display prover) | `files/phase2/xeyes.png` 9442 B, 1280x720, sha256 `ED2D1311...`; eyes visibly rendered (image inspected) | 03:11, pulled local `p2r4/xeyes-r4.png` |
+| NPP run | spawn ok, self-dies 1.5 s at comdlg32.dll load: `virtual_setup_exception stack overflow 1984 bytes` + `WINE_EOF exit=1 ms=1511`; no window | 03:12, `files/phase2/wine.log` |
+| NPP capture | 5336 B, sha256 `527F19E0C37F93A2060574F4162D7EAFC016FAFB91DB4B3B7A1FBBF8FA6669A6` = BIT-IDENTICAL to the round-3b black reference | 03:13, `p2r4/npp-r4-final.png` |
+| process safety | in-app guard 160/400 never tripped; watchdog 200/400 live (`procs=10`, MemAvailable ~2.2 GB); no explorer chain | p2r4/watchdog-final6.log |
+| leftovers (new bug) | 5 orphan wine procs (wineboot/services/explorer/rundll32/control, S<s) + 1 extra services.exe survive wineserver death AND `killall`; accumulate per boot | 03:14 `ps -A -o USER,PID,STAT,NAME` |
+| build gates (item 10) | `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` BUILD SUCCESSFUL; 6 test classes / 16 tests 0 failures; APK 23,477,543 B | 03:17-03:18, `p2r4/gradle-r4e-gate.log` |
+
+**PHASE 2 GATE: FAIL** - the gate needs a Notepad++ window PNG plus
+"hello from phase 2" typed into it (XTest) and a 10-minute survival with that
+window. The display path itself is fully proven (xeyes PNG from a clean install,
+Xvfb 10/10), but no wine window maps (B-026): the NPP run self-dies 1.5 s in and
+the capture is bit-identical to the black reference, so items 5-7 were skipped
+(SKIPS.md). Everything else in this round passed with numbers.
+

@@ -99,6 +99,16 @@ object Phase2Data {
     // Android, only read by box64) and installed over rootfs bin/sh/usr/bin/sh.
     const val UDSH_SHA256 = "35a6fc02421f4cc863caa26396ecac293c7c4dceee79f96706c7e2bb0f3be767"
 
+    // The functional no-op libfontconfig.so.1 (B-022 fix; source + recipe in
+    // android/win86/fontconfig-stub/). Wine's init_fontconfig() dlsyms 26 Fc*
+    // symbols from this lib; the real Debian build cannot be loaded by box64 on
+    // this phone (its dt-needed chain fails) and the fontconfig paths then recurse
+    // into create_winstation failures that end in the explorer.exe storm of B-022.
+    // The stub exports all 26 and answers "no config, no fonts" so wine takes its
+    // normal no-fonts paths (docs/PHASE2_RESULT.md round 3b). Shipped as an APK
+    // asset (data - only ever read by box64, never executed by Android).
+    const val FONTCONFIG_STUB_SHA256 = "0e967100613908e3b5769cf2c0e089f6d7f09c4f4b0907b3ae28415c393d3619"
+
     private val log = StringBuilder()
     fun say(s: String) { android.util.Log.i(TAG, s); log.append(s).append('\n') }
     fun logText(): String = log.toString()
@@ -322,6 +332,7 @@ object Phase2Data {
         // build-guestsh.sh). Real dash stays at bin/dash; no +x is ever set -
         // box64 reads everything as data.
         say("SHELL bin/sh+usr/bin/sh = udsh ${if (ensureGuestSh(ctx)) "ok" else "FAILED"}")
+        say("FONTCONFIG stub ${if (ensureFontconfigStub(ctx)) "ok" else "FAILED"}")
         say("ROOTFS pkgs=$ok debBytes=$totalBytes soFiles=$soCount ms=${t1 - t0}")
         writeLog(ctx)
     }
@@ -360,6 +371,52 @@ object Phase2Data {
             false
         }
     }
+
+    /**
+     * Install the fontconfig stub from the APK assets over
+     * rootfs/usr/lib/x86_64-linux-gnu/libfontconfig.so.1, verifying the pinned digest.
+     * Idempotent: a staged stub with the right sha is left alone; a symlink or the real
+     * lib (which the tar reader created as symlink -> libfontconfig.so.1.12.0) is
+     * deleted; a regular non-stub file is copied aside as <path>.udreal first so
+     * rollback stays possible. Called from fetchRuntime and from Phase2Wine.boot, so a
+     * fresh fetch or a later boot both heal the staging without any manual step
+     * (B-019 pattern, item 8 wiring 2026-10-18).
+     */
+    fun ensureFontconfigStub(ctx: Context): Boolean {
+        val rootfs = rootfsDir(ctx)
+        val rel = "usr/lib/x86_64-linux-gnu/libfontconfig.so.1"
+        return try {
+            val bytes = ctx.assets.open("win86/libfontconfig.so.1").use { it.readBytes() }
+            val got = sha256(bytes)
+            if (got != FONTCONFIG_STUB_SHA256) {
+                say("FCSTUB_FAIL asset sha=$got want=$FONTCONFIG_STUB_SHA256"); return false
+            }
+            val f = File(rootfs, rel)
+            val isRegular = java.nio.file.Files.isRegularFile(
+                f.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS
+            )
+            val curSha = if (isRegular) try { sha256(f) } catch (_: Throwable) { null } else null
+            if (fcStubIsEffective(isRegular, curSha)) { say("FCSTUB already staged sha=${got.take(16)}e"); return true }
+            val aside = File(rootfs, "$rel.udreal")
+            if (isRegular && !aside.exists()) {
+                try { f.copyTo(aside, overwrite = false); say("FCSTUB real lib kept at $rel.udreal") }
+                catch (t: Throwable) { say("FCSTUB_FAIL cannot keep real lib: $t"); return false }
+            }
+            if (!f.delete() && f.exists()) { say("FCSTUB_FAIL cannot replace $rel"); return false }
+            f.parentFile?.mkdirs()
+            f.writeBytes(bytes)
+            say("FCSTUB_INSTALL $rel wasRegular=$isRegular bytes=${bytes.size} sha=${got.take(16)}e")
+            true
+        } catch (t: Throwable) {
+            say("FCSTUB_FAIL $t")
+            false
+        }
+    }
+
+    /** Pure decision (unit-tested): the staged lib is only the stub when it is a real
+     *  file (never a symlink back to the Debian lib) whose digest matches the asset. */
+    internal fun fcStubIsEffective(isRegularFile: Boolean, currentSha256: String?): Boolean =
+        isRegularFile && currentSha256 == FONTCONFIG_STUB_SHA256
 
     fun fetchWine(ctx: Context) {
         val t0 = System.currentTimeMillis()
@@ -413,6 +470,16 @@ object Phase2Data {
         val size = app.walkBottomUp().fold(0L) { a, f -> a + if (f.isFile) f.length() else 0 }
         say("NPP unpacked ms=${t1 - t0} exe=${exe.exists()} bytes=$size")
         writeLog(ctx)
+    }
+
+    /** The T3 download sequence in one place: used by the activity fetch "all" and by
+     *  the harness broadcast `fetchall` (item 9 clean-install proof runs on broadcasts
+     *  only), so both paths can never drift apart. */
+    fun fetchAll(ctx: Context) {
+        fetchRuntime(ctx)
+        fetchBundle(ctx)
+        fetchWine(ctx)
+        fetchNpp(ctx)
     }
 
     fun writeLog(ctx: Context) {

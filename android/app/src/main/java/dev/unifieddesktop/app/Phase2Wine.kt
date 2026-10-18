@@ -323,9 +323,16 @@ object Phase2Wine {
     // system_server down with it. While wine runs, this guard samples our uid's
     // process count and the system's MemAvailable every 5 s and kills the whole
     // tree before that can happen again. The decision is a pure function so it
-    // is unit-tested: trip above 40 processes or below 600 MB available.
-    internal const val SAFETY_MAX_PROCS = 40
-    internal const val SAFETY_MIN_MEM_MB = 600
+    // is unit-tested.
+    //
+    // 2026-10-18 (round 4): 40/600 was too tight for a REAL app run: a Notepad++
+    // launch legitimately reached 49 processes (wine services + explorer swarm)
+    // and MemAvailable ~1.2 GB eight seconds in, and the guard killed every
+    // launch mid-init (SAFETY_GUARD TRIP procs=49; earlier round: procs=47).
+    // Raised to 160 procs / 400 MB: still kills a real fork storm (B-022 hit
+    // 333) while leaving normal wine sessions alone.
+    internal const val SAFETY_MAX_PROCS = 160
+    internal const val SAFETY_MIN_MEM_MB = 400
 
     internal fun safetyCapTrips(procCount: Int, memAvailableMb: Int): Boolean =
         procCount > SAFETY_MAX_PROCS || memAvailableMb < SAFETY_MIN_MEM_MB
@@ -681,6 +688,7 @@ object Phase2Wine {
         val dropped = dropHives(ctx)
         say("PREFIX_HIVES dropped=$dropped (a fresh server init rebuilds them)")
         if (!ensureWinePatched(ctx)) { say("WINE_BOOT_ABORT wine patch failed"); writeLog(ctx); return }
+        Phase2Data.ensureFontconfigStub(ctx)   // B-022: keeps the stub staged (idempotent)
         ensurePrefixBinaries(ctx)
         if (!ensureWineserver(ctx)) { say("WINE_BOOT_ABORT wineserver failed"); writeLog(ctx); return }
         extraEnv = if (winedebug.isNullOrEmpty()) emptyMap() else mapOf("WINEDEBUG" to winedebug)
@@ -728,6 +736,7 @@ object Phase2Wine {
         if (!nppExe(ctx).isFile) { say("WINE fail: ${nppExe(ctx)} missing"); return }
         Phase2X11.ensureXvfb(ctx)
         ensureWinePatched(ctx)
+        Phase2Data.ensureFontconfigStub(ctx)   // B-022: stub must be in place before any wine run
         ensurePrefixBinaries(ctx)
         if (!ensureWineserver(ctx)) { say("WINE fail: no wineserver"); return }
         startSafetyGuard(ctx)

@@ -350,6 +350,27 @@ open(p, "w").write(s)
 PYEOF
 grep -q "retry-no-exec" "$SRC/src/wrapped/wrappedlibc.c" || { echo "ERROR: mprotect patch did not land"; exit 1; }
 
+# ---------------------------------------------------------------------------
+# REVERTED (2026-10-18, BUGS B-026) - kept for the record; do NOT re-add as-is.
+#
+# A patch here excluded rt_sigreturn (15) from the legacy pre-SUD synth-SIGSYS
+# hack in x64Syscall (condition `... && (R_EAX&0xffff)!=15`), on the theory that
+# the restorer trampolines (anon-exec pages at 0x6000_0000+) must reach the
+# normal syscall path. Phone result, 3 untraced Notepad++ runs: NPP now died
+# deterministically ~1.5 s in, right at the comdlg32.dll load:
+#   `virtual_setup_exception stack overflow 1984 bytes addr 0x7fffe34632
+#    stack 0x80000840 (0x80000000-0x80001000-0x80100000)`, WINE_EOF exit=1.
+# The pre-patch library got further (plugins mimeTools/NppConverter loading,
+# uxtheme fixmes; wine-h2seh.log) - so the exclusion moved the failure EARLIER.
+# Reason: the fall-through runs the host rt_sigreturn (a no-argument syscall)
+# from inside x64Syscall_linux's C frame, so the guest's rt_sigframe sitting on
+# the guest stack is never consumed and the trampoline continues past its
+# `syscall` instruction with the signal-handler stack. The real fix must either
+# make wine's SUD setup succeed ("could not find library containing signal
+# restorer trampoline" keeps syscall_dispatch_enabled=FALSE) or execute
+# rt_sigreturn with the guest stack; neither is in this patch series.
+# ---------------------------------------------------------------------------
+
 rm -rf "$BUILD"
 mkdir -p "$BUILD"
 cd "$BUILD"

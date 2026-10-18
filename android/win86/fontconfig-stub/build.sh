@@ -4,10 +4,14 @@
 # x86_64-linux-gnu (a glibc guest library, like everything in the rootfs), NOT Android.
 # stub.c carries the full rationale.
 #
-# Output: $ROOT/libfontconfig.so.1 by default (FONT_STUB_OUT overrides). Deploy into the
-# phone's rootfs at files/win86/rootfs/usr/lib/x86_64-linux-gnu/ , keeping the real lib as
-# libfontconfig.so.1.12.0 + a .hidden symlink for rollback (docs/PHASE2_RESULT.md round
-# 3b). Wiring it into the in-app rootfs fetch is pending; see that document.
+# Output: android/app/src/main/assets/win86/libfontconfig.so.1 by default (FONT_STUB_OUT
+# overrides) - the same asset path under which the app ships it in the APK; Phase2Data
+# .ensureFontconfigStub() copies it into the phone's rootfs at
+# files/win86/rootfs/usr/lib/x86_64-linux-gnu/ with a SHA-256 check (idempotent healing;
+# item 8 wiring, 2026-10-18). The real lib stays on the phone as libfontconfig.so.1.12.0
+# (+ a copy saved as <path>.udreal when a regular file gets replaced) for rollback
+# (docs/PHASE2_RESULT.md round 3b). Both output paths are gitignored (x86-64 binaries
+# are never committed).
 set -euo pipefail
 
 NDK="${ANDROID_NDK_HOME:-$HOME/android-ndk-r27c}"
@@ -17,7 +21,8 @@ NM="$BIN/llvm-nm"
 READELF="$BIN/llvm-readelf"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-OUT="${FONT_STUB_OUT:-$ROOT/libfontconfig.so.1}"
+OUT="${FONT_STUB_OUT:-$ROOT/../../app/src/main/assets/win86/libfontconfig.so.1}"
+mkdir -p "$(dirname "$OUT")"
 
 "$CLANG" --target=x86_64-linux-gnu -shared -nostdlib -fPIC -O2 \
     -Wl,-soname,libfontconfig.so.1 -o "$OUT" "$ROOT/stub.c"
