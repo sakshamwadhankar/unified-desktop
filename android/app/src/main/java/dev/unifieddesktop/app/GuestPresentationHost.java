@@ -46,6 +46,14 @@ import top.niunaijun.blackbox.app.configuration.AppLifecycleCallback;
  * original ViewRoot and installed as the content of a Presentation on our private display.
  */
 final class GuestPresentationHost extends AppLifecycleCallback {
+
+    /** Live guest activities in resume order; the phase-7 harness closes them headlessly. */
+    private static final java.util.List<Activity> GUESTS =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    static java.util.List<Activity> liveGuests() {
+        return new java.util.ArrayList<>(GUESTS);
+    }
     private static final String TAG = "Phase1-B1";
     private static final int TARGET_WIDTH = 1280;
     private static final int TARGET_HEIGHT = 720;
@@ -155,7 +163,14 @@ final class GuestPresentationHost extends AppLifecycleCallback {
 
     @Override
     public void onActivityResumed(final Activity activity) {
-        if (isHostActivity(activity) || moveScheduled.contains(activity)) return;
+        if (isHostActivity(activity)) return;
+        // B-061: a hidden Android app is now alive, so the engine's daemon service may run;
+        // it is stopped again in onActivityDestroyed with the last guest.
+        EngineDaemon.INSTANCE.guestStarted(activity.getApplicationContext(), activity);
+        if (!GUESTS.contains(activity)) GUESTS.add(activity);
+        P7Log.INSTANCE.say(activity, "GUEST resumed " + activity.getClass().getName() +
+                " live=" + GUESTS.size());
+        if (moveScheduled.contains(activity)) return;
         final Display display = targetDisplay(activity);
         if (display == null) return;
         moveScheduled.add(activity);
@@ -195,8 +210,12 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             Log.i(TAG, "B1_BEFORE_MOVE attached=" + decor.isAttachedToWindow() +
                     " size=" + decor.getWidth() + "x" + decor.getHeight() +
                     " visibility=" + decor.getVisibility() + " token=" + decor.getWindowToken());
+            P7Log.INSTANCE.say(activity, "B1 before-move attached=" + decor.isAttachedToWindow() +
+                    " size=" + decor.getWidth() + "x" + decor.getHeight() +
+                    " display=" + display.getDisplayId());
             if (!decor.isAttachedToWindow()) {
                 Log.e(TAG, "B1_MOVE_NOT_READY guest=" + activity.getClass().getName());
+                P7Log.INSTANCE.say(activity, "B1 move NOT ready (decor detached)");
                 moveScheduled.remove(activity);
                 return;
             }
@@ -218,6 +237,9 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             Log.i(TAG, "B1_PRESENTATION_SHOWN guest=" + activity.getClass().getName() +
                     " display=" + display.getDisplayId() + " target=" + width + "x" + height +
                     " size=" + decor.getWidth() + "x" + decor.getHeight());
+            P7Log.INSTANCE.say(activity, "B1 moved to presentation display=" + display.getDisplayId() +
+                    " target=" + width + "x" + height + " size=" + decor.getWidth() + "x" +
+                    decor.getHeight());
             probeGuestSignatures(activity);
             if (activity.getIntent().getBooleanExtra("phase1_inject_input", false)) {
                 decor.postDelayed(() -> injectInput(activity, decor), 700L);
@@ -229,6 +251,7 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             }
         } catch (Throwable t) {
             Log.e(TAG, "B1_PRESENTATION_FAILED guest=" + activity.getClass().getName(), t);
+            P7Log.INSTANCE.say(activity, "B1 move FAILED " + t);
         }
     }
 
@@ -542,6 +565,11 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             try { presentation.dismiss(); } catch (Throwable ignored) { }
             presentation = null;
         }
+        GUESTS.remove(activity);
+        // B-061: with the last hidden app gone the engine daemon may stop.
+        EngineDaemon.INSTANCE.guestStopped(activity.getApplicationContext(), activity);
+        P7Log.INSTANCE.say(activity, "GUEST destroyed " + activity.getClass().getName() +
+                " live=" + GUESTS.size());
     }
 
     private Display targetDisplay(Activity activity) {

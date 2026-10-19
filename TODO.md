@@ -1,98 +1,100 @@
-# Phase 6: to-do
-Done 11 of 11 | item 8 DONE on the phone (08:02-08:31) except its typing-latency samples (SKIPS.md residual row) | Updated 08:35 | Phone round: all checks pass, phone-labelled; report follows.
+# Phase 7: to-do
+Done 4 of 12 (1, 2, 9, 10) | Partial 3 (6, 8, 11) | Deferred / not done 5 (3, 4, 5, 7) | Updated 16:21 | Now: cleanup + report (hard stop 16:30)
 
- 1. [x] 06:09 start: `adb devices` empty (phone unplugged, so no phone round); RAM 1.437 GB free at
-    06:08 -> code first, `wsl --shutdown` freed ~0; RAM 3.67 GB at 06:13 -> emulator started ONCE
-    06:13 (`emulator -avd Pixel_8_Pro -memory 3072 -no-boot-anim -no-snapshot-load`), booted and
-    `adb devices` shows `emulator-5554 device` at 06:17. Temp dir C:\Users\Asus\AppData\Local\Temp\opencode\p6 (+ gb.sh, the Gradle-via-Git-Bash helper).
- 2. [x] 06:18 licenses: checked THIRD_PARTY.md against the Phase-6 code - the shell uses only the
-    Android SDK (`View`/`ViewGroup`, `WebView`, `java.io.File`, `Paint`), i.e. the existing
-    "Android SDK / build tools / emulator" row. NO new component, no new row needed.
- 3. [x] 06:16 B-047 video-on both sides + tests: phone starts video only on the PC's `video-on`
-    (`Phase5Session.enableVideo`, gate-guarded); `pair`/`bench` never send it. `Phase5Protocol.parseControl`
-    + `Phase5ProtocolTest` 16/16 (was 14), `phase5::VideoOnPacer` + 3 tests, cargo test --release 41/41.
- 4. [x] 07:09 Shell core: `Phase6ShellModel.kt` (pure window manager: open/focus/raise/minimize/maximize/
-    restore/close/drag/resize/clamp/z-order) + `Phase6ShellModelTest.kt` **18 tests, 0 failures**
-    (fresh run 06:19:56; `:app:testDebugUnitTest` BUILD SUCCESSFUL, 82 tests total). Views
-    `Phase6Shell.kt` (root + taskbar + clock + start menu + z-order + input), `Phase6Window.kt`
-    (title bar, minimize/maximize/close, 8 resize edges, min size, key routing, wheel), `Phase6Views.kt`.
-    Live on the emulator: `p6:shell` windows=4 focused=4, start menu opens/closes, 300-move title-bar
-    drag moves the window (`drags=300`, shot 01+02).
- 5. [x] 07:09 Apps + input + B-039: Files (real `files/desktop` dir; `p6:newfolder` created "New folder",
-    listing `/desktop [New folder]`, shot 04), Browser (address typed on the PC keyboard, auto-https,
-    loaded `https://example.com/` - shot 03), Settings (text line), Test (Phase-5 desktop hosted in a
-    window, flash area visible). Input: real mouse MotionEvents (SOURCE_MOUSE) from PC window messages
-    (`buttonsAllTime`, clicks/drags), keyboard to the focused widget (`keysAllTime=29 keyAtFocused=58
-    keyFlashes=29`), Enter navigates. **B-039 probe: `p6:probe:harness` -> `route=edittext-ime`,
-    `p6:keys` -> `pageKeys=(pending)`** = PC keys reach the browser through the address EditText's IME
-    route, the WebView DOM keydown listener gets nothing from the link.
- 6. [x] 07:09 CORE GATE (emulator): link up (START LINK -> NSD -> `view --addr 127.0.0.1:47600` over
-    `adb forward`), 4 screenshots captured **app-side from the live ShellRoot view hierarchy** and pulled
-    with `run-as`, each PNG starts `89 50 4E 47`: `01-startmenu-1792373789635.png` 64,396 B (start menu
-    over 4 windows), `02-windows-1792373791063.png` 40,187 B (overlapping Files/Settings/Test/Browser),
-    `03-browser-1792373722669.png` 65,396 B (URL typed from the PC keyboard, page loaded),
-    `04-files-1792373759531.png` 65,552 B (Files with the created "New folder"). LIMIT, stated plainly:
-    the PC window stayed black - the PC decoder drops every frame of the emulator's stream (BUGS B-056),
-    so the pixels are the desktop surface as composed on the phone, not the PC window; the input in
-    these shots came from the PC keyboard/mouse over the link (counters above).
-
- 7. [x] 07:14 Measurements (emulator via `adb forward`; the PC decoder still drops every frame -
-     B-057 - so the receiver VSTAT shows `presented=0`, and the fps numbers come from the phone
-     encoder's `P5 VSTAT sent=` counter, which is stated at each row): **idle with no animating
-     window = 1.0 fps** (0 windows, 10 frames/10 s; re-confirmed 07:18, and 21/21.1 s earlier -
-     the keep-alive >=1/s holds); idle Files only = 2.3 fps (23/10 s); idle Files+Browser with
-     `https://example.com` loaded = 1.0 fps (10/10 s) - so the earlier 53.9 fps "idle" figure was
-     the Test window's Phase-5 animated test desktop, by design: with the Test window open the
-     same probe reads 55.6 fps (556/10 s). Not a bug; corrected here. **Drag (title bar, Files,
-     600 moves) = 30.6 fps** over 30.4 s (929 frames). Typing from the PC into the focused Test
-     window: 20 keys -> 19 `P5 LAT` samples (one key coalesced into the previous frame), medians
-     recv->dispatch **0.14 ms**, dispatch->drawn **8.4 ms**, drawn->encoded **26.8 ms** (p90
-     2.1 / 15.4 / 41.7; the PC leg is not measurable - no decoded frame). Stuck keys after
-     100 keys + 10 drags: **keysDown=0 buttonsDown=0** (keysAllTime 49->149, keyFlashes 49->149,
-     buttonsAllTime 6->16).
- 8. [x] 08:31 Phone round (the real gate) - the phone appeared at 08:00: DONE except the typing
-     latency samples. 08:02 `install -r` + OEM scan dialog (`com.oplus.phonemanager`) dismissed
-     with **Ignore** (never Fix now; tap (312,2190), 08:02:23); START LINK tapped (uiautomator
-     bounds) -> `phase4x status` `running=true` 08:03:18; `udreceiver view --addr auto` over
-     **Wi-Fi** (no adb forward) -> the PC **decoded** the phone's stream: `presented==decoded`,
-     `dropped=0`, `decode=4.4-5.2 ms`, `d3d11=true`, seq 5860 - **B-057 is emulator-only**.
-     Screenshots = the PC window's **video rectangle only** (client 1920x1200, crop y=60; PNG
-     magic `89 50 4E 47` each): **start menu opened by a PC-mouse click** on the taskbar Start
-     (`phone-01-startmenu.png` 257,515 B, 08:07:16), **overlapping windows**
-     (`phone-02b-overlap.png` 389,463 B - Files dragged by its title bar to ~(720,95) over the
-     Browser), **address typed from the PC keyboard** (`phone-03-browser-typed.png` 188,424 B;
-     `phone-03b-browser-load.png` 223,372 B; `phone-03c-browser-clean.png` 251,026 B - the
-     field auto-prepends `https://` on focus so a typed scheme doubles; the bad follow-up URL
-     honestly shows "Web page not available"). Numbers (receiver VSTAT + `p6:shell`): **drag
-     28.3 fps** (892 frames/31.5 s of title-bar drags; per-second max 54), **idle 1.0 fps**
-     (10/10.02 s, no windows, `dropped=0 rx=2-3 kbit/s` - closes the Phase-5 keep-alive-at-the-
-     receiver carry-over), **stuck keys 0** after 100 keys + 10 drags (keysAllTime 313->445,
-     keyFlashes 191->323, buttonsAllTime 113->125, keyAtFocused 364->628) at 08:24:40.
-     **Residual skip: the 20 typing latency samples** - no `P5 LAT` (phone, all-tags grep) and
-     no `LATSTAGE` (PC) during PC typing; SKIPS.md row. **B-058 logged** (the title drag moved
-     the window +660 x but +11 y). Stopped via the app's STOP LINK 08:31:40 (`running=false
-     last=NSD unregistered`); `svc power stayon false` restored; a missed call at ~08:29 (after
-     all measurements) was left untouched.
- 9. [x] 07:23 Build gates, all green: **gradle** `./gradlew :app:testDebugUnitTest :app:lintDebug
-     :app:assembleDebug` -> `BUILD SUCCESSFUL in 50s`, `GRADLE_EXIT=0` (07:16; junit aggregates
-     testDebugUnitTest: 100 tests, 0 failures, 3 skipped); **cargo** build --release exit 0;
-     `cargo test --release` **41 passed, 0 failed** (first test run died at link with `exit code:
-     1104` because the just-killed `udreceiver.exe` still held the file - clean re-run at 07:22);
-     `cargo clippy --release --all-targets` exit 0.
-10. [x] 07:34 Docs: `docs/PHASE6_RESULT.md` written (gate table incl. the PC-window BLACK limit, numbers
-     with methods and the 53.9-fps correction, self-found fixes, B-056/B-057, unknowns; every row labelled
-     emulator). `ARCHITECTURE.md` H4 updated to the built shell. `BUGS.md` gained **B-056** (emulator
-     encoder `BAD_VALUE`, mitigated) and **B-057** (PC black window: permanent drop while awaiting a
-     keyframe the emulator never sends). `SKIPS.md`: the Phase-5 carry-over row updated (keep-alive
-     emulator-proven phone-side, receiver-side open; B-039 probe run -> IME route) + the item-8 phone
-     round row added. Code refs fixed: `Phase5Encoder.kt` comment B-055->B-056, `Phase6Dispatch.kt`
-     comment B-056->B-057.
-11. [x] 07:40 Cleanup + report. Phone side: intermediate shots deleted; kept the 4 gate PNGs +
-     `filesfinal-1792375311960.png` + `filesfix2-1792375185695.png` in `filesDir` (evidence) and the
-     app's `desktop/` store (it holds the "New folder" created by the Files test). PC side: temp p6
-     dir pruned to the scripts, the gate logs (`gate-gradle{,2,3}.log`, `gate-cargo{,-test}.log`),
-     the gate PNG copies, view11.log (B-057 evidence) and the typing table; `udreceiver` killed,
-     `adb forward` removed, emulator shut down (`emu kill`, qemu gone, `adb devices` empty - the
-     laptop is back to the 06:09 state). Final gate re-run on the final tree (07:38, comment-only
-     edits since 07:32): `BUILD SUCCESSFUL in 16s`, exit 0, junit 100/0/3. STATE.md updated last.
-     Report: the end-of-task table in the session reply.
+ 1. [x] 14:49 Start: `adb devices` -> `2c0f6edc device`; battery 53 %; laptop FreePhysicalMemory
+    2,102,864 KB (~2.0 GB, so NO emulator: rule needs > 3 GB); `svc power stayon usb` set
+    (`stay_on_while_plugged_in=2`), `mCallState=0`, temp dir `C:\Users\Asus\AppData\Local\Temp\opencode\p7`
+    created 13:43. APK `android/app/build/outputs/apk/debug/app-debug.apk` (93,076,232 B) installed
+    (13:46); OEM scan dialog `com.oplus.phonemanager/.virusdetect.VirusDialogActivity` appeared
+    (`p7\scan.png`, 973,919 B, PNG magic checked); its "Ignore" tap was NOT confirmed before the
+    phone screen locked (see item-1 note below), so the dialog may still be up.
+    Re-provisioning, all downloads by the PHONE's own code (Phase2Dispatch `fetchall` / Phase3Dispatch
+    `cs-fetch`), no laptop staging needed:
+    - `files/win86` = 1900 MB (`du -sm`): `DL wine-11.19-amd64.tar.xz bytes=101940736 ms=121411
+      sha=40068b38...bbef3e` = **sha matched the Phase2Data pin**; `WINE unpacked bytes=871873917
+      bin=true`; `DL npp.zip bytes=8250001 sha=beddf554...5f414`, `NPP exe=true bytes=27150947`;
+      bundle 290 files; `wineboot` -> `PREFIX_BOOT_OK exit 0 ms=29092`. Evidence `files/win86/t3.log`.
+    - `files/phase3` = 453 MB: deb download 117,176,796 B in 176,952 ms (~662 KB/s, below the
+      1 MB/s staging threshold - it had already finished when I checked, and the app's own check
+      passed: `CS_VERIFY marker=true sha=eabd4122...09d0c5` = **matches the pin**, so I did not
+      re-stage the laptop copy); `CS_START pid=18694 port=43511 healthz=200`. Evidence `files/phase3/p3.log`.
+    - Xvfb: `XVFB_READY waited_ms=513`, `XVFB_STABLE total_ms=3080` (started 13:58); NOTE 14:49:
+      Xvfb is NOT in `ps` any more and `files/win86/tmp/.X11-unix` is gone - it will be restarted
+      for item 6. Picked option: phone-first, no emulator (RAM), no owner contact.
+    NOTE (blocker, 14:20-14:49): the phone screen turned off and is PIN-locked
+    (`deviceLocked=1`, `mDreamingLockscreen=true`, focus NotificationShade); `wm dismiss-keyguard`,
+    `input keyevent 82/224`, swipe-up and `locksettings set-disabled true` did not unlock it
+    (setting reverted to false). No POWER/SLEEP sent. In-app work continues over
+    `am broadcast -n dev.unifieddesktop.app/.HarnessReceiver` (no UI taps needed); SKIPS row added.
+ 2. [x] 15:44 B-061 FIX NOW: daemon off at app start; start only with a hidden Android app, stop
+    with the last one; neutral notification text. DONE and PROVEN on the phone with the final
+    build (15:41): idle app (no guest) -> `dumpsys activity services dev.unifieddesktop.app`
+    had 0 DaemonService records; launched Google Tasks headlessly (`--es phase7x 'guest ...'`) ->
+    DaemonService present + notification `title=Android app engine`, `text=A hidden app is running`
+    (own neutral text; the old "BlackBox Core" channel name persists on the phone, channels are
+    create-once). Code: `EngineDaemon.kt` (start on launch request / resume, stop with the last
+    close, idle stop at app create), `EngineApplication` guard by real process name so guest
+    `:pN`/`:black` processes never call stopService (BlackBox's hooked stopService throws there),
+    engine `isEnableDaemonService()=false`, `GuestPresentationHost` resume/destroy hooks, vendor
+    `DaemonService.java` notification text (+ `fetch-source.sh` mirror). Heads-up: the engine's
+    `AppLifecycleCallback` is not dispatched in the guest `:pN` processes on this build, so the
+    start comes from `EngineBridge` launch/import and the stop from our explicit close path.
+ 3. [ ] B-059/B-060/B-058 FIX NOW: real key presses (`keybd_event`/SendInput) `https://` +
+    `!@#$%^&*()_+{}|:"<>?` into the address bar, fix Shift/meta mapping with a unit test;
+    address bar select-all on focus + `https://` only on Go; one real-mouse drag (SendInput) to
+    settle B-058 with a unit test if y is lost.
+    DEFERRED per manager 15:32 (SKIPS row "Phase 7 deferred input bugs"). Useful evidence this
+    round: real PC keys typed the code-server URL into the address bar with `:`, `/`, `?`, `=`, `.`
+    intact (`pc-04.png`) - the Phase-6 `:` loss matches the old harness's posted keys. No code fix
+    committed, no unit test added. A real SendInput drag of the Browser title bar moved nothing.
+ 4. [ ] B-057 FIX NOW: PC handles `MF_E_TRANSFORM_STREAM_CHANGE` in place (no rebuild, no
+    drop-until-keyframe); phone restarts the encoder when no keyframe follows a request within 1 s;
+    unit tests both sides; verify start-up stays clean on the phone.
+    DEFERRED per manager 15:32. PC side written in the working tree (`pc/udreceiver/src/view.rs`
+    in-place stream change + `classify_output_code`) and covered by `view::tests::stream_change_is_handled_in_place`:
+    `cargo test --release` = 42 passed / 0 failed (`gate_cargo2.log`). Phone-side KeyframeWatchdog +
+    `restartVideo` written earlier (6 unit tests pass); NOT verified on the phone or emulator.
+ 5. [ ] Android app window: Google Tasks in a shell window through the Phase-1 path, own virtual
+    display sized to the window; pointer + keys reach it (type a new task title from the PC).
+    NOT DONE (SKIPS row): the Phase-1 reparent path is closed and guests run in `:pN` where the
+    engine's lifecycle callbacks never fire, so there is no view-tree access. The guest itself
+    renders on the private display (`p7g-0.png`/`p7g-1.png`, "Welcome to Tasks", 1280x720).
+ 6. [~] X11 window: Xvfb screen in a shell window (say GetImage or -fbdir mmap + fps); xeyes and
+    Notepad++ in it; pointer + keys by XTEST.
+    PARTIAL (phone): the window exists ("Notepad++ + xeyes (X11)") and shows the Xvfb screen on the
+    PC; Notepad++ (Windows/Wine) and xeyes (Linux) both render in it (`pc-final.png`, `x11now.png`);
+    the pointer path reaches the server; PC keys did NOT reach Notepad++ (`length: 0 lines: 1` after
+    typing `x11ok`/`hello-x11`) -> BUGS B-062; xeyes placement has no window manager -> B-063;
+    `runbin` ignores arguments -> B-064. New code: `Phase7Windows.kt` (X11WindowContent),
+    `Phase2X11.kt` (`motion`/`button`/`fakeKey`), `Phase6Shell/Window/Dispatch.kt` (`x11` app kind).
+    Transfer: phone Wi-Fi is client-isolated (ping fails, mDNS silent) so the link ran over
+    `adb forward tcp:47600 tcp:47600` -> `udreceiver view --addr 127.0.0.1:47600 --seconds 1800`
+    (presented==decoded, dropped=0, decode 3.8-5.9 ms, d3d11=true).
+ 7. [ ] VS Code window: code-server in a WebView shell window, workspace folder opened; B-039 probe
+    per section 6; type "phase7" from the PC and save with Ctrl+S, verified on disk.
+    NOT DONE (SKIPS row): `cs-start` healthy (`pid=24379 port=44093 healthz=200`) and the URL was
+    typed into the Browser window over the PC link, but the page never rendered (black content,
+    status "ready", 3 min spent) -> BUGS B-065.
+ 8. [~] GATE (phone): one PC-window screenshot (video rectangle only) with all four kinds side by
+    side; per-window typing proof; fps while dragging Android and X11 windows (20 s each); PSS +
+    process count with all four open; CPU % and battery temp over 2 min.
+    PARTIAL: `pc-final.png` (16:15, video rectangle only) shows the two window kinds that exist
+    (X11 with Notepad++ + xeyes, and the Browser with the typed text "phase7x11ok" in its address
+    bar). Typing proof: Browser yes, X11 no (B-062). The fps/PSS/CPU/temperature numbers were NOT
+    RUN (feature stop) -> SKIPS row.
+ 9. [x] Emulator items: NOT NEEDED - the phone stayed connected the whole round (`2c0f6edc device`
+    at start and at close-out; laptop RAM ~2 GB < 3 GB anyway).
+10. [x] Build gates: Android `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` ->
+    `BUILD SUCCESSFUL in 1m 11s`, `101 actionable tasks: 26 executed, 75 up-to-date`,
+    `GRADLE_EXIT=0` (`p7\gate_android.log`). Rust: `cargo test --release` ->
+    `test result: ok. 42 passed; 0 failed; 0 ignored` (`CARGO_TEST_EXIT=0`, `p7\gate_cargo2.log`);
+    `cargo clippy --all-targets` -> `Finished dev profile` (`CARGO_CLIPPY_EXIT=0`,
+    `p7\gate_cargo.log`). NOTE the first cargo run (16:14) failed `LNK1104` because the running
+    `udreceiver view` held `target\release\udreceiver.exe` open; after stopping the receiver the
+    rerun passed - no code change was involved.
+11. [~] Docs: `docs/PHASE7_RESULT.md` written; BUGS B-062..B-065 added; SKIPS rows added
+    (deferred input bugs, items 5/6/7/8 residuals); TODO updated. STILL OPEN: ARCHITECTURE
+    H4/H5/H6/H8-as-built + Q7, LESSONS entries (deferred with the input work).
+12. [x] Cleanup + report: receiver + forward stopped; phone broadcasts `phase2x killall`,
+    `phase3x cs-stop`, `phase7x close`, then `am force-stop`; 0 processes proof + 0 DaemonService;
+    `svc power stayon false`; STATE.md updated last; final report with the exact gate lines.

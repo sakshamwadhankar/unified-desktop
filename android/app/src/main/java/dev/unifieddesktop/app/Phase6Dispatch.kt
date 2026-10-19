@@ -62,6 +62,7 @@ object Phase6Dispatch {
                     "browser" -> ShellRoot.App.BROWSER
                     "settings" -> ShellRoot.App.SETTINGS
                     "test" -> ShellRoot.App.TEST
+                    "x11" -> ShellRoot.App.X11
                     else -> return "unknown app [$arg]"
                 }
                 val f = s.openApp(app)

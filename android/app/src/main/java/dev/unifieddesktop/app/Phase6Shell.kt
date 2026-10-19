@@ -75,9 +75,10 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     // ------------------------------------------------------------------ windows
 
-    enum class App { FILES, BROWSER, SETTINGS, TEST;
+    enum class App { FILES, BROWSER, SETTINGS, TEST, X11;
         fun title(): String = when (this) {
             FILES -> "Files"; BROWSER -> "Browser"; SETTINGS -> "Settings"; TEST -> "Test"
+            X11 -> "Notepad++ + xeyes (X11)"
         }
     }
 

@@ -20,6 +20,7 @@ class EngineBridge(private val context: Context) {
     private val core get() = BlackBoxCore.get()
 
     fun importInstalled(packageName: String): EngineResult {
+        EngineDaemon.starting(context)
         return try {
             context.packageManager.getPackageInfo(packageName, 0)
             val result = core.installPackageAsUser(packageName, 0)
@@ -139,6 +140,7 @@ class EngineBridge(private val context: Context) {
     }
 
     fun launch(packageName: String, displayId: Int): EngineResult {
+        EngineDaemon.starting(context)
         return try {
             if (!core.isInstalled(packageName, 0)) {
                 return EngineResult(false, "package is not imported")
@@ -164,6 +166,7 @@ class EngineBridge(private val context: Context) {
         moving: Boolean = false,
         moveSeconds: Int = 60
     ): EngineResult {
+        EngineDaemon.starting(context)
         return try {
             if (!core.isInstalled(packageName, 0)) {
                 return EngineResult(false, "package is not imported")

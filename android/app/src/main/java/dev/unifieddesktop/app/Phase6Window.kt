@@ -79,6 +79,7 @@ class ShellWindowView(
         ShellRoot.App.BROWSER -> BrowserView(context)
         ShellRoot.App.SETTINGS -> SettingsView(context)
         ShellRoot.App.TEST -> TestWindowContent(context)
+        ShellRoot.App.X11 -> X11WindowContent(context)
     }
 
     /** Which title-bar button a window-local x lands on. */
@@ -166,6 +167,7 @@ class ShellWindowView(
     /** A key from the PC, delivered to this window's content. */
     fun keyToContent(down: Boolean, keyCode: Int, scan: Int, meta: Int): Boolean {
         val c = content
+        if (c is ShellRawKeyContent) return c.key(down, keyCode, scan, meta)
         if (c is TestWindowContent) return c.key(down, keyCode, scan, meta)
         val now = SystemClock.uptimeMillis()
         val ev = KeyEvent(

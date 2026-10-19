@@ -927,20 +927,20 @@ impl Pipeline {
             let mut status = 0u32;
             let hr = unsafe { self.dec.mft.ProcessOutput(0, &mut db, &mut status) };
             if let Err(e) = hr {
-                let code = e.code();
-                if code == MF_E_TRANSFORM_NEED_MORE_INPUT {
-                    break;
+                match classify_output_code(e.code().0) {
+                    OutputOutcome::NeedInput => break,
+                    OutputOutcome::StreamChange => {
+                        // B-057: renegotiate the output type IN PLACE and keep calling
+                        // ProcessOutput. A stream change is not an error: the decoder wants a new
+                        // output type, then continues from the same input. Rebuilding it or
+                        // dropping frames until the next keyframe only makes the hole visible
+                        // (stuck picture, ~1 fps for a second).
+                        println!("[{TAG}] decoder stream change; setting the new output type in place");
+                        self.dec.renegotiate_output()?;
+                        continue;
+                    }
+                    OutputOutcome::Fatal => return Err(format!("ProcessOutput: {e}")),
                 }
-                if code == MF_E_TRANSFORM_STREAM_CHANGE {
-                    println!("[{TAG}] decoder stream change; renegotiating the output type");
-                    self.dec.in_set = false;
-                    // Drop non-keyframes until the IDR answer arrives, or every following
-                    // P-frame just re-reports the same stream change.
-                    self.awaiting_keyframe = true;
-                    self.shared.need_keyframe.store(1, Ordering::SeqCst);
-                    break;
-                }
-                return Err(format!("ProcessOutput: {e}"));
             }
             let sample: Option<IMFSample> =
                 unsafe { std::mem::ManuallyDrop::take(&mut db[0].pSample) };
@@ -992,6 +992,43 @@ struct VideoProc {
     enumerator: ID3D11VideoProcessorEnumerator,
     processor: ID3D11VideoProcessor,
     key: (i32, i32, i32, i32),
+}
+
+impl Decoder {
+    /// B-057: adopt the output type the decoder now offers, without flushing the input stream or
+    /// rebuilding the decoder. Callers keep pulling output immediately afterwards.
+    fn renegotiate_output(&mut self) -> Result<(), String> {
+        let (w, h) = choose_and_set_output(&self.mft)?;
+        self.out_w = w;
+        self.out_h = h;
+        self.soft_tex = None;
+        self.soft_w = 0;
+        self.soft_h = 0;
+        Ok(())
+    }
+}
+
+/// The three ProcessOutput outcomes we distinguish. Split out so the B-057 rule - a stream change
+/// is handled in place, not as a failure that waits for a keyframe - is testable without a media
+/// stack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputOutcome {
+    /// MF_E_TRANSFORM_NEED_MORE_INPUT: feed the next access unit.
+    NeedInput,
+    /// MF_E_TRANSFORM_STREAM_CHANGE: set the new output type, keep calling ProcessOutput.
+    StreamChange,
+    /// Anything else: a real failure.
+    Fatal,
+}
+
+fn classify_output_code(code: i32) -> OutputOutcome {
+    if code == MF_E_TRANSFORM_NEED_MORE_INPUT.0 {
+        OutputOutcome::NeedInput
+    } else if code == MF_E_TRANSFORM_STREAM_CHANGE.0 {
+        OutputOutcome::StreamChange
+    } else {
+        OutputOutcome::Fatal
+    }
 }
 
 impl VideoProc {
@@ -1512,5 +1549,26 @@ fn describe_adapter(device: &ID3D11Device) {
                 String::from_utf16_lossy(&desc.Description[..n])
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// B-057: a decoder stream change must be renegotiated in place; it is never treated as a
+    /// failure that drops frames until the next keyframe.
+    #[test]
+    fn stream_change_is_handled_in_place() {
+        assert_eq!(
+            classify_output_code(MF_E_TRANSFORM_STREAM_CHANGE.0),
+            OutputOutcome::StreamChange
+        );
+        assert_eq!(
+            classify_output_code(MF_E_TRANSFORM_NEED_MORE_INPUT.0),
+            OutputOutcome::NeedInput
+        );
+        assert_eq!(classify_output_code(-1), OutputOutcome::Fatal);
+        assert_eq!(classify_output_code(0x8000_4005u32 as i32), OutputOutcome::Fatal);
     }
 }

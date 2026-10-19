@@ -6,12 +6,25 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 6 of 13 **CLOSED, PASS on the phone** (manager review 2026-10-19 08:45), with
-  input bugs to fix FIRST in the next prompt: B-059 (a `:` typed on the PC never arrived),
-  B-060 (address bar prepends https:// and appends to the old URL), B-058 (a synthetic drag
-  moved the window in x only), B-057 (PC black on the emulator stream). Residual: PC-typing
-  latency samples in the shell (SKIPS). Drag 28.3 fps on the phone (PRD target 30: Phase 12).
-  Phases 1-5 CLOSED, PASS (records: `docs/PHASE1_RESULT.md` ... `PHASE5_RESULT.md`).
+- **Phase:** 7 of 13, **round stopped at the 16:30 hard stop - PARTIAL, not closed.** Items 1-2
+  done (+ item 9 not needed): **B-061 FIXED and proven on the phone** (idle app -> 0 DaemonService
+  records; headless Tasks launch -> DaemonService + neutral notification `Android app engine /
+  A hidden app is running`; process-name guard so guest `:pN`/`:black` never call `stopService`;
+  old "BlackBox Core" channel name persists, channels are create-once). Item 6 (X11 window)
+  **partial**: a shell window ("Notepad++ + xeyes (X11)") shows the Xvfb screen on the PC with
+  Notepad++ (Windows/Wine) and xeyes (Linux) both visible (`pc-final.png`); the pointer path
+  reaches the X server, but PC keys never reached Notepad++ (`length: 0 lines: 1` after typing
+  `x11ok`/`hello-x11`; B-062) and with no window manager xeyes cannot be placed (B-063; `runbin`
+  ignores arguments, B-064). Item 7 (VS Code) **not done**: code-server healthy (`pid=24379
+  port=44093 healthz=200`), URL typed into the shell Browser window over the PC link, page never
+  rendered (B-065). Item 5 (Tasks window) **not built** - guests run in `:pN` where the engine's
+  lifecycle callbacks never fire, so there is no in-shell route yet. Items 3-4 deferred by the
+  manager (SKIPS row "Phase 7 deferred input bugs"; B-057's PC half is written and tested -
+  cargo 42/42 incl. `stream_change_is_handled_in_place`). The link ran over USB
+  (`adb forward tcp:47600`; the phone's Wi-Fi is client-isolated: ping fails, mDNS silent).
+  Gates: Android `BUILD SUCCESSFUL in 1m 11s` / `GRADLE_EXIT=0`; `cargo test --release`
+  42 passed/0 failed; `cargo clippy --all-targets` exit 0. Record: `docs/PHASE7_RESULT.md`.
+  Phases 1-6 CLOSED, PASS (records `docs/PHASE1_RESULT.md` ... `PHASE6_RESULT.md`).
 - **Phase 6 (Desktop shell), phone (the real gate, label: phone):** install + OEM scan
   "Ignore"; START LINK; `view --addr auto` over Wi-Fi decoded on the PC (`presented==decoded`,
   `dropped=0`, decode 4.4-5.2 ms - **B-057 is emulator-only**); start menu opened by a PC-mouse
@@ -28,11 +41,15 @@ corrects it after review.
   1.0 fps, drag 30.6 fps; typing medians 0.14/8.4/26.8 ms; stuck keys 0. Emulator-only limits:
   **B-056** (mitigated in code), **B-057** (PC window black on the emulator stream; not
   reproduced on the phone).
-- **Last updated:** 2026-10-19 08:35, agent (Phase 6 item 8 phone round). Teardown: receiver
-  killed, link stopped via the app's STOP LINK, `svc power stayon false`; phone untouched
-  otherwise (evidence PNGs + `viewphone.log` kept in the temp p6 dir).
-- **Next action:** manager review of Phase 6 (B-056/B-057/B-058 decisions; the typing-sample
-  residual). Earlier open owner items: the AOA round and the 5-step no-developer-mode check
+- **Last updated:** 2026-10-19 16:22, agent (Phase 7 round at the hard stop). Teardown verified on
+  the phone: broadcasts `phase7x close`, `phase3x cs-stop`, `phase2x killall`, then
+  `am force-stop dev.unifieddesktop.app`; `ps` shows **0** Xvfb/xeyes/wineserver/notepad/libnode/app
+  processes, `dumpsys activity services` **0** DaemonService records, `svc power stayon false`
+  (`stay_on_while_plugged_in=0`). Receiver + `adb forward` removed; Gradle daemon stopped. Evidence
+  kept in the temp p7 dir (`pc-final.png`, `x11now.png`, `gate_android.log`, `gate_cargo2.log`).
+- **Next action:** manager review of Phase 7 (decisions on B-062..B-065, the deferred input items
+  and the item-5/6/7/8 SKIPS rows). Phase 7 stays open until the input paths and the missing window
+  kinds are done. Earlier open owner items: the AOA round and the 5-step no-developer-mode check
   (SKIPS).
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
@@ -93,4 +110,6 @@ corrections in `docs/PHASE1_RESULT.md`.
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6: Q1-Q4 answered (records in `docs/PHASE1_RESULT.md`...`PHASE4_RESULT.md`); Q5 NOT PROVEN - AOA round deferred (SKIPS.md row); Q6 answered (custom framed protocol over TCP + TLS 1.3, not QUIC/WebRTC). |
 | Phone round (Phase 6 item 8) | **RUN 2026-10-19 08:02-08:31, PASS** except the typing-latency samples (SKIPS.md residual: no `P5 LAT`/`LATSTAGE` during PC typing - needs the probe path explained). Evidence: `docs/PHASE6_RESULT.md` section 1b + the phone PNGs, all captured from the PC window's video rectangle. |
-| B-056 / B-057 / B-058 (Phase 6) | Open in BUGS.md awaiting the manager's decision: B-056 emulator encoder configure rejection (mitigated in code); B-057 PC black window on the **emulator** stream only (FIX NOW per the manager; the phone round did NOT reproduce it); B-058 title-bar drag lost the y delta on the phone (verify with one real-mouse drag). |
+| Phase 7 round (2026-10-19) | **PARTIAL at the 16:30 hard stop.** B-061 fixed + proven (phone). X11 window shows the Xvfb screen on the PC (Notepad++ + xeyes) but PC keys do not reach it (B-062), xeyes placement open (B-063), harness `:`-parser + receiver letterbox mapping logged (B-064); VS Code window never rendered (B-065); item 5 not built; item 8 fps/PSS/CPU numbers NOT RUN; items 3-4 deferred. Evidence: `docs/PHASE7_RESULT.md`, temp `p7\pc-final.png`, `x11now.png`, `gate_android.log`, `gate_cargo2.log`. |
+| B-056 / B-057 / B-058 (Phase 6) | Open in BUGS.md awaiting the manager's decision: B-056 emulator encoder configure rejection (mitigated in code); B-057 PC black window on the **emulator** stream only (FIX NOW per the manager; the phone round did NOT reproduce it; its PC half is now written + tested - cargo 42/42); B-058 title-bar drag lost the y delta on the phone (a real SendInput drag this round moved nothing at all - still open). |
+| B-062..B-065 (Phase 7) | Open in BUGS.md awaiting the manager's decision: X11 window does not receive PC keys; xeyes cannot be placed (no WM); harness `phase2x` splits on `:` and the receiver ignores the video letterbox when mapping clicks; the shell Browser window did not render code-server. |

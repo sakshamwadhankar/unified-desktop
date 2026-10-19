@@ -24,6 +24,34 @@ import java.util.concurrent.atomic.AtomicReference
  *  - every key/button the PC holds is remembered so release-all (and the session end)
  *    leaves nothing down.
  */
+/**
+ * B-057: a sync-frame request that produces no keyframe within [timeoutMs] means the encoder is
+ * stuck (the request arrived while the codec was still draining, or the codec dropped it). The
+ * decision is a pure state machine so it can be tested without a media stack.
+ */
+internal class KeyframeWatchdog(private val timeoutMs: Long = 1_000L) {
+    private var requestedAtMs = -1L
+
+    /** Arm the watchdog for a request sent at [nowMs]; a second call while armed is ignored. */
+    fun requested(nowMs: Long) {
+        if (requestedAtMs < 0) requestedAtMs = nowMs
+    }
+
+    /** A keyframe left the encoder: the request did its job. */
+    fun keyframeSeen() {
+        requestedAtMs = -1L
+    }
+
+    /** True once when the timeout elapsed without a keyframe (the caller then restarts). */
+    fun expired(nowMs: Long): Boolean {
+        val armed = requestedAtMs
+        if (armed < 0) return false
+        if (nowMs - armed < timeoutMs) return false
+        requestedAtMs = -1L
+        return true
+    }
+}
+
 class Phase5Session(
     private val service: Phase4LinkService,
     private val out: OutputStream,
@@ -55,6 +83,8 @@ class Phase5Session(
     @Volatile private var dropping = false
     @Volatile private var lastKeyframeRequestMs = 0L
     private val videoGate = AtomicBoolean(false)
+    private val keyframeWatchdog = KeyframeWatchdog()
+    private val encoderRestarts = AtomicInteger(0)
 
     /** Latency probe for the current key-down (all µs on the PHONE clock). */
     private class Probe(val tPcUs: Long, val tRecvUs: Long) {
@@ -186,6 +216,7 @@ class Phase5Session(
     private fun onVideo(flags: Byte, seq: Int, ptsUs: Long, encodeDoneNs: Long, annexB: ByteArray) {
         if (!running.get()) return
         val isKey = (flags.toInt() and Phase5Protocol.VFLAG_KEYFRAME.toInt()) != 0
+        if (isKey) keyframeWatchdog.keyframeSeen()
         if (dropping) {
             if (isKey) {
                 dropping = false
@@ -228,8 +259,37 @@ class Phase5Session(
         if (now - lastKeyframeRequestMs < KEYFRAME_REQUEST_MIN_MS) return
         lastKeyframeRequestMs = now
         keyframeRequests.incrementAndGet()
+        // B-057: if no keyframe follows within a second the encoder is stuck; the stats loop
+        // then restarts the whole encoder pipeline.
+        keyframeWatchdog.requested(now)
         say("P5 keyframe request ($why)")
         encoder?.requestKeyframe()
+    }
+
+    /**
+     * B-057: rebuild the encoder pipeline after a sync-frame request produced no keyframe.
+     * The desktop Presentation and the encoder are torn down and brought up again through the
+     * normal path, so their pairing (the display renders into the encoder's surface texture)
+     * stays consistent. Runs on the stats thread.
+     */
+    private fun restartVideo(why: String) {
+        if (!videoGate.get()) return
+        encoderRestarts.incrementAndGet()
+        say("P5 encoder restart #${encoderRestarts.get()} ($why)")
+        videoGate.set(false)
+        val enc = encoder
+        encoder = null
+        try { enc?.stop() } catch (t: Throwable) { say("P5 encoder stop threw $t") }
+        val d = desktop
+        desktop = null
+        val latch = java.util.concurrent.CountDownLatch(1)
+        main.post {
+            try { d?.stop() } catch (t: Throwable) { say("P5 desktop stop threw $t") }
+            finally { latch.countDown() }
+        }
+        try { latch.await(2, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Throwable) {}
+        try { Thread.sleep(150) } catch (_: InterruptedException) {}
+        enableVideo("encoder restart")
     }
 
     // ---------------------------------------------------------------- input in
@@ -358,6 +418,9 @@ class Phase5Session(
                 lastVstat = now
                 say("P5 VSTAT ${statsLine()}")
             }
+            if (keyframeWatchdog.expired(now)) {
+                restartVideo("no keyframe 1 s after a sync-frame request")
+            }
         }
     }
 
@@ -365,7 +428,8 @@ class Phase5Session(
         val d = desktop
         val stats = d?.stats() ?: "shell=down"
         return "sent=${sentFrames.get()} bytes=${sentBytes.get()} dropped=${dropped.get()} " +
-            "keyreq=${keyframeRequests.get()} keyreqSent=${encoder?.stats() ?: ""} " +
+            "keyreq=${keyframeRequests.get()} keyRestarts=${encoderRestarts.get()} " +
+            "keyreqSent=${encoder?.stats() ?: ""} " +
             "inApplied=${inputApplied.get()} inDropped=${inputDropped.get()} $stats"
     }
 

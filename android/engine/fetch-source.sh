@@ -1130,6 +1130,40 @@ replace_once(appops,
 "AppOps caller helper")
 
 PY
+
+# B-061 (Phase 7): the engine daemon's foreground notification is ours, not the engine fork's
+# brand text, and it is only ever shown while a hidden Android app is alive (the app starts and
+# stops DaemonService itself; isEnableDaemonService() = false at app start).
+python3 - "$VENDOR/source/Bcore/src/main/java/top/niunaijun/blackbox/core/system/DaemonService.java" <<'PY'
+from pathlib import Path
+import sys
+
+daemon = Path(sys.argv[1])
+text = daemon.read_text()
+
+
+def replace_once(old, new, label):
+    global text
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected 1 marker, found {count}")
+    text = text.replace(old, new, 1)
+
+
+replace_once(
+    '    private static final String CHANNEL_NAME = "BlackBox Daemon Service";\n'
+    '    private static final String CHANNEL_DESCRIPTION = "Keeps BlackBox core services running";',
+    '    private static final String CHANNEL_NAME = "Android app engine";\n'
+    '    private static final String CHANNEL_DESCRIPTION = "Shown only while a hidden Android app is running";',
+    "DaemonService channel text")
+replace_once(
+    '                .setContentTitle("BlackBox Core")\n'
+    '                .setContentText("Core services are running")',
+    '                .setContentTitle("Android app engine")\n'
+    '                .setContentText("A hidden app is running")',
+    "DaemonService notification text")
+daemon.write_text(text)
+PY
 if ! printf '%s\n' "Fetched $REV and Dobby $DOBBY_REV; prebuilt artifacts excluded." > "$VENDOR/MANIFEST"; then
   if command -v cmd.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
     cmd.exe /c "echo Fetched $REV and Dobby $DOBBY_REV; prebuilt artifacts excluded. > $(wslpath -w \"$VENDOR/MANIFEST\")" >/dev/null 2>&1 || true

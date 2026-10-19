@@ -633,6 +633,33 @@ object Phase2X11 {
             out.flush()
         }
 
+        /** XTEST pointer motion, absolute (MotionNotify, detail 0); x/y at the motion offsets. */
+        fun motion(x: Int, y: Int) {
+            put(xtestOp); put(2); putShort(9)
+            put(6); put(0); put(0); put(0)     // MotionNotify
+            putInt(0)                          // delay = CurrentTime
+            putInt(0)                          // root = None
+            repeat(8) { put(0) }
+            putShort(x); putShort(y)
+            repeat(8) { put(0) }
+            out.flush()
+        }
+
+        /** XTEST button press (detail 4) or release (detail 5); detail = button number. */
+        fun button(btn: Int, down: Boolean) {
+            put(xtestOp); put(2); putShort(9)
+            put(if (down) 4 else 5); put(btn); put(0); put(0)
+            putInt(0)
+            putInt(0)
+            repeat(8) { put(0) }
+            putShort(0); putShort(0)
+            repeat(8) { put(0) }
+            out.flush()
+        }
+
+        /** One XTEST key event by X keycode: evtype 2 = press, 3 = release. */
+        fun fakeKey(evtype: Int, detail: Int) = fakeInput(evtype, detail)
+
         var shiftCode = 50
         private fun findShift() {
             keycodeFor(0xFFE1 /* Shift_L */)?.let { shiftCode = it.first }
