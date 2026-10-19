@@ -6,35 +6,34 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 6 of 13 - **emulator round COMPLETE, PHONE ROUND OPEN** (item 8: the phone
-  `2c0f6edc` never appeared in `adb devices` - unplugged at 06:09, polled every 30 s until
-  the hard stop -> SKIPS.md). Phases 1-5 CLOSED, PASS (records: `docs/PHASE1_RESULT.md` ...
-  `PHASE5_RESULT.md`).
-- **Phase 6 (Desktop shell), emulator:** taskbar + start menu (Files, Browser, Settings,
-  Test), movable/resizable windows driven by the PC's real mouse and keyboard through the
-  Phase-5 link, keyboard routed to the focused widget; four app-side gate screenshots of the
-  live shell hierarchy. Window model pure Kotlin, 18 tests; `:app:testDebugUnitTest` 100 tests
-  / 0 failures / 3 skipped, lint + assemble green (last run on the final tree 07:38); cargo
-  41/41, clippy clean. Numbers (emulator via adb forward, phone-side counters): idle
-  keep-alive **1.0 fps** (static shell), title-bar drag **30.6 fps** over 30.4 s (929 frames),
-  typing medians recv->dispatch **0.14 ms** / dispatch->drawn **8.4 ms** / drawn->encoded
-  **26.8 ms**; stuck keys **0** after 100 keys + 10 drags. Limits: the PC window stays black
-  on the *emulator's* stream (**B-057** - every frame dropped awaiting a keyframe the emulator
-  encoder never sends; the phone's encoder honoured it in Phase 5), so the gate shots are
-  app-side and the PC-side typing stages could not print; **B-056** (emulator encoder
-  configure rejection) mitigated in code. B-039 probe: PC keys reach the browser's address
-  field via the **IME route**; the page-DOM route is still open. Record: `docs/PHASE6_RESULT.md`.
-- **Last updated:** 2026-10-19 07:41, agent (Phase 6 items 9-11). Cleanup done at 07:39:
-  emulator shut down (`emu kill`, qemu gone), receiver killed, `adb forward` removed,
-  `adb devices` empty, phone never touched. A background watcher kept polling for `2c0f6edc`
-  until ~08:45 at the time of writing.
-- **Next action:** the phone round: plug `2c0f6edc` in and run the item-8 checklist
-  (docs/PHASE6_RESULT.md, SKIPS.md): install, dismiss the OEM scan dialog with Ignore,
-  Start link, `udreceiver view --addr auto` over Wi-Fi, receiver-window screenshots (start
-  menu, overlapping windows), 30 s drag fps + idle fps from the receiver's VSTAT, 20 typing
-  samples into the browser address bar, stuck keys after 100 keys + 10 drags. Then manager
-  review of Phase 6 (B-056/B-057 decisions). Earlier open owner items: the AOA round and the
-  5-step no-developer-mode check (SKIPS).
+- **Phase:** 6 of 13 **CLOSED, PASS on the phone** (manager review 2026-10-19 08:45), with
+  input bugs to fix FIRST in the next prompt: B-059 (a `:` typed on the PC never arrived),
+  B-060 (address bar prepends https:// and appends to the old URL), B-058 (a synthetic drag
+  moved the window in x only), B-057 (PC black on the emulator stream). Residual: PC-typing
+  latency samples in the shell (SKIPS). Drag 28.3 fps on the phone (PRD target 30: Phase 12).
+  Phases 1-5 CLOSED, PASS (records: `docs/PHASE1_RESULT.md` ... `PHASE5_RESULT.md`).
+- **Phase 6 (Desktop shell), phone (the real gate, label: phone):** install + OEM scan
+  "Ignore"; START LINK; `view --addr auto` over Wi-Fi decoded on the PC (`presented==decoded`,
+  `dropped=0`, decode 4.4-5.2 ms - **B-057 is emulator-only**); start menu opened by a PC-mouse
+  click; overlapping windows; PC-keyboard-typed address bar - every capture from the **PC
+  window's video rectangle only** (PNG magic checked): `phone-01`, `phone-02b`,
+  `phone-03/03b/03c`. Numbers: title-bar drag **28.3 fps** (892 frames/31.5 s), idle **1.0 fps**
+  (10 frames/10.02 s, no windows - closes the keep-alive-at-the-receiver carry-over), stuck
+  keys **0** after 100 keys + 10 drags. Residual skip: typing latency samples (no
+  `P5 LAT`/`LATSTAGE`). **B-058** logged (title-bar drag lost the y delta). Link stopped via
+  the app 08:31:40, `svc power stayon false` restored; a missed call at ~08:29 was after all
+  measurements and untouched. Record: `docs/PHASE6_RESULT.md` sections 1b + phone gates in 1.
+- **Phase 6, emulator (earlier round, same tree):** shell + apps + input; 18 model tests;
+  junit 100/0/3, lint + assemble green (final tree 07:38); cargo 41/41, clippy clean; idle
+  1.0 fps, drag 30.6 fps; typing medians 0.14/8.4/26.8 ms; stuck keys 0. Emulator-only limits:
+  **B-056** (mitigated in code), **B-057** (PC window black on the emulator stream; not
+  reproduced on the phone).
+- **Last updated:** 2026-10-19 08:35, agent (Phase 6 item 8 phone round). Teardown: receiver
+  killed, link stopped via the app's STOP LINK, `svc power stayon false`; phone untouched
+  otherwise (evidence PNGs + `viewphone.log` kept in the temp p6 dir).
+- **Next action:** manager review of Phase 6 (B-056/B-057/B-058 decisions; the typing-sample
+  residual). Earlier open owner items: the AOA round and the 5-step no-developer-mode check
+  (SKIPS).
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app
@@ -93,5 +92,5 @@ corrections in `docs/PHASE1_RESULT.md`.
 | Item | Notes |
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6: Q1-Q4 answered (records in `docs/PHASE1_RESULT.md`...`PHASE4_RESULT.md`); Q5 NOT PROVEN - AOA round deferred (SKIPS.md row); Q6 answered (custom framed protocol over TCP + TLS 1.3, not QUIC/WebRTC). |
-| Phone round (Phase 6 item 8) | SKIPS.md row (phone unplugged all run; polled until the hard stop). Every check has an emulator stand-in, labelled `emulator via adb forward` in `docs/PHASE6_RESULT.md`; none closes the item. Needs the owner to plug `2c0f6edc` in. |
-| B-056 / B-057 (Phase 6) | Open in BUGS.md awaiting the manager's decision: emulator encoder configure rejection (mitigated in code) and the PC black window on the emulator stream (permanent drop while awaiting a keyframe). |
+| Phone round (Phase 6 item 8) | **RUN 2026-10-19 08:02-08:31, PASS** except the typing-latency samples (SKIPS.md residual: no `P5 LAT`/`LATSTAGE` during PC typing - needs the probe path explained). Evidence: `docs/PHASE6_RESULT.md` section 1b + the phone PNGs, all captured from the PC window's video rectangle. |
+| B-056 / B-057 / B-058 (Phase 6) | Open in BUGS.md awaiting the manager's decision: B-056 emulator encoder configure rejection (mitigated in code); B-057 PC black window on the **emulator** stream only (FIX NOW per the manager; the phone round did NOT reproduce it); B-058 title-bar drag lost the y delta on the phone (verify with one real-mouse drag). |

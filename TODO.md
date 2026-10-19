@@ -1,5 +1,5 @@
 # Phase 6: to-do
-Done 10 of 11 | Failed or skipped: item 8 (phone round - phone never appeared; SKIPS.md row) | Updated 07:40 | Now: item 11 done; report written; STATE.md last; phone watcher still polling until ~08:45. HARD STOP 08:50.
+Done 11 of 11 | item 8 DONE on the phone (08:02-08:31) except its typing-latency samples (SKIPS.md residual row) | Updated 08:35 | Phone round: all checks pass, phone-labelled; report follows.
 
  1. [x] 06:09 start: `adb devices` empty (phone unplugged, so no phone round); RAM 1.437 GB free at
     06:08 -> code first, `wsl --shutdown` freed ~0; RAM 3.67 GB at 06:13 -> emulator started ONCE
@@ -50,11 +50,29 @@ Done 10 of 11 | Failed or skipped: item 8 (phone round - phone never appeared; S
      2.1 / 15.4 / 41.7; the PC leg is not measurable - no decoded frame). Stuck keys after
      100 keys + 10 drags: **keysDown=0 buttonsDown=0** (keysAllTime 49->149, keyFlashes 49->149,
      buttonsAllTime 6->16).
- 8. [ ] Phone round (the real gate): SKIPPED - the phone `2c0f6edc` never appeared in
-     `adb devices` (polled 06:09 -> 08:4x, every 30 s at the end via a background watcher;
-     unplugged at the start). SKIPS.md row added with the exact checklist to run. Every
-     check has an emulator stand-in, labelled `emulator via adb forward` (items 5-7 +
-     `docs/PHASE6_RESULT.md`); none of them closes this item.
+ 8. [x] 08:31 Phone round (the real gate) - the phone appeared at 08:00: DONE except the typing
+     latency samples. 08:02 `install -r` + OEM scan dialog (`com.oplus.phonemanager`) dismissed
+     with **Ignore** (never Fix now; tap (312,2190), 08:02:23); START LINK tapped (uiautomator
+     bounds) -> `phase4x status` `running=true` 08:03:18; `udreceiver view --addr auto` over
+     **Wi-Fi** (no adb forward) -> the PC **decoded** the phone's stream: `presented==decoded`,
+     `dropped=0`, `decode=4.4-5.2 ms`, `d3d11=true`, seq 5860 - **B-057 is emulator-only**.
+     Screenshots = the PC window's **video rectangle only** (client 1920x1200, crop y=60; PNG
+     magic `89 50 4E 47` each): **start menu opened by a PC-mouse click** on the taskbar Start
+     (`phone-01-startmenu.png` 257,515 B, 08:07:16), **overlapping windows**
+     (`phone-02b-overlap.png` 389,463 B - Files dragged by its title bar to ~(720,95) over the
+     Browser), **address typed from the PC keyboard** (`phone-03-browser-typed.png` 188,424 B;
+     `phone-03b-browser-load.png` 223,372 B; `phone-03c-browser-clean.png` 251,026 B - the
+     field auto-prepends `https://` on focus so a typed scheme doubles; the bad follow-up URL
+     honestly shows "Web page not available"). Numbers (receiver VSTAT + `p6:shell`): **drag
+     28.3 fps** (892 frames/31.5 s of title-bar drags; per-second max 54), **idle 1.0 fps**
+     (10/10.02 s, no windows, `dropped=0 rx=2-3 kbit/s` - closes the Phase-5 keep-alive-at-the-
+     receiver carry-over), **stuck keys 0** after 100 keys + 10 drags (keysAllTime 313->445,
+     keyFlashes 191->323, buttonsAllTime 113->125, keyAtFocused 364->628) at 08:24:40.
+     **Residual skip: the 20 typing latency samples** - no `P5 LAT` (phone, all-tags grep) and
+     no `LATSTAGE` (PC) during PC typing; SKIPS.md row. **B-058 logged** (the title drag moved
+     the window +660 x but +11 y). Stopped via the app's STOP LINK 08:31:40 (`running=false
+     last=NSD unregistered`); `svc power stayon false` restored; a missed call at ~08:29 (after
+     all measurements) was left untouched.
  9. [x] 07:23 Build gates, all green: **gradle** `./gradlew :app:testDebugUnitTest :app:lintDebug
      :app:assembleDebug` -> `BUILD SUCCESSFUL in 50s`, `GRADLE_EXIT=0` (07:16; junit aggregates
      testDebugUnitTest: 100 tests, 0 failures, 3 skipped); **cargo** build --release exit 0;

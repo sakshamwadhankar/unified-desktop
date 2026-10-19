@@ -5,9 +5,10 @@
 > VirtualDisplay 1920x1080 inside a 2992x1344 landscape screen), driven from the **real PC
 > window** (mouse + keyboard through the Phase-5 link: `adb forward tcp:47600` then
 > `udreceiver view`, so the transport is TCP on this laptop, not Wi-Fi).
-> The **phone round (item 8) is OPEN**: the test phone `2c0f6edc` was unplugged at 06:09 and
-> never appeared in `adb devices` (polled until the end of the run) -> SKIPS.md.
-> No number in this file may be called "phone-verified".
+> The **phone round (item 8) RAN** on the test phone `2c0f6edc` at 08:02-08:31 (CPH2619,
+> Android 16, 480 dpi), over **Wi-Fi** (`view --addr auto`); its screenshots are captures of
+> the **PC window's video rectangle** (section 1b). Rows marked "phone" below are
+> phone-verified; one residual skip: PC-typing latency samples (SKIPS.md).
 
 ## 1. Gate
 
@@ -21,10 +22,36 @@
 | B-039 WebView keyboard probe (item 5) | PROBED (emulator): PC keys reach the browser through the **address EditText's IME route** (`route=edittext-ime`); the page's own DOM keydown listener still gets nothing from the link (`pageKeys=(pending)`) - unchanged B-039 | `p6:probe:harness`, `p6:keys` |
 | Measurements: drag fps, idle fps, typing samples, stuck keys | PASS (emulator; phone-side counters, see section 2) | TODO item 7 |
 | Build gates | PASS: gradle `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` -> `BUILD SUCCESSFUL`, exit 0 (three runs: 07:16; 07:32 after the toolbar fix; **07:38 on the final tree** - all green, junit 100 tests / 0 failures / 3 skipped), `cargo build --release` exit 0; `cargo test --release` 41/41; `cargo clippy --release --all-targets` exit 0 | `gate-gradle.log`, `gate-gradle2.log`, `gate-gradle3.log`, `gate-cargo.log`, `gate-cargo-test.log` (temp p6 dir) |
-| Phone round (item 8) | **SKIPPED - phone never appeared** (see SKIPS.md) | `adb devices` = emulator only, every poll 06:09-08:3x |
+| Phone round (item 8) | **PASS (phone)**: install + OEM scan dialog dismissed with Ignore; START LINK; `view --addr auto` over Wi-Fi decoded the stream on the PC (`presented`==`decoded`, `dropped=0`, decode 4.4-5.2 ms - **B-057 is emulator-only**); start menu opened by a PC-mouse click; overlapping windows; PC-keyboard-typed address bar; drag 28.3 fps / idle 1.0 fps; stuck keys 0 | section 1b; `phone-01-*`, `phone-02b-*`, `phone-03*-*` PNGs; TODO item 8 |
 | Licenses | No new third-party component: the shell uses only the Android SDK (`View`/`ViewGroup`, `WebView`, `java.io.File`, `Paint`) | THIRD_PARTY.md unchanged |
 
-## 2. Numbers (all emulator, phone-side counters; the receiver cannot be used for fps here - B-057)
+## 1b. Phone round (label: **phone**, 2026-10-19 08:02-08:31)
+
+Phone `2c0f6edc` (CPH2619, Android 16, 480 dpi) on Wi-Fi; PC = `udreceiver view --addr auto`
+(the only transport used this round; no `adb forward`). Screenshots below are the **PC
+window's video rectangle only** (`fit(1920,1080,1920,1200)` -> scale 1, crop at y=60; client
+1920x1200), PNG magic `89 50 4E 47` checked on each.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Install + OEM dialog | `adb install -r` OK; the `com.oplus.phonemanager` scan dialog appeared 4 s later and was dismissed with **Ignore** (never "Fix now"); focus back at the launcher | tap (312,2190), 08:02:23 |
+| Start link | START LINK tapped (uiautomator bounds (24,505)-(322,649), tapped twice as in Phase 5); `phase4x status` -> `running=true` | 08:03:18 |
+| Wi-Fi link | `view --addr auto` found the phone via NSD; PC decoded the stream: `presented==decoded`, `dropped=0`, `decode=4.4-5.2 ms`, `d3d11=true`, seq 5860 at the end; phone side `dropped=0 inDropped=0 keyreq=2` | `viewphone.log`; **B-057 does not reproduce on the phone** (the `c2.qti` encoder honours the keyframe request) |
+| Start menu open (PC mouse) | PC click on the taskbar Start button (client 48,884 = desktop 60,1045) opened the menu; screenshot 08:07:16 | `phone-01-startmenu.png` 257,515 B |
+| Overlapping windows | the Files window was dragged by its title bar with the PC mouse to ~(720,95), overlapping the Browser at (60,48) | `phone-02b-overlap.png` 389,463 B |
+| Address bar typed from the PC keyboard | PARTIAL (manager review of the PNGs): keys from the PC do reach the address field and a real page loads (`phone-03b`: `https://example.com/example.com/` shows example.com's own text). But the text is garbled: typing `https://example.com/` gave `https://https//example.com/` (`phone-03`): the field auto-prepends `https://` on focus AND the typed `:` never arrived (B-059, B-060); a later attempt gave `https://example.come.com/example.com/` -> "Web page not available" (`phone-03c`), because typed text is appended to the old URL. The keys were posted as window messages by the harness, not pressed: B-059 must be re-checked with real key presses. | `phone-03-browser-typed.png` 188,424 B; `phone-03b-browser-load.png` 223,372 B; `phone-03c-browser-clean.png` 251,026 B |
+| Stopped via the app | STOP LINK tapped; `phase4x status` -> `running=false last=NSD unregistered` | 08:31:40 |
+
+Phone round numbers (receiver VSTAT and `p6:shell`, all 08:16-08:26):
+
+| Measurement | Result | Method / caveat |
+|---|---|---|
+| Title-bar drag fps (Files, 33 PC drags) | **28.3 fps** over 31.5 s (892 frames) | PC `presented=` delta from `viewphone.log`; per-second max 54 fps (111 VSTAT lines >= 25 fps in the log). The window really moved (+660 px in x); its y delta was lost - see **B-058** |
+| Idle fps, **no animating window** (both windows closed) | **1.0 fps** (10 frames / 10.02 s) with `dropped=0`, `rx=2-3 kbit/s` | PC VSTAT; this closes the Phase-5 carry-over "keep-alive >= 1 fps **at the receiver**" for the phone |
+| Typing samples (20 keys into the address bar) | **not measurable this round**: no `P5 LAT` record reached logcat (all-tags grep right after typing) and the PC printed no `LATSTAGE`; the typed text itself is proven by the screenshots above | SKIPS.md residual row; honest "unknown", no substitute numbers |
+| Stuck keys after stress (100 keys + 10 drags) | **keysDown=0 buttonsDown=0**; counters moved keysAllTime 313->445, keyFlashes 191->323, keyAtFocused 364->628, buttonsAllTime 113->125 | `p6:shell` 08:24:40 |
+
+## 2. Numbers (emulator rows; phone numbers in section 1b)
 
 | Measurement | Result | Method / caveat |
 |---|---|---|
@@ -72,11 +99,18 @@ Fixed 60 fps encoder pacing (Phase 5) plus a static shell gives a quiet idle (1 
 - **B-057** - the PC `view` stays black on the emulator stream: every frame dropped while
   `awaiting_keyframe`, the keyframe request is issued once, the emulator encoder ignores it
   (the phone's encoder honoured it in Phase 5). This is why the gate screenshots are app-side
-  and why the PC-side typing stages could not print.
+  and why the PC-side typing stages could not print. **Emulator-only: the phone round decoded
+  normally (section 1b).**
+- **B-058** (phone round, minor, needs verification) - dragging a window by its title bar with
+  the synthetic PC drags moved it +660 px in x but only +11 px in y (net expected: +600/+300);
+  `Phase6ShellModel.moveBy` clamps y to 0..395, so clamping does not explain it. The 28.3 fps
+  number is still a real window drag (the window genuinely moved). Cause unknown.
 
-## 6. Still unknown (until the phone round happens)
+## 6. Still unknown
 
-- The whole shell on the phone: real encoder, real Wi-Fi, real OEM dialogs; whether the
-  `c2.qti` encoder + the Phase-5 decoder chain show the shell without B-057.
-- Phone-side numbers (idle/drag/typing) and the stuck-key stress on the real device.
-- The Files toolbar at the phone's density (the wrap was fixed at 240 dpi; the phone is 480).
+- End-to-end PC-typing latency on the phone (`P5 LAT` records and `LATSTAGE` never printed
+  during PC typing - SKIPS.md residual row).
+- Whether the y-delta loss in title-bar drags (B-058) is a shell bug or a synthetic-input
+  artifact; needs one drag with a real mouse or on-device touch.
+- The Files toolbar at the phone's 480 dpi is confirmed by the phone screenshots (all four
+  labels fit at the default width) - closed.
