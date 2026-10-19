@@ -275,6 +275,32 @@ pub fn scale_to_desktop(px: i32, py: i32, client_w: i32, client_h: i32, dw: i32,
     (x, y)
 }
 
+/// A client pixel -> desktop pixel through the video letterbox (the same fit() the blit
+/// uses). B-064: this offsets the black bars, so a click aimed at a video pixel lands on
+/// that desktop pixel; unit-tested below.
+pub fn scale_client_to_desktop(px: i32, py: i32, client_w: i32, client_h: i32) -> (i32, i32) {
+    if client_w <= 0 || client_h <= 0 {
+        return (0, 0);
+    }
+    let (vw, vh) = fit_video(client_w, client_h);
+    let (ox, oy) = ((client_w - vw) / 2, (client_h - vh) / 2);
+    scale_to_desktop(px - ox, py - oy, vw, vh, DESKTOP_W, DESKTOP_H)
+}
+
+/// The size the 1920x1080 desktop is blitted to inside a client of `cw x ch`.
+pub fn fit_video(cw: i32, ch: i32) -> (i32, i32) {
+    if cw <= 0 || ch <= 0 {
+        return (cw.max(2), ch.max(2));
+    }
+    let sx = cw as f64 / DESKTOP_W as f64;
+    let sy = ch as f64 / DESKTOP_H as f64;
+    let s = sx.min(sy);
+    (
+        ((DESKTOP_W as f64 * s) as i32).max(2),
+        ((DESKTOP_H as f64 * s) as i32).max(2),
+    )
+}
+
 /// Windows VK modifier bit (what `GetKeyState` reports) -> the wire's MOD_* bitmask.
 pub fn mods_from_shift(shift: bool, ctrl: bool, alt: bool, meta: bool) -> u8 {
     let mut m = 0u8;
@@ -520,6 +546,20 @@ mod tests {
         assert_eq!(scale_to_desktop(9999, 9999, 1920, 1080, 1920, 1080), (1919, 1079));
         assert_eq!(scale_to_desktop(-50, -50, 1920, 1080, 1920, 1080), (0, 0));
         assert_eq!(scale_to_desktop(5, 5, 0, 0, 1920, 1080), (0, 0));
+    }
+
+    #[test]
+    fn letterbox_maps_video_pixels_to_the_desktop() {
+        // 1536x960 client: the 16:9 video fits at 1536x864 with a 48 px bar top and bottom.
+        assert_eq!(fit_video(1536, 960), (1536, 864));
+        // the centre of the video is the centre of the desktop
+        assert_eq!(scale_client_to_desktop(768, 480, 1536, 960), (960, 540));
+        // a click 48 px lower in the client (the top of the video) is desktop y 0
+        assert_eq!(scale_client_to_desktop(0, 48, 1536, 960), (0, 0));
+        // clicking the black bar clamps to the desktop edge instead of going negative
+        assert_eq!(scale_client_to_desktop(0, 0, 1536, 960), (0, 0));
+        // exactly 1:1 when the client is the desktop size
+        assert_eq!(scale_client_to_desktop(400, 128, 1920, 1080), (400, 128));
     }
 
     #[test]

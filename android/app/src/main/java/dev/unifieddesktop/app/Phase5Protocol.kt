@@ -255,6 +255,40 @@ object Phase5Protocol {
         }
     }
 
+    /**
+     * The US-layout character an Android keycode + meta state produces, or NUL when the key
+     * is not printable. Pure math so the shifted-punctuation mapping is unit-tested
+     * (Phase5ProtocolTest.shiftedPunctuationVkToChar) instead of relying on the framework's
+     * KeyCharacterMap: VK 0xBA + Shift must be ':', VK 0x31 + Shift must be '!', and so on
+     * (BUGS B-059/B-062).
+     */
+    fun keyCodeToChar(keyCode: Int, meta: Int): Char {
+        val shift = (meta and android.view.KeyEvent.META_SHIFT_ON) != 0
+        if (keyCode in 29..54) { // A..Z
+            val c = 'a' + (keyCode - 29)
+            return if (shift) c.uppercaseChar() else c
+        }
+        if (keyCode in 7..16) { // 0..9
+            val digit = keyCode - 7
+            return if (shift) ")!@#$%^&*("[digit] else ('0' + digit)
+        }
+        if (keyCode == 62) return ' '
+        return when (keyCode) {
+            74 -> if (shift) ':' else ';'      // SEMICOLON
+            81 -> if (shift) '+' else '='      // EQUALS
+            55 -> if (shift) '<' else ','      // COMMA
+            69 -> if (shift) '_' else '-'      // MINUS
+            56 -> if (shift) '>' else '.'      // PERIOD
+            76 -> if (shift) '?' else '/'      // SLASH
+            68 -> if (shift) '~' else '`'      // GRAVE
+            71 -> if (shift) '{' else '['      // LEFT_BRACKET
+            73 -> if (shift) '|' else '\\'     // BACKSLASH
+            72 -> if (shift) '}' else ']'      // RIGHT_BRACKET
+            75 -> if (shift) '"' else '\''     // APOSTROPHE
+            else -> '\u0000'
+        }
+    }
+
     /** Android meta state for a PC modifier bitmask. */
     fun modsToMetaState(mods: Int): Int {
         var meta = 0

@@ -75,15 +75,17 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     // ------------------------------------------------------------------ windows
 
-    enum class App { FILES, BROWSER, SETTINGS, TEST, X11;
+    enum class App { FILES, BROWSER, SETTINGS, TEST, X11, VSCODE, ANDROID;
         fun title(): String = when (this) {
             FILES -> "Files"; BROWSER -> "Browser"; SETTINGS -> "Settings"; TEST -> "Test"
             X11 -> "Notepad++ + xeyes (X11)"
+            VSCODE -> "VS Code"
+            ANDROID -> "Android app"
         }
     }
 
-    /** Open (or re-focus) an app window. */
-    fun openApp(app: App): ShellWindowView {
+    /** Open (or re-focus) an app window. [guest] names the hidden Android app for ANDROID. */
+    fun openApp(app: App, guest: String? = null): ShellWindowView {
         val existing = model.all().firstOrNull { it.title == app.title() }
         if (existing != null) {
             model.focus(existing.id)
@@ -91,7 +93,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
             return frames[existing.id]!!
         }
         val win = model.open(app.title(), 900, 620)
-        val frame = ShellWindowView(context, win, app)
+        val frame = ShellWindowView(context, win, app, guest)
         frame.onDragBy = { id, dx, dy, edges -> frameDrag(id, dx, dy, edges) }
         frame.onClose = { closeWindow(it) }
         frame.onMinimize = { minimizeWindow(it) }
@@ -137,7 +139,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
     }
 
     /** Push model state into the views (visibility, rects, taskbar, z-order). */
-    private fun syncViews() {
+    fun syncViews() {
         for (win in model.all()) {
             val f = frames[win.id] ?: continue
             f.visibility = if (win.minimized) View.GONE else View.VISIBLE
@@ -294,7 +296,9 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         val frame = model.focusedId?.let { frames[it] } ?: return false
         keyAtFocused++
         if (down) keyFlashes++
-        return frame.keyToContent(down, keyCode, scan, meta)
+        val handled = frame.keyToContent(down, keyCode, scan, meta)
+        if (down) P7Log.say(context, "P6SHELL key code=$keyCode meta=$meta focused=${frame.win.title} handled=$handled")
+        return handled
     }
 
     /** Releases everything the PC still holds; returns (keys, buttons) released. */

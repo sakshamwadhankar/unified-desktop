@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
@@ -189,8 +190,13 @@ object FilesDispatch {
  * Browser: a WebView with an address bar (typed with the PC keyboard), back/forward/reload
  * and a status line. The B-039 probe logs what each keyboard route does, so the working
  * route is a fact in logcat, not a guess.
+ *
+ * With [codeServer] = true this is the **VS Code window**: it logs in to the running
+ * code-server by POSTing the session password (the same flow Phase3CodeActivity used to
+ * render the workbench) and opens a workspace through the `?folder=` deep link.
  */
-class BrowserView(context: Context) : LinearLayout(context) {
+class BrowserView(context: Context, private val codeServer: Boolean = false) :
+    LinearLayout(context), ShellTextContent {
 
     val address: EditText = EditText(context).apply {
         hint = "address (https://...)"
@@ -200,14 +206,26 @@ class BrowserView(context: Context) : LinearLayout(context) {
         textSize = 20f
         isFocusable = true
         isFocusableInTouchMode = true
+        // B-060: a desktop address bar selects its text when it gets the focus, so typing a
+        // new URL replaces the old one instead of appending to it.
+        setSelectAllOnFocus(true)
     }
 
     private val status = ShellUi.label(context, "ready", 17f)
 
-    val web: WebView = @SuppressLint("SetJavaScriptEnabled") WebView(context).apply {
+    /** code-server login state (only used when [codeServer]). */
+    private var serverPort = 0
+    private var pendingFolder: String? = null
+
+    val web: WebView = @SuppressLint("SetJavaScriptEnabled") KeyWebView(context).apply {
         setBackgroundColor(Color.WHITE)
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
+        // The Phase-3 settings that rendered code-server (B-065); the shell Browser was
+        // missing media + file-access parity.
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        settings.mediaPlaybackRequiresUserGesture = false
         isFocusable = true
         isFocusableInTouchMode = true
         webViewClient = object : WebViewClient() {
@@ -219,6 +237,17 @@ class BrowserView(context: Context) : LinearLayout(context) {
                         "document.addEventListener('keydown',function(e){window.__udKeys.push(e.key);});" +
                         "return 'probe-installed';})()", null
                 )
+                // B-065: finish the login, then open the workspace with the documented deep
+                // link. Only once: pendingFolder is cleared before the navigation.
+                val folder = pendingFolder
+                if (codeServer && folder != null && serverPort > 0 && url?.contains("folder=") != true) {
+                    pendingFolder = null
+                    val deep = "http://127.0.0.1:$serverPort/?folder=" +
+                        android.net.Uri.encode(folder, "/")
+                    status.text = "opening folder"
+                    android.util.Log.i("Phase6", "VSCODE folder $deep")
+                    v?.loadUrl(deep)
+                }
             }
         }
     }
@@ -249,9 +278,7 @@ class BrowserView(context: Context) : LinearLayout(context) {
     fun go() {
         val typed = address.text.toString().trim()
         if (typed.isEmpty()) return
-        // Default to https: the platform blocks cleartext http for targetSdk 36, so a bare
-        // host typed on the PC keyboard must not end in "webpage not available" (2026-10-19).
-        val url = if (typed.contains("://")) typed else "https://$typed"
+        val url = BrowserUrl.normalize(typed)
         status.text = "loading $url"
         if (pos >= 0 && pos < history.size - 1) history = ArrayList(history.subList(0, pos + 1))
         history.add(url); pos = history.size - 1
@@ -259,6 +286,42 @@ class BrowserView(context: Context) : LinearLayout(context) {
         web.loadUrl(url)
         android.util.Log.i("Phase6", "BROWSER go $url")
     }
+
+    /**
+     * Log in to the running code-server exactly like Phase3CodeActivity did (a POST to
+     * `/login` sets the session cookie) and open [folder] through the `?folder=` deep link.
+     * B-065: the shell Browser used to navigate with `?password=` in the URL, which never
+     * logs a code-server session in.
+     */
+    fun openCodeServer(folder: String): String {
+        val f = Phase3Server.sessionFile(context)
+        if (!f.isFile) return "code-server not started (no session file)"
+        var port = -1
+        var pw = ""
+        f.useLines { ls ->
+            for (l in ls) {
+                when {
+                    l.startsWith("port=") -> port = l.substringAfter('=').trim().toIntOrNull() ?: -1
+                    l.startsWith("password=") -> pw = l.substringAfter('=').trim()
+                }
+            }
+        }
+        if (port <= 0 || pw.isEmpty()) return "bad session file"
+        serverPort = port
+        pendingFolder = folder
+        android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+        val login = "http://127.0.0.1:$port/login"
+        status.text = "logging in to code-server :$port"
+        web.postUrl(login, "password=$pw".toByteArray())
+        android.util.Log.i("Phase6", "VSCODE postUrl $login folder=$folder")
+        return "login :$port folder=$folder"
+    }
+
+    fun addressText(): String = address.text.toString()
+
+    fun pageText(): String = status.text.toString()
+
+    override fun contentText(): String = pageText()
 
     fun back() {
         if (pos > 0) { pos--; web.loadUrl(history[pos]) } else if (web.canGoBack()) web.goBack()
@@ -268,40 +331,42 @@ class BrowserView(context: Context) : LinearLayout(context) {
         if (pos < history.size - 1) { pos++; web.loadUrl(history[pos]) } else if (web.canGoForward()) web.goForward()
     }
 
-    /** Typed text for the address bar; the harness uses this to feed the PC's keys. */
-    fun addressText(): String = address.text.toString()
-
-    fun pageText(): String = status.text.toString()
-
     /**
      * The B-039 probe: three keyboard routes into the page, each logged with its result.
-     * Returns the one that works ("keyevent", "edittext-ime", "commit", or "none").
+     * Route 1 is a real KeyEvent, route 2 the input connection (what an IME does), route 3
+     * the page's own `execCommand('insertText')`. The DOM keydown counter is read back
+     * asynchronously into the log, so the route that works is a fact, not a guess.
      */
     fun probeKeyboard(payload: String): String {
         web.requestFocus()
-        val before = keyCount()
-        // Route 1: a real KeyEvent per character (the Phase-5 route that worked on EditText).
         var handled = 0
         for (ch in payload) {
             val code = charToKeyCode(ch)
+            val shift = ch.isUpperCase() || ch in "!@#$%^&*()_+{}|:\"<>?~"
+            val meta = if (shift) android.view.KeyEvent.META_SHIFT_ON else 0
             val ev = android.view.KeyEvent(
                 android.os.SystemClock.uptimeMillis(), android.os.SystemClock.uptimeMillis(),
-                android.view.KeyEvent.ACTION_DOWN, code, 0, 0, -1, 0, 0,
+                android.view.KeyEvent.ACTION_DOWN, code, 0, meta, -1, 0, 0,
                 android.view.InputDevice.SOURCE_KEYBOARD
             )
             if (web.dispatchKeyEvent(ev)) handled++
+            val up = android.view.KeyEvent(
+                android.os.SystemClock.uptimeMillis(), android.os.SystemClock.uptimeMillis(),
+                android.view.KeyEvent.ACTION_UP, code, 0, meta, -1, 0, 0,
+                android.view.InputDevice.SOURCE_KEYBOARD
+            )
+            web.dispatchKeyEvent(up)
         }
-        // Route 2: the input connection (what the IME would do) - the classic WebView route.
         val ic = android.view.inputmethod.BaseInputConnection(web, true)
         ic.commitText(payload, 1)
-        val after = keyCount()
-        val route = when {
-            after > before -> "keyevent"
-            handled > 0 -> "edittext-ime"
-            else -> "commit"
+        web.evaluateJavascript(
+            "document.execCommand('insertText',false," + org.json.JSONObject.quote(payload) + ")",
+            null
+        )
+        web.evaluateJavascript("(window.__udKeys||[]).length") { v ->
+            android.util.Log.i("Phase6", "B039 probe payload=\"$payload\" handled=$handled keydowns=$v")
         }
-        android.util.Log.i("Phase6", "B039 probe payload=\"$payload\" keydowns=$before->$after handled=$handled route=$route")
-        return route
+        return "dispatch=$handled"
     }
 
     private var cachedKeys = 0
@@ -329,6 +394,73 @@ class BrowserView(context: Context) : LinearLayout(context) {
         ch == ':' -> android.view.KeyEvent.KEYCODE_SEMICOLON
         ch == '-' -> android.view.KeyEvent.KEYCODE_MINUS
         else -> 0
+    }
+}
+
+/**
+ * B-060: the address bar's URL rule, pure so it is unit-tested. A scheme is added only on
+ * Go, and only when the text has none (the platform blocks cleartext http for targetSdk 36,
+ * so a bare host becomes https). `http://` typed by the user is kept for loopback URLs.
+ */
+object BrowserUrl {
+    fun normalize(typed: String): String {
+        val t = typed.trim()
+        if (t.isEmpty()) return ""
+        return when {
+            t.contains("://") -> t
+            t.startsWith("about:") || t.startsWith("data:") -> t
+            else -> "https://$t"
+        }
+    }
+}
+
+/**
+ * B-039: a WebView that reports window focus. Printable characters go through Chromium's own
+ * input connection (the IME route an EditContext accepts); everything else stays a real key
+ * event so shortcuts keep working.
+ */
+class KeyWebView(context: Context) : WebView(context) {
+
+    /** The keycode whose down we sent through the input connection, so its up is swallowed. */
+    private var lastCommitted = -1
+
+    override fun hasWindowFocus(): Boolean = true
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(true)
+        isFocusable = true
+        isFocusableInTouchMode = true
+        if (!isFocused) requestFocus()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // B-039 (found 19:12): VS Code 1.141's editor is an EditContext, not a textarea. Raw
+        // keydowns reach the page (Ctrl+P opens Quick Open, the New File box takes text), but
+        // Monaco's editor never inserts a character from them; the IME route (commitText) is
+        // what an EditContext accepts. So printable characters go through the input connection
+        // only - never both, or a textarea would get each char twice - while Ctrl/Alt
+        // shortcuts, Enter, Backspace, Tab and arrows stay real key events (Ctrl+S, Ctrl+P
+        // keep working).
+        if (event.action == KeyEvent.ACTION_UP && event.keyCode == lastCommitted) {
+            lastCommitted = -1
+            return true
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && !event.isCtrlPressed && !event.isAltPressed) {
+            val ch = Phase5Protocol.keyCodeToChar(event.keyCode, event.metaState)
+            if (ch != '\u0000') {
+                // Chromium's connection, not a BaseInputConnection: only this one knows the
+                // focused DOM editable (or EditContext). The old override returned a plain
+                // BaseInputConnection, which cannot reach the page at all.
+                val ic = super.onCreateInputConnection(android.view.inputmethod.EditorInfo())
+                if (ic != null && ic.commitText(ch.toString(), 1)) {
+                    lastCommitted = event.keyCode
+                    android.util.Log.i("Phase6", "B039 route=ime ch='$ch' ic=${ic.javaClass.simpleName}")
+                    return true
+                }
+                android.util.Log.w("Phase6", "B039 ime refused ch='$ch' ic=${ic?.javaClass?.simpleName}")
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 }
 

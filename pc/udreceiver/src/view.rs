@@ -372,12 +372,10 @@ fn now_us64() -> i64 {
 
 fn scaled(shared: &Shared, x: i32, y: i32) -> (i32, i32) {
     let (cw, ch) = shared.client();
-    // The video is letterboxed inside the client (the same fit() the blit uses), so pointer
-    // coordinates must be mapped through that rect - mapping through the whole client area
-    // would land ~5% low for a 16:10 window showing a 16:9 desktop.
-    let (vw, vh) = fit(phase5::DESKTOP_W, phase5::DESKTOP_H, cw, ch);
-    let (ox, oy) = ((cw - vw) / 2, (ch - vh) / 2);
-    phase5::scale_to_desktop(x - ox, y - oy, vw, vh, phase5::DESKTOP_W, phase5::DESKTOP_H)
+    // B-064: the same letterbox math the blit uses, now pure and unit-tested in phase5.rs
+    // (`scale_client_to_desktop`). The old inline copy was correct, but the round's clicks
+    // were aimed with video-rectangle pixels, which skipped the bar offset.
+    phase5::scale_client_to_desktop(x, y, cw, ch)
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -446,6 +444,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let vk = (wparam.0 & 0xFF) as u8;
             let scan = ((lparam.0 >> 16) & 0xFF) as u8;
             let down = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN);
+            if down && std::env::var_os("UD_KEYLOG").is_some() {
+                // Hop 1 of the B-062 trace: what the PC window actually received and sent.
+                eprintln!("p5pc key vk=0x{vk:02x} scan=0x{scan:02x} mods=0x{:02x}", mods());
+            }
             if vk == 0x1B && down {
                 shared.running.store(false, Ordering::SeqCst);
                 shared.release_all.store(1, Ordering::SeqCst);

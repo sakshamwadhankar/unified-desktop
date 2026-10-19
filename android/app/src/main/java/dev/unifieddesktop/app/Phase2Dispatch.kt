@@ -8,16 +8,21 @@ import android.content.Context
  * on its own thread; results go to files/phase2/{wine,x11}.log.
  */
 object Phase2Dispatch {
-    /** Run one action string, e.g. "wineboot", "npp", "type:hello world". */
+    /** Run one action string, e.g. "wineboot", "npp", "type:hello world", "capture x11now". */
     fun runX(ctx: Context, what: String) {
         Thread({
             try {
-                val arg = what.substringAfter(':', "")
-                when (what.substringBefore(':')) {
+                // B-064: split only the action name. Both "capture:x" and "capture x" must
+                // work, and an argument may itself contain ':' (e.g. "runbin:direct:...").
+                val cut = what.indexOfFirst { it == ':' || it == ' ' }
+                val action = if (cut < 0) what else what.substring(0, cut)
+                val arg = if (cut < 0) "" else what.substring(cut + 1)
+                when (action) {
                     "tmp" -> Phase2X11.proveNoTmp()
                     "xvfb" -> { Phase2X11.proveNoTmp(); Phase2X11.startXvfb(ctx) }
                     "capture" -> if (Phase2X11.captureX11(ctx, arg.ifEmpty { "x11.png" }) == null) return@Thread
                     "pattern" -> if (Phase2X11.capturePattern(ctx, arg.ifEmpty { "pattern.png" }) == null) return@Thread
+                    "place" -> Phase2X11.placeWindows()
                     "xeyes" -> {
                         Phase2X11.ensureXvfb(ctx)
                         val xb = java.io.File(Phase2Data.rootfsDir(ctx), "usr/bin/xeyes")
@@ -31,6 +36,8 @@ object Phase2Dispatch {
                             name = "phase2-xeyes-err"
                         }.start()
                         Thread.sleep(3000)
+                        // B-063: put Notepad++ and xeyes side by side (no window manager).
+                        Phase2X11.placeWindows()
                         Phase2X11.captureX11(ctx, arg.ifEmpty { "xeyes.png" })
                     }
                     "wineboot" -> Phase2Wine.boot(ctx, arg.ifEmpty { null })

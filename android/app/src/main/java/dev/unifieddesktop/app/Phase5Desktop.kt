@@ -35,7 +35,7 @@ class Phase5Desktop(private val activity: Activity) {
     companion object {
         const val W = Phase5Protocol.DESKTOP_W
         const val H = Phase5Protocol.DESKTOP_H
-        const val DPI = 240
+        const val DPI = 160
         const val TAG = "Phase5"
 
         /** Key-down flash duration; long enough for the PC's PrintWindow poll to see it. */
@@ -99,7 +99,14 @@ class Phase5Desktop(private val activity: Activity) {
         while (SystemClock.uptimeMillis() < deadline) {
             try {
                 val p = Presentation(activity, d.display)
-                p.setContentView(ShellRoot(activity).also { desktop = it })
+                // The shell must render at the desktop's own scale (1.0): building it with the
+                // activity context uses the phone's density (up to 480 = 3x), which makes every
+                // sp-sized part (taskbar, WebView, code-server) 2-3x too large on a 1920x1080
+                // PC-size desktop (owner report + ph-vscode-max1.png, 2026-10-19).
+                val config = android.content.res.Configuration(activity.resources.configuration)
+                config.densityDpi = DPI
+                val shellContext = activity.createConfigurationContext(config)
+                p.setContentView(ShellRoot(shellContext).also { desktop = it })
                 p.setOnDismissListener { running = false }
                 p.show()
                 pres = p

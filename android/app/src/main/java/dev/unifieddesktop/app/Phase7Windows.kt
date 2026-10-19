@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
@@ -36,8 +35,30 @@ class X11WindowContent(context: Context) :
     private var frames = 0L
     private var lastGrabMs = 0L
 
+    // B-062: X11 socket I/O must not run on the main thread (NetworkOnMainThreadException).
+    // One worker keeps pointer and key events in the order the PC produced them.
+    @Volatile private var input: java.util.concurrent.ExecutorService? = null
+    private val inputLock = Any()
+    // One X11 socket: the frame loop and the input worker both use it, so every request/reply
+    // pair must be serialized (interleaved reads desync GetImage vs GetKeyboardMapping).
+    private val xio = Any()
+
     init {
         addView(image, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    private fun submit(block: () -> Unit): Boolean {
+        val ex = synchronized(inputLock) {
+            input ?: java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+                Thread(r, "p7-x11-input").apply { isDaemon = true }
+            }.also { input = it }
+        }
+        return try {
+            ex.execute(block)
+            true
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     override fun onAttachedToWindow() {
@@ -49,6 +70,10 @@ class X11WindowContent(context: Context) :
 
     override fun onDetachedFromWindow() {
         running = false
+        synchronized(inputLock) {
+            input?.shutdownNow()
+            input = null
+        }
         super.onDetachedFromWindow()
     }
 
@@ -61,6 +86,9 @@ class X11WindowContent(context: Context) :
             x.initKeyboard()
             x11 = x
             P7Log.say(context, "P7X11 connected")
+            // B-063: side-by-side placement even though there is no window manager. Runs on
+            // its own connection; harmless when the guest apps are not up yet.
+            P7Log.say(context, "P7X11 place ${Phase2X11.placeWindows()}")
         } catch (t: Throwable) {
             P7Log.say(context, "P7X11 connect failed: $t")
             running = false
@@ -69,7 +97,7 @@ class X11WindowContent(context: Context) :
         while (running) {
             val t0 = SystemClock.elapsedRealtime()
             try {
-                val bmp = x.getImage()
+                val bmp = synchronized(xio) { x.getImage() }
                 frames++
                 main.post { image.setImageBitmap(bmp) }
             } catch (t: Throwable) {
@@ -95,18 +123,23 @@ class X11WindowContent(context: Context) :
         val x = x11 ?: return false
         val cx = gx(event.x.toInt()).coerceIn(0, W - 1)
         val cy = gy(event.y.toInt()).coerceIn(0, H - 1)
-        try {
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { x.motion(cx, cy); x.button(1, true) }
-                MotionEvent.ACTION_MOVE -> x.motion(cx, cy)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { x.motion(cx, cy); x.button(1, false) }
-                else -> return false
+        val action = event.actionMasked
+        if (action != MotionEvent.ACTION_DOWN && action != MotionEvent.ACTION_MOVE &&
+            action != MotionEvent.ACTION_UP && action != MotionEvent.ACTION_CANCEL
+        ) return false
+        return submit {
+            try {
+                synchronized(xio) {
+                    when (action) {
+                        MotionEvent.ACTION_DOWN -> { x.motion(cx, cy); x.button(1, true) }
+                        MotionEvent.ACTION_MOVE -> x.motion(cx, cy)
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { x.motion(cx, cy); x.button(1, false) }
+                    }
+                }
+            } catch (t: Throwable) {
+                P7Log.say(context, "P7X11 input failed: $t")
             }
-        } catch (t: Throwable) {
-            P7Log.say(context, "P7X11 input failed: $t")
-            return false
         }
-        return true
     }
 
     override fun mouseMove(x: Int, y: Int) { }
@@ -118,11 +151,13 @@ class X11WindowContent(context: Context) :
 
     override fun mouseWheel(delta: Int, x: Int, y: Int) {
         val client = x11 ?: return
-        try {
-            val btn = if (delta < 0) 4 else 5 // X: button 4/5 = wheel up/down
-            repeat(3) { client.button(btn, true); client.button(btn, false) }
-        } catch (t: Throwable) {
-            P7Log.say(context, "P7X11 wheel failed: $t")
+        val btn = if (delta < 0) 4 else 5 // X: button 4/5 = wheel up/down
+        submit {
+            try {
+                synchronized(xio) { repeat(3) { client.button(btn, true); client.button(btn, false) } }
+            } catch (t: Throwable) {
+                P7Log.say(context, "P7X11 wheel failed: $t")
+            }
         }
     }
 
@@ -133,49 +168,55 @@ class X11WindowContent(context: Context) :
      * Notepad++/xeyes would receive from a phone keyboard, so it maps directly to an X keysym.
      */
     override fun key(down: Boolean, keyCode: Int, scan: Int, meta: Int): Boolean {
-        val client = x11 ?: return false
-        val ch = charFor(keyCode, meta)
-        if (ch == '\u0000') {
-            // No printable char (arrows, modifiers, Enter handled below): act on the few keys
-            // that matter for a text editor.
-            val sym = when (keyCode) {
-                KeyEvent.KEYCODE_ENTER -> 0xFF0D
-                KeyEvent.KEYCODE_DEL -> 0xFF08
-                KeyEvent.KEYCODE_FORWARD_DEL -> 0xFFFF
-                KeyEvent.KEYCODE_TAB -> 0xFF09
-                KeyEvent.KEYCODE_ESCAPE -> 0xFF1B
-                KeyEvent.KEYCODE_DPAD_LEFT -> 0xFF51
-                KeyEvent.KEYCODE_DPAD_UP -> 0xFF52
-                KeyEvent.KEYCODE_DPAD_RIGHT -> 0xFF53
-                KeyEvent.KEYCODE_DPAD_DOWN -> 0xFF54
-                KeyEvent.KEYCODE_SPACE -> 0x20
-                else -> return false
-            }
-            return fire(client, sym, down)
+        val client = x11 ?: run {
+            if (down) P7Log.say(context, "P7X11 key code=$keyCode dropped: no X11 connection")
+            return false
         }
-        val sym = ch.code
-        return fire(client, sym, down)
+        // Pure mapping (unit-tested in Phase7X11KeysTest): printable char -> its code point,
+        // plus the handful of control keys a text editor needs. The server keymap then supplies
+        // the X keycode and whether Shift must be held.
+        val sym = X11Keys.keysym(keyCode, meta)
+        if (sym == null) {
+            if (down) P7Log.say(context, "P7X11 key code=$keyCode meta=$meta no keysym")
+            return false
+        }
+        // B-062: XTEST key I/O on the input worker (main thread would throw
+        // NetworkOnMainThreadException before the request leaves the app).
+        val queued = submit { fire(client, sym, down) }
+        if (down) {
+            P7Log.say(
+                context,
+                "P7X11 key code=$keyCode meta=$meta char='${charFor(keyCode, meta)}' " +
+                    "sym=0x${sym.toString(16)} queued=$queued"
+            )
+        }
+        return queued
     }
 
     private fun fire(client: Phase2X11.X11, keysym: Int, down: Boolean): Boolean {
-        val kc = client.keycodeFor(keysym) ?: return false
         return try {
-            val evType = if (down) 2 else 3 // KeyPress / KeyRelease
-            if (kc.second) client.fakeKey(evType, client.shiftCode)
-            client.fakeKey(evType, kc.first)
-            true
+            synchronized(xio) {
+                val kc = client.keycodeFor(keysym)
+                if (kc == null) {
+                    if (down) P7Log.say(context, "P7X11 no keycode for sym=0x${keysym.toString(16)}")
+                    return false
+                }
+                val evType = if (down) 2 else 3 // KeyPress / KeyRelease
+                // Press Shift before the key on the way down, release the key before Shift on
+                // the way up, exactly like a real keyboard.
+                if (down && kc.second) client.fakeKey(evType, client.shiftCode)
+                client.fakeKey(evType, kc.first)
+                if (!down && kc.second) client.fakeKey(evType, client.shiftCode)
+                true
+            }
         } catch (t: Throwable) {
             P7Log.say(context, "P7X11 key failed: $t")
             false
         }
     }
 
-    /** The character a phone keyboard would produce for this keycode+meta, or NUL. */
-    private fun charFor(keyCode: Int, meta: Int): Char {
-        val ev = KeyEvent(0L, 0L, KeyEvent.ACTION_DOWN, keyCode, 0, meta)
-        val c = ev.unicodeChar
-        return if (c == 0) '\u0000' else c.toChar()
-    }
+    /** The character a phone keyboard would produce for this keycode+meta (pure mapping). */
+    private fun charFor(keyCode: Int, meta: Int): Char = Phase5Protocol.keyCodeToChar(keyCode, meta)
 
     override fun contentText(): String = ""
 

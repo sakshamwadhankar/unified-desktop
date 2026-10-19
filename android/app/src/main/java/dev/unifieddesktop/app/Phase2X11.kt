@@ -619,6 +619,62 @@ object Phase2X11 {
             return null
         }
 
+        // ---------------- window placement (B-063) ----------------
+
+        /** Children of the root window (top-levels), in stacking order (bottom first). */
+        fun queryTree(): List<Int> {
+            put(15); put(0); putShort(2)
+            putInt(root)
+            out.flush()
+            val rep = readFully(32)
+            require(rep[0].toInt() and 0xff == 1) { "QueryTree failed type=${rep[0]}" }
+            val n = (rep[16].toInt() and 0xff) or ((rep[17].toInt() and 0xff) shl 8)
+            val data = readFully(n * 4)
+            val bb = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+            return ArrayList<Int>(n).apply { for (i in 0 until n) add(bb.getInt(i * 4)) }
+        }
+
+        /** InternAtom; needed to read WM_CLASS. */
+        fun internAtom(name: String): Int {
+            val b = name.toByteArray(Charsets.US_ASCII)
+            put(16); put(0); putShort(2 + pad4(b.size) / 4)
+            putShort(b.size); putShort(0)
+            out.write(b)
+            repeat(pad4(b.size) - b.size) { put(0) }
+            out.flush()
+            val rep = readFully(32)
+            require(rep[0].toInt() and 0xff == 1) { "InternAtom failed type=${rep[0]}" }
+            return ByteBuffer.wrap(rep, 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        }
+
+        /** GetProperty (format 8 only); null when the property is unset. */
+        fun getProperty8(window: Int, atom: Int, maxLongs: Int = 64): String? {
+            put(20); put(0); putShort(6)
+            putInt(window); putInt(atom); putInt(0) // AnyPropertyType
+            putInt(0); putInt(maxLongs)
+            out.flush()
+            val rep = readFully(32)
+            require(rep[0].toInt() and 0xff == 1) { "GetProperty failed type=${rep[0]}" }
+            val format = rep[1].toInt() and 0xff
+            val len = ByteBuffer.wrap(rep, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int * 4
+            val type = ByteBuffer.wrap(rep, 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            val valueLen = ByteBuffer.wrap(rep, 16, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            val data = readFully(len)
+            if (type == 0 || format != 8) return null
+            return String(data, 0, valueLen.coerceAtMost(data.size), Charsets.ISO_8859_1)
+        }
+
+        /** ConfigureWindow: move/resize and optionally raise (stack-mode Above). */
+        fun configureWindow(window: Int, x: Int, y: Int, w: Int, h: Int, raise: Boolean) {
+            val values = if (raise) 5 else 4
+            put(12); put(0); putShort(3 + values)
+            putInt(window)
+            putShort(1 or 2 or 4 or 8 or (if (raise) 64 else 0)); putShort(0)
+            putInt(x); putInt(y); putInt(w); putInt(h)
+            if (raise) putInt(0) // StackMode.Above
+            out.flush()
+        }
+
         private fun fakeInput(evtype: Int, detail: Int) {
             // XTestFakeInput is 36 bytes (spec length 1+(1*8)=9 words): header +
             // type/detail/unused + delay + root + 8 unused + x/y + 8 unused. A
@@ -779,5 +835,56 @@ object Phase2X11 {
         true
     } catch (t: Throwable) {
         say("XTEST_FAIL $t"); writeLog(ctx); false
+    }
+
+    /**
+     * B-063: there is no window manager, so a fresh Notepad++ (Wine) maps full-screen and
+     * puts the later xeyes under it. Read the root's children, classify them by WM_CLASS and
+     * place them with ConfigureWindow: Notepad++ left, xeyes right (raised). Unknown
+     * top-levels are treated as Notepad++-sized frames; the last unknown is used as the
+     * right-hand window if no xeyes is found at all.
+     */
+    fun placeWindows(): String {
+        var result = "none"
+        try {
+            val x = X11.connect()
+            try {
+                val atom = x.internAtom("WM_CLASS")
+                val kids = x.queryTree()
+                val npp = ArrayList<Int>()
+                val eyes = ArrayList<Int>()
+                val other = ArrayList<Int>()
+                val classes = StringBuilder()
+                for (id in kids) {
+                    val cls = x.getProperty8(id, atom)?.replace('\u0000', ' ')?.trim() ?: ""
+                    classes.append(id).append(':').append(cls.ifEmpty { "?" }).append(' ')
+                    when {
+                        cls.contains("notepad", ignoreCase = true) -> npp.add(id)
+                        cls.contains("xeyes", ignoreCase = true) -> eyes.add(id)
+                        else -> other.add(id)
+                    }
+                }
+                for (id in npp) x.configureWindow(id, 0, 0, 880, 720, false)
+                for (id in other) x.configureWindow(id, 0, 0, 880, 720, false)
+                when {
+                    eyes.isNotEmpty() -> {
+                        x.configureWindow(eyes.last(), 900, 180, 360, 360, true)
+                        result = "npp=${npp.size} xeyes=${eyes.size} ids=[${classes.toString().trim()}]"
+                    }
+                    other.size >= 2 -> {
+                        x.configureWindow(other.last(), 900, 180, 360, 360, true)
+                        result = "npp=${npp.size} xeyes=0 guessed=${other.last()} ids=[${classes.toString().trim()}]"
+                    }
+                    else -> result = "npp=${npp.size} xeyes=0 kids=${kids.size} ids=[${classes.toString().trim()}]"
+                }
+                say("P7X11 place $result")
+            } finally {
+                x.close()
+            }
+        } catch (t: Throwable) {
+            say("P7X11 place failed: $t")
+            result = "failed: $t"
+        }
+        return result
     }
 }

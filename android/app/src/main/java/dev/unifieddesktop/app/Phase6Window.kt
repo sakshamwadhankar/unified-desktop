@@ -37,11 +37,13 @@ class ShellWindowView(
     context: Context,
     val win: ShellModel.Win,
     val app: ShellRoot.App,
+    val guest: String? = null,
 ) : FrameLayout(context) {
 
     companion object {
         const val BTN = 34          // title-bar button width, desktop pixels
         const val TITLE_H = ShellRoot.TITLE_H
+        const val DEFAULT_GUEST = "com.google.android.apps.tasks"
     }
 
     enum class Hit { MINIMIZE, MAXIMIZE, CLOSE, TITLE, NONE }
@@ -61,7 +63,7 @@ class ShellWindowView(
         color = Color.WHITE; textSize = 20f; typeface = Typeface.DEFAULT_BOLD
     }
 
-    val content: View = buildContent(context, app)
+    val content: View = buildContent(context, app, guest)
 
     private var captureEdges = -1      // -1 = not capturing; 0 = move; else resize edges
     private var lastX = 0
@@ -74,12 +76,14 @@ class ShellWindowView(
         })
     }
 
-    private fun buildContent(context: Context, app: ShellRoot.App): View = when (app) {
+    private fun buildContent(context: Context, app: ShellRoot.App, guest: String?): View = when (app) {
         ShellRoot.App.FILES -> FilesView(context)
         ShellRoot.App.BROWSER -> BrowserView(context)
         ShellRoot.App.SETTINGS -> SettingsView(context)
         ShellRoot.App.TEST -> TestWindowContent(context)
         ShellRoot.App.X11 -> X11WindowContent(context)
+        ShellRoot.App.VSCODE -> BrowserView(context, codeServer = true)
+        ShellRoot.App.ANDROID -> AndroidWindowContent(context, guest ?: DEFAULT_GUEST)
     }
 
     /** Which title-bar button a window-local x lands on. */

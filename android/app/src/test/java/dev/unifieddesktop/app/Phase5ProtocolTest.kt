@@ -178,6 +178,49 @@ class Phase5ProtocolTest {
         )
     }
 
+    /**
+     * B-059: a PC key arrives as (VK, mods). Shifted punctuation must survive the whole
+     * mapping VK -> Android keycode -> character; the old harness lost ':' on the wire, so
+     * this test pins the mapping itself, independent of the harness.
+     */
+    @Test
+    fun shiftedPunctuationVkToChar() {
+        fun ch(vk: Int, mods: Int): Char =
+            P.keyCodeToChar(P.vkToKeycode(vk), P.modsToMetaState(mods))
+        val pairs = listOf(
+            0xBA to ';', 0xBB to '=', 0xBC to ',', 0xBD to '-', 0xBE to '.',
+            0xBF to '/', 0xC0 to '`', 0xDB to '[', 0xDC to '\\', 0xDD to ']', 0xDE to '\'',
+        )
+        for ((vk, plain) in pairs) {
+            assertEquals("plain VK 0x${vk.toString(16)}", plain, ch(vk, 0))
+            assertEquals(
+                "shifted VK 0x${vk.toString(16)}",
+                when (vk) {
+                    0xBA -> ':'; 0xBB -> '+'; 0xBC -> '<'; 0xBD -> '_'; 0xBE -> '>'
+                    0xBF -> '?'; 0xC0 -> '~'; 0xDB -> '{'; 0xDC -> '|'; 0xDD -> '}'
+                    else -> '"'
+                },
+                ch(vk, P.MOD_SHIFT)
+            )
+        }
+        assertEquals('1', ch(0x31, 0))
+        assertEquals('!', ch(0x31, P.MOD_SHIFT))
+        assertEquals('!', ch(0x31, P.MOD_SHIFT or P.MOD_CTRL))
+        assertEquals('@', ch(0x32, P.MOD_SHIFT))
+        assertEquals('#', ch(0x33, P.MOD_SHIFT))
+        assertEquals('$', ch(0x34, P.MOD_SHIFT))
+        assertEquals('%', ch(0x35, P.MOD_SHIFT))
+        assertEquals('^', ch(0x36, P.MOD_SHIFT))
+        assertEquals('&', ch(0x37, P.MOD_SHIFT))
+        assertEquals('*', ch(0x38, P.MOD_SHIFT))
+        assertEquals('(', ch(0x39, P.MOD_SHIFT))
+        assertEquals(')', ch(0x30, P.MOD_SHIFT))
+        assertEquals('a', ch(0x41, 0))
+        assertEquals('A', ch(0x41, P.MOD_SHIFT))
+        assertEquals(' ', ch(0x20, 0))
+        assertEquals('\u0000', P.keyCodeToChar(66, 0)) // Enter is not a typed char
+    }
+
     // ---------------------------------------------------------------- chunk assembly
 
     @Test

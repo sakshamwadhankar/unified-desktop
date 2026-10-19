@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference
  *   p6:newfolder               Files window: create a folder, then list
  *   p6:rename:<name>           Files window: rename the selected entry
  *   p6:url:<url>               Browser: set the address bar and load
+ *   p6:vscode[:folder]         VS Code window: log in to code-server, open the folder
  *   p6:probe:<text>            B-039 keyboard-route probe into the live page
  *   p6:keys                    the page's recorded keydown list (DOM probe)
  *   p6:settings                the Settings window's text
@@ -56,16 +57,26 @@ object Phase6Dispatch {
         val arg = if (parts.size > 1) parts[1] else ""
         return when (what) {
             "shell" -> s.stats()
+            // Per-window geometry, for the real-mouse tests (B-058/B-064b): the harness answers
+            // with every window's id/title/rect so a drag can be measured, not eyeballed.
+            "rects" -> s.model.all().joinToString(" ") { w ->
+                "id=${w.id} title=\"${w.title}\" rect=${w.rect().joinToString(",")} focused=${w.id == s.model.focusedId}"
+            }
             "open" -> {
-                val app = when (arg.lowercase()) {
-                    "files" -> ShellRoot.App.FILES
-                    "browser" -> ShellRoot.App.BROWSER
-                    "settings" -> ShellRoot.App.SETTINGS
-                    "test" -> ShellRoot.App.TEST
-                    "x11" -> ShellRoot.App.X11
+                val app = when {
+                    arg.lowercase() == "files" -> ShellRoot.App.FILES
+                    arg.lowercase() == "browser" -> ShellRoot.App.BROWSER
+                    arg.lowercase() == "settings" -> ShellRoot.App.SETTINGS
+                    arg.lowercase() == "test" -> ShellRoot.App.TEST
+                    arg.lowercase() == "x11" -> ShellRoot.App.X11
+                    arg.lowercase() == "vscode" -> ShellRoot.App.VSCODE
+                    arg.lowercase().startsWith("android") -> ShellRoot.App.ANDROID
                     else -> return "unknown app [$arg]"
                 }
-                val f = s.openApp(app)
+                // "open:android" or "open:android <package>"; the guest app's package is the
+                // argument after the app name.
+                val guest = arg.substringAfter(' ', "").trim().ifEmpty { null }
+                val f = s.openApp(app, guest)
                 "opened ${app.title()} id=${f.win.id} rect=${f.win.rect().joinToString(",")} ${s.stats()}"
             }
             "menu" -> { s.toggleStartMenu(); "startMenu=${s.startMenuOpen()}" }
@@ -77,6 +88,9 @@ object Phase6Dispatch {
             "max" -> {
                 val id = s.model.focusedId ?: return "nothing focused"
                 s.model.toggleMaximize(id)
+                // B-063 harness: the model rect alone is not enough; the frame must be laid out
+                // again or the window keeps its old on-screen size (found 18:35).
+                s.syncViews()
                 val w = s.model.byId(id)!!
                 "maximized=${w.maximized} rect=${w.rect().joinToString(",")}"
             }
@@ -88,6 +102,14 @@ object Phase6Dispatch {
                 b.address.setText(arg)
                 b.go()
                 "url=$arg ${b.pageText()}"
+            }
+            // B-065: open (or re-open) the VS Code window and log in to code-server.
+            "vscode" -> {
+                val f = s.openApp(ShellRoot.App.VSCODE)
+                val b = f.content as BrowserView
+                val folder = if (arg.isNotEmpty()) arg
+                    else java.io.File(Phase3Native.dir(ctx), "workspace").absolutePath
+                "vscode ${b.openCodeServer(folder)}"
             }
             "probe" -> {
                 val b = browser(s)
@@ -101,6 +123,37 @@ object Phase6Dispatch {
                 b.keysSeen { v -> ref.set(v); l.countDown() }
                 l.await(3, java.util.concurrent.TimeUnit.SECONDS)
                 "pageKeys=${ref.get()}"
+            }
+            // Run JavaScript in the VS Code/Browser page and log the result. Debug-only, used
+            // to find where DOM focus is (Monaco's hidden textarea) when a key event reaches
+            // the WebView but no editor accepts it (B-039 trace, 19:0x).
+            "js" -> {
+                val f = s.openApp(ShellRoot.App.VSCODE)
+                val b = f.content as? BrowserView ?: return "window is not a browser"
+                b.web.evaluateJavascript(arg) { v -> android.util.Log.i("Phase6", "JS ${v}") }
+                "js sent"
+            }
+            // Fixed JS, no quoting through the device shell: list the page's textareas, then
+            // focus Monaco's hidden input so PC keys land in the editor, not in the chat box.
+            "jsareas" -> {
+                val f = s.openApp(ShellRoot.App.VSCODE)
+                val b = f.content as? BrowserView ?: return "window is not a browser"
+                b.web.evaluateJavascript(
+                    "Array.from(document.querySelectorAll('textarea')).map(function(t){" +
+                        "return t.className}).join('|')"
+                ) { v -> android.util.Log.i("Phase6", "JSAREAS ${v}") }
+                "jsareas sent"
+            }
+            "jsfocus" -> {
+                val f = s.openApp(ShellRoot.App.VSCODE)
+                val b = f.content as? BrowserView ?: return "window is not a browser"
+                b.web.evaluateJavascript(
+                    "(function(){var t=document.querySelectorAll('textarea');var n=0;" +
+                        "for(var i=0;i<t.length;i++){var c=t[i].className||'';" +
+                        "if(c.indexOf('inputarea')>=0||c.indexOf('monaco')>=0){t[i].focus();n++;}}" +
+                        "return n+':'+(document.activeElement.className||document.activeElement.tagName);})()"
+                ) { v -> android.util.Log.i("Phase6", "JSFOCUS ${v}") }
+                "jsfocus sent"
             }
             "settings" -> SettingsDispatch.text().replace("\n", " | ")
             // Draw the live desktop surface (the real ShellRoot view hierarchy, exactly what the
