@@ -83,6 +83,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::phase5::{self, InputEvent, VideoFrame};
 use crate::protocol::{Message, PriorityWriter, CH_CONTROL, CH_INPUT, CH_VIDEO};
 
+/// B-067: a Windows socket read can surface a timed-out or still-pending operation as a raw OS
+/// error instead of WouldBlock/TimedOut (997 = ERROR_IO_PENDING, 10060 = WSAETIMEDOUT). The
+/// view's read loop treats those as "no data this tick" (it checks again next iteration);
+/// every other error stays fatal.
+fn is_transient_read(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    ) || matches!(e.raw_os_error(), Some(997) | Some(10060))
+}
+
 const TAG: &str = "p5pc";
 /// Frames remembered for the latency report (about 7 s at 84 fps).
 const FRAME_RING: usize = 600;
@@ -642,10 +653,7 @@ fn pipeline_loop(
                         pending.extend(msgs);
                         continue;
                     }
-                    Err(e)
-                        if e.kind() == std::io::ErrorKind::WouldBlock
-                            || e.kind() == std::io::ErrorKind::TimedOut =>
-                    {
+                    Err(e) if is_transient_read(&e) => {
                         break;
                     }
                     Err(e) => return Err(format!("read: {e}")),
@@ -1572,5 +1580,18 @@ mod tests {
         );
         assert_eq!(classify_output_code(-1), OutputOutcome::Fatal);
         assert_eq!(classify_output_code(0x8000_4005u32 as i32), OutputOutcome::Fatal);
+    }
+
+    /// B-067: raw Windows timeout/pending codes from a socket read are transient (the loop
+    /// retries); real socket errors stay fatal.
+    #[test]
+    fn transient_read_errors_are_not_fatal() {
+        use std::io::{Error, ErrorKind};
+        assert!(is_transient_read(&Error::from(ErrorKind::WouldBlock)));
+        assert!(is_transient_read(&Error::from(ErrorKind::TimedOut)));
+        assert!(is_transient_read(&Error::from_raw_os_error(997))); // ERROR_IO_PENDING
+        assert!(is_transient_read(&Error::from_raw_os_error(10060))); // WSAETIMEDOUT
+        assert!(!is_transient_read(&Error::from_raw_os_error(10054))); // WSAECONNRESET: fatal
+        assert!(!is_transient_read(&Error::from_raw_os_error(9))); // EBADF: fatal
     }
 }

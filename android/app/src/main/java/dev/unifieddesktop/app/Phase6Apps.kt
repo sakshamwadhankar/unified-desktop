@@ -218,6 +218,9 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     private var pendingFolder: String? = null
 
     val web: WebView = @SuppressLint("SetJavaScriptEnabled") KeyWebView(context).apply {
+        android.util.Log.i("Phase6", "BROWSER density ctx=" +
+            context.resources.displayMetrics.density + " dpi=" +
+            context.resources.displayMetrics.densityDpi)
         setBackgroundColor(Color.WHITE)
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
@@ -423,6 +426,12 @@ class KeyWebView(context: Context) : WebView(context) {
 
     /** The keycode whose down we sent through the input connection, so its up is swallowed. */
     private var lastCommitted = -1
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        android.util.Log.i("Phase6", "WEBVIEW attached density=" +
+            resources.displayMetrics.density + " dpi=" + resources.displayMetrics.densityDpi)
+    }
 
     override fun hasWindowFocus(): Boolean = true
 

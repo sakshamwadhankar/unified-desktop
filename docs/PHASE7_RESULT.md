@@ -32,3 +32,36 @@ Xvfb capture: xeyes visible, NPP `length: 0`), `view4.log` (PC receiver), `gate_
 Not done / skipped this round: items 3, 4 (deferred per manager 15:32, one SKIPS row),
 items 5, 7 and the measurement half of item 8 (SKIPS rows), the Android-window input path
 (guest runs in `:p0`, no view-tree access - SKIPS row).
+
+## Round 3 (2026-10-20 00:43-03:15, phone 2c0f6edc)
+
+Scope (manager prompt): DPI at 1:1 (B-066), the Android window through the Phase-1 B1 route
+(item 3), then ONE gate screenshot and typing/number proofs. Every row is **phone** unless
+it says otherwise.
+
+| Item | What was done | Files | Test | Verified on | Numbers |
+|---|---|---|---|---|---|
+| 1 Start | adb device up, battery 20% charging 35.3->38.2 C, mCallState=0; OEM VirusDialog (B-048) cleared via uiautomator bounds + one tap; link over Wi-Fi (phone 192.168.1.16:47600) | - | - | phone | FreePhysicalMemory 2.9 GB, no emulator |
+| 2b B-066 DPI | shell+WebView at density 1.0 / dpi 160; JS probe devicePixelRatio=1; VS Code readable at 1:1 vs round 2's 3x | Phase5Desktop.kt, Phase6Apps.kt | live JS probe + PC capture | phone | shell density=1.0 dpi=160, capture p7c/i2-now.png |
+| 3 Android window | **Task's own UI renders in a shell window** via the Phase-1 B1 path: window creates the `phase1-owned` VirtualDisplay on its SurfaceView, guest launches normally, GuestPresentationHost moves the activity decor into a Presentation on that display. PC input crosses processes on a same-uid abstract LocalSocket (host window -> guest process; no INJECT_EVENTS, no Accessibility) | AndroidWindowContent.kt, GuestPresentationHost.java | live session + click | **phone** | `P7AND display id=53 900x576 surface=true`, `B1_PRESENTATION_SHOWN guest=...TaskListsActivity display=53 target=900x576`, click `handled=true` |
+| 3b Android input | one click on "Sign in" reached the guest (handled=true) and started the guest's next activity, which the B1 route does not present -> window black | - | - | **phone** | BUGS B-068 |
+| 3c Android typing | not testable: Tasks needs a signed-in account before it shows any text field | - | - | phone (blocked) | SKIPS row |
+| 4 GATE | all four kinds were **open at the same time** (taskbar `s17.png` 02:27, `s19.png` 02:47: Test, Notepad++ + xeyes, VS Code, Android app) but **not in one side-by-side screenshot**: Android went black on reopen (B-070), the NPP window's frame loop had died before Xvfb existed (opened 02:14:30 -> `ECONNREFUSED :6000`; the Xvfb root capture `x11cap2.png` shows Notepad++ + xeyes DO render), the VS Code window stayed blank (code-server started 02:45, after the window), and title-bar drags stopped moving windows (B-071) | - | - | **phone** (partial) | per-kind: Android `s10.png` (02:11) + `B1_PRESENTATION_SHOWN`; Windows/Linux `x11cap2.png` (NPP `length: 27 lines: 2`, xeyes) + round 2 `ph-x11-12.png`; VS Code `i2-now.png` (1:1 on the phone) + round 2 emulator typing |
+| 4b typings | Notepad++ `npp7` not run (no live NPP window); VS Code `code7` **not proven on the phone** (no loaded workbench, no editor target - round-2 emulator proof only); Android `tasks7` impossible (Tasks needs an account) | - | - | phone (blocked) | SKIPS row |
+| 4a numbers | fps over 47 s of continuous window dragging; PSS; process count; phone CPU; battery temp over 45 s | - | VSTAT + dumpsys + top | **phone** | fps 55-61 sustained, **dropped=0**, decode 4.2-5.0 ms, d3d11=true; PSS **197 MB** (197,409 kB), **12** of our processes (app, :black, :p0-:p4, wineserver, Xvfb, notepad++, 2x libnode); app CPU **126%** (~1.6 cores of 8), phone 351-388% busy of 800%; battery **38.2 C** at t0 and t1 (45 s apart), level 22% -> 22% |
+| 5 B-067 | view.rs treats raw 997/10060 as a transient read timeout; survival run with live video | pc/udreceiver/src/view.rs | 44/44 cargo tests | **phone** | view-r7 started 02:09:55 and streamed for **61 min 40 s** (ended 03:11:35, 202,252 frames presented, dropped=0, fps 55-61) - **no 997**. It then exited on a different failure, `read: cannot decrypt peer's message` (BUGS B-072), so B-067's own symptom did not recur in 61 min. |
+| 6 Gates | Android and Rust gates | - | gradle + cargo | code-only | `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` -> BUILD SUCCESSFUL in 37s (101 tasks); `cargo build --release` ok; `cargo test --release` **44 passed, 0 failed**; `cargo clippy --all-targets` clean (only the pre-existing workspace-profile note) |
+
+GATE (phone): **all four window kinds were open at once, but not in one side-by-side
+screenshot**. The phase-7 gate itself (one screenshot of Android + Windows + Linux + VS Code
+tiled with their content, typed into) is therefore **not met**.
+
+Not done this round: VS Code content (window blank, code-server started too late), Notepad++
+content in the shell window (X11 loop started before Xvfb), `code7`/`npp7` typing proofs
+(no live text target), Tasks typing (no account), closing a shell window with its X button
+(clicks counted, window stayed; worked around by an app restart).
+
+Evidence (`C:\\Users\\Asus\\AppData\\Local\\Temp\\opencode\\p7c`): `s10.png` (Tasks UI in
+the shell window), `s12.png`/`s17.png`/`s18.png` (cascaded windows, VS Code blank),
+`x11cap2.png` (X11 root: Notepad++ + xeyes do render in Xvfb), `view-r7.log` (55-61 fps,
+dropped=0), `view-r6.err`/`view-r7.log` (B-069), `ui3.xml` (B-048 dialog).

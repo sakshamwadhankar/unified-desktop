@@ -7,6 +7,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.hardware.display.DisplayManager;
+import android.net.LocalServerSocket;
+import android.net.LocalSocket;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
@@ -55,12 +57,117 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         return new java.util.ArrayList<>(GUESTS);
     }
     private static final String TAG = "Phase1-B1";
+    /** The display the shell's Android window owns; the guest decor is presented onto it. */
+    static final String DISPLAY_NAME = "phase1-owned";
     private static final int TARGET_WIDTH = 1280;
     private static final int TARGET_HEIGHT = 720;
     private static final int TARGET_DENSITY_DPI = 320;
     static final String PREFS = "phase1-path-b";
     static final String DISPLAY_ID = "display_id";
     private Presentation presentation;
+    /** The live container holding the reparented guest decor, while the Presentation shows.
+     * The shell's Android window dispatches its own PC input here (in-process, D3/D5-safe). */
+    private static volatile View liveContent;
+
+    static boolean dispatchGuestTouch(int action, float x, float y) {
+        View content = liveContent;
+        if (content == null) return false;
+        long now = SystemClock.uptimeMillis();
+        MotionEvent ev = MotionEvent.obtain(now, now, action, x, y, 0);
+        ev.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+        try {
+            return content.dispatchTouchEvent(ev);
+        } finally {
+            ev.recycle();
+        }
+    }
+
+    static boolean dispatchGuestKey(int keyCode, boolean down, int meta) {
+        View content = liveContent;
+        if (content == null) return false;
+        long now = SystemClock.uptimeMillis();
+        KeyEvent ev = new KeyEvent(now, now, down ? KeyEvent.ACTION_DOWN : KeyEvent.ACTION_UP,
+                keyCode, 0, meta);
+        ev.setSource(android.view.InputDevice.SOURCE_KEYBOARD);
+        return content.dispatchKeyEvent(ev);
+    }
+
+    // ---------------------------------------------------------------- input bridge
+    // The reparented decor lives in the GUEST process; the shell window that shows the
+    // display surface lives in the HOST process. Both are the same uid, so PC input crosses
+    // on a same-uid abstract LocalSocket (one request per event, reply "1"/"0" = handled).
+    // No INJECT_EVENTS, no Accessibility (D3/D5): the event is dispatched to our own views.
+    static final String INPUT_SOCKET = "dev.unifieddesktop.guestinput";
+    private static LocalServerSocket inputServer;
+    private static final android.os.Handler MAIN = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    /** Called from the guest process when the presentation shows; idempotent. */
+    static void ensureInputServer() {
+        synchronized (GuestPresentationHost.class) {
+            if (inputServer != null) return;
+            try {
+                inputServer = new LocalServerSocket(INPUT_SOCKET);
+            } catch (Throwable t) {
+                Log.w(TAG, "B1_INPUT_FAILED listen " + t);
+                return;
+            }
+            Thread th = new Thread(GuestPresentationHost::inputLoop, "b1-input");
+            th.setDaemon(true);
+            th.start();
+            Log.i(TAG, "B1_INPUT listening " + INPUT_SOCKET);
+        }
+    }
+
+    private static void inputLoop() {
+        while (true) {
+            LocalSocket s = null;
+            try {
+                s = inputServer.accept();
+                java.io.BufferedReader r = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(s.getInputStream(), "UTF-8"));
+                String line = r.readLine();
+                String reply = handleInput(line) ? "1" : "0";
+                s.getOutputStream().write((reply + "\n").getBytes("UTF-8"));
+                s.getOutputStream().flush();
+            } catch (Throwable t) {
+                Log.w(TAG, "B1_INPUT loop " + t);
+                return;
+            } finally {
+                if (s != null) try { s.close(); } catch (Throwable ignored) { }
+            }
+        }
+    }
+
+    /** "T <action> <x> <y>" or "K <keyCode> <1|0 down> <meta>", dispatched on the UI thread. */
+    private static boolean handleInput(String line) {
+        if (line == null) return false;
+        String[] p = line.trim().split(" ");
+        final boolean[] out = new boolean[1];
+        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        Runnable work = () -> {
+            try {
+                if (p.length == 4 && "T".equals(p[0])) {
+                    out[0] = dispatchGuestTouch(Integer.parseInt(p[1]),
+                            Float.parseFloat(p[2]), Float.parseFloat(p[3]));
+                } else if (p.length == 4 && "K".equals(p[0])) {
+                    out[0] = dispatchGuestKey(Integer.parseInt(p[1]), "1".equals(p[2]),
+                            Integer.parseInt(p[3]));
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "B1_INPUT bad '" + line + "': " + t);
+            } finally {
+                done.countDown();
+            }
+        };
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            work.run();
+        } else {
+            MAIN.post(work);
+            try { done.await(500, java.util.concurrent.TimeUnit.MILLISECONDS); }
+            catch (InterruptedException ignored) { }
+        }
+        return out[0];
+    }
     private final Set<Activity> moveScheduled =
             Collections.newSetFromMap(new WeakHashMap<Activity, Boolean>());
     private final Set<Activity> configurationPrepared =
@@ -564,6 +671,7 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         if (presentation != null) {
             try { presentation.dismiss(); } catch (Throwable ignored) { }
             presentation = null;
+            liveContent = null;
         }
         GUESTS.remove(activity);
         // B-061: with the last hidden app gone the engine daemon may stop.
@@ -578,7 +686,7 @@ final class GuestPresentationHost extends AppLifecycleCallback {
         // up by its stable diagnostic name avoids relying on host-process SharedPreferences;
         // BlackBox maps a guest's Context data directory separately.
         for (Display display : manager.getDisplays()) {
-            if ("phase1-owned".equals(display.getName())) return display;
+            if (DISPLAY_NAME.equals(display.getName())) return display;
         }
         return null;
     }
@@ -626,6 +734,8 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             copyViewTreeOwnerTags(container, decor);
             container.addView(decor, new android.widget.FrameLayout.LayoutParams(width, height));
             setContentView(container);
+            liveContent = container;
+            ensureInputServer();
             container.post(() -> {
                 container.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));

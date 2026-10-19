@@ -105,7 +105,16 @@ class Phase5Desktop(private val activity: Activity) {
                 // PC-size desktop (owner report + ph-vscode-max1.png, 2026-10-19).
                 val config = android.content.res.Configuration(activity.resources.configuration)
                 config.densityDpi = DPI
-                val shellContext = activity.createConfigurationContext(config)
+                // B-066 round 3: the configuration override fixed the shell's own sp text but the
+                // WebView inside it still reported devicePixelRatio=3 (measured on the phone:
+                // innerWidth=300 in an 835-px-wide window). A WebView derives its scale from the
+                // display it is attached to, so build the shell context from the virtual display
+                // (created at DPI) and only then apply the density override.
+                val displayContext = activity.createDisplayContext(d.display)
+                val shellContext = displayContext.createConfigurationContext(config)
+                android.util.Log.i(TAG, "shell density=" + shellContext.resources.displayMetrics.density +
+                        " dpi=" + shellContext.resources.displayMetrics.densityDpi +
+                        " displayDensity=" + displayContext.resources.displayMetrics.density)
                 p.setContentView(ShellRoot(shellContext).also { desktop = it })
                 p.setOnDismissListener { running = false }
                 p.show()

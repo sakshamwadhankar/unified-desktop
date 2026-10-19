@@ -6,8 +6,31 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 7 of 13, **round stopped at the 16:30 hard stop - PARTIAL, not closed.** Items 1-2
-  done (+ item 9 not needed): **B-061 FIXED and proven on the phone** (idle app -> 0 DaemonService
+- **Phase:** 7 of 13, **round 3 (2026-10-20 03:21) PARTIAL - not closed; the phase gate is NOT met.**
+  **New on the phone this round:** (a) **B-066 half done** - shell + WebView at density 1.0 /
+  dpi 160, `devicePixelRatio=1`, VS Code UI at 1:1 (`p7c/i2-now.png`). (b) **The Android window
+  works for rendering**: the shell window creates its own `phase1-owned` VirtualDisplay on its
+  SurfaceView and the Phase-1 B1 route moves the guest activity's decor into a Presentation on
+  it, so Google Tasks' own "Welcome to Tasks" UI appears inside the window (`p7c/s10.png`,
+  `P7AND display id=53 900x576`, `B1_PRESENTATION_SHOWN ... display=53 target=900x576`).
+  (c) **PC input reaches the guest in-process-ish**: the presentation lives in the GUEST process,
+  so a static call from the shell always saw `null`; a same-uid abstract LocalSocket
+  (`B1_INPUT listening dev.unifieddesktop.guestinput`) now carries touch/key events, and a click
+  on "Sign in" was delivered (`handled=true`) and navigated the guest. No INJECT_EVENTS, no
+  Accessibility (D3/D5). (d) **B-067 survived 61 min 40 s** of live 55-61 fps streaming with
+  `dropped=0` and no 997 (it then died on a new error, `read: cannot decrypt peer's message`,
+  B-072). (e) Numbers with everything open: PSS 197 MB, 12 of our processes, app CPU 126%
+  (~1.6 of 8 cores), phone 351-388% busy of 800%, battery 38.2 C (stable over 45 s), 22%.
+  **Not met:** one side-by-side gate screenshot (all four kinds were open together, `s17.png`/
+  `s19.png`, but the Android window went black on reopen (B-070), the NPP window's frame loop was
+  started before Xvfb (the Xvfb root capture `p7c/x11cap2.png` does show NPP + xeyes), the VS Code
+  window stayed blank because code-server was started after it, and title-bar drags stopped moving
+  windows (B-071)); `npp7` and `code7` typing are NOT proven on the phone; Tasks typing is
+  impossible without an account. Gates: Android `BUILD SUCCESSFUL in 37s`; `cargo test --release`
+  44/44; clippy clean. Record: `docs/PHASE7_RESULT.md` "Round 3". Cleanup verified: 0 of our
+  processes, no DaemonService, stayon=0, brightness=2047, no adb forwards, gradle daemon stopped.
+- **Round 2 (2026-10-19 16:30 hard stop):**
+  Items 1-2 done (+ item 9 not needed): **B-061 FIXED and proven on the phone** (idle app -> 0 DaemonService
   records; headless Tasks launch -> DaemonService + neutral notification `Android app engine /
   A hidden app is running`; process-name guard so guest `:pN`/`:black` never call `stopService`;
   old "BlackBox Core" channel name persists, channels are create-once). Item 6 (X11 window)
