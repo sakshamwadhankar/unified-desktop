@@ -65,6 +65,36 @@ object Phase5Protocol {
     const val CTRL_NEED_KEYFRAME = "need-keyframe"
     const val CTRL_RELEASE_ALL = "release-all"
 
+    /**
+     * B-047: the PC asks for video with this message (`udreceiver view` sends it after the
+     * channel gate is open). `pair` and `bench` never send it, so they carry no video.
+     */
+    const val CTRL_VIDEO_ON = "video-on"
+
+    /** A parsed control-channel message. Pure data: unit-testable (Phase5ProtocolTest). */
+    sealed class Control {
+        object NeedKeyframe : Control()
+        object ReleaseAll : Control()
+        object VideoOn : Control()
+        /** `csq <t_pc_us>`; the stamp is echoed back verbatim in `csr`. */
+        data class ClockSyncRequest(val pcStamp: String) : Control()
+        /** `vq ...`: the PC's own video stats, logged on this side. */
+        data class PcVideoStats(val text: String) : Control()
+        data class Unknown(val text: String) : Control()
+    }
+
+    fun parseControl(text: String): Control {
+        val t = text.trim()
+        return when {
+            t == CTRL_NEED_KEYFRAME -> Control.NeedKeyframe
+            t == CTRL_RELEASE_ALL -> Control.ReleaseAll
+            t == CTRL_VIDEO_ON -> Control.VideoOn
+            t.startsWith("csq ") -> Control.ClockSyncRequest(t.removePrefix("csq ").trim())
+            t.startsWith("vq ") -> Control.PcVideoStats(t)
+            else -> Control.Unknown(t)
+        }
+    }
+
     class VideoFrame(
         val flags: Byte,
         val seq: Int,

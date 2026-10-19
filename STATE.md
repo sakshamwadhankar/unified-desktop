@@ -6,23 +6,35 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 5 of 13 **CLOSED, PASS** (2026-10-19 02:28, real phone 2c0f6edc). Phases 1-4
-  CLOSED, PASS (records: `docs/PHASE1_RESULT.md` ... `PHASE4_RESULT.md`; Phase 4 = Wi-Fi +
-  USB tethering, AOA moved to its own round, D17). Next: Phase 6 (Desktop shell), not started.
-- **Phase 5 (Video + input), phone:** the phone's 1920x1080 desktop surface shows full screen
-  on the PC; hardware encode `c2.qti.avc.encoder` and hardware decode (MF H.264 MFT on D3D11,
-  Intel UHD); mouse, drag and keyboard (incl. Shift) work on real Android views. ~57 fps
-  moving and dragging (paced at 60). Typing latency p50/p95: Wi-Fi 122.7/172.9 ms, USB
-  tethering 106.5/148.8 ms (n=50 each; target 80 ms -> Phase 12, B-051). Stuck keys: 0 after
-  300 fast keys + 30 drags. Our CPU 130-151 %, PSS ~186 MB. Record: `docs/PHASE5_RESULT.md`.
-  The agent built the pipeline (to 01:51); every free model then hit its usage limit and the
-  manager finished the phase overnight on the owner's instruction (fixes B-052..B-055).
-- **Last updated:** 2026-10-19 02:28, manager (Phase 5 close). Phone settings restored
-  (stayon 0, brightness 2047), link stopped by the app's button, tethering off, laptop routes
-  on Wi-Fi only, WARP untouched.
-- **Next action:** owner review of Phase 5; Phase 6 prompt only when the owner asks. Open
-  owner items: the AOA round (SKIPS, one UAC click + USB debugging off) and the 5-step
-  no-developer-mode check (SKIPS "No-adb proof"). Phase 6 carry-overs are in SKIPS.
+- **Phase:** 6 of 13 - **emulator round COMPLETE, PHONE ROUND OPEN** (item 8: the phone
+  `2c0f6edc` never appeared in `adb devices` - unplugged at 06:09, polled every 30 s until
+  the hard stop -> SKIPS.md). Phases 1-5 CLOSED, PASS (records: `docs/PHASE1_RESULT.md` ...
+  `PHASE5_RESULT.md`).
+- **Phase 6 (Desktop shell), emulator:** taskbar + start menu (Files, Browser, Settings,
+  Test), movable/resizable windows driven by the PC's real mouse and keyboard through the
+  Phase-5 link, keyboard routed to the focused widget; four app-side gate screenshots of the
+  live shell hierarchy. Window model pure Kotlin, 18 tests; `:app:testDebugUnitTest` 100 tests
+  / 0 failures / 3 skipped, lint + assemble green (last run on the final tree 07:38); cargo
+  41/41, clippy clean. Numbers (emulator via adb forward, phone-side counters): idle
+  keep-alive **1.0 fps** (static shell), title-bar drag **30.6 fps** over 30.4 s (929 frames),
+  typing medians recv->dispatch **0.14 ms** / dispatch->drawn **8.4 ms** / drawn->encoded
+  **26.8 ms**; stuck keys **0** after 100 keys + 10 drags. Limits: the PC window stays black
+  on the *emulator's* stream (**B-057** - every frame dropped awaiting a keyframe the emulator
+  encoder never sends; the phone's encoder honoured it in Phase 5), so the gate shots are
+  app-side and the PC-side typing stages could not print; **B-056** (emulator encoder
+  configure rejection) mitigated in code. B-039 probe: PC keys reach the browser's address
+  field via the **IME route**; the page-DOM route is still open. Record: `docs/PHASE6_RESULT.md`.
+- **Last updated:** 2026-10-19 07:41, agent (Phase 6 items 9-11). Cleanup done at 07:39:
+  emulator shut down (`emu kill`, qemu gone), receiver killed, `adb forward` removed,
+  `adb devices` empty, phone never touched. A background watcher kept polling for `2c0f6edc`
+  until ~08:45 at the time of writing.
+- **Next action:** the phone round: plug `2c0f6edc` in and run the item-8 checklist
+  (docs/PHASE6_RESULT.md, SKIPS.md): install, dismiss the OEM scan dialog with Ignore,
+  Start link, `udreceiver view --addr auto` over Wi-Fi, receiver-window screenshots (start
+  menu, overlapping windows), 30 s drag fps + idle fps from the receiver's VSTAT, 20 typing
+  samples into the browser address bar, stuck keys after 100 keys + 10 drags. Then manager
+  review of Phase 6 (B-056/B-057 decisions). Earlier open owner items: the AOA round and the
+  5-step no-developer-mode check (SKIPS).
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app
@@ -81,3 +93,5 @@ corrections in `docs/PHASE1_RESULT.md`.
 | Item | Notes |
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6: Q1-Q4 answered (records in `docs/PHASE1_RESULT.md`...`PHASE4_RESULT.md`); Q5 NOT PROVEN - AOA round deferred (SKIPS.md row); Q6 answered (custom framed protocol over TCP + TLS 1.3, not QUIC/WebRTC). |
+| Phone round (Phase 6 item 8) | SKIPS.md row (phone unplugged all run; polled until the hard stop). Every check has an emulator stand-in, labelled `emulator via adb forward` in `docs/PHASE6_RESULT.md`; none closes the item. Needs the owner to plug `2c0f6edc` in. |
+| B-056 / B-057 (Phase 6) | Open in BUGS.md awaiting the manager's decision: emulator encoder configure rejection (mitigated in code) and the PC black window on the emulator stream (permanent drop while awaiting a keyframe). |

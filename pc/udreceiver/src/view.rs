@@ -500,6 +500,9 @@ struct Pipeline {
     vp: Option<VideoProc>,
     awaiting_keyframe: bool,
     logged_frames: u64,
+    /// B-047: every access unit the phone sent, decoded or not (the video-on pacer stops on
+    /// the first one).
+    frames_in: u64,
     /// Recent frames: (seq, received, presented), PC microseconds. The phone's latency
     /// report names a frame seq; this ring supplies that frame's PC-side times.
     frames: std::collections::VecDeque<(u32, i64, i64)>,
@@ -544,6 +547,7 @@ fn pipeline_loop(
         vp: None,
         awaiting_keyframe: false,
         logged_frames: 0,
+        frames_in: 0,
         frames: std::collections::VecDeque::with_capacity(FRAME_RING),
         pending_lat: Vec::new(),
     };
@@ -558,6 +562,9 @@ fn pipeline_loop(
     let mut last_csq = Instant::now() - Duration::from_secs(2);
     let mut clock = phase5::ClockSync::new();
     let mut last_need = Instant::now() - Duration::from_secs(9);
+    // B-047: ask for video; keep asking until the first access unit shows up.
+    let mut video_on = phase5::VideoOnPacer::new();
+    let started_at = Instant::now();
 
     while shared.running.load(Ordering::SeqCst) {
         if seconds > 0 && start.elapsed() > Duration::from_secs(seconds) {
@@ -590,6 +597,19 @@ fn pipeline_loop(
             last_need = Instant::now();
             p.awaiting_keyframe = true;
             println!("[{TAG}] -> phone need-keyframe");
+        }
+        // B-047: video starts because the receiver asks for it, never because a session
+        // exists. `pair` and `bench` do not run this loop at all.
+        if video_on.due(started_at.elapsed().as_millis() as u64, p.frames_in > 0) {
+            let mut w = PriorityWriter::new(&mut session.tls);
+            let _ = w.push(Message::new(
+                CH_CONTROL,
+                phase5::CTRL_VIDEO_ON.as_bytes().to_vec(),
+            )?);
+            let _ = w.emit_all();
+            if video_on.sends() <= 5 {
+                println!("[{TAG}] -> phone video-on (ask #{})", video_on.sends());
+            }
         }
         if last_csq.elapsed() > Duration::from_secs(1) {
             let t = now_us();
@@ -809,6 +829,7 @@ impl Pipeline {
         if vf.is_config() {
             return Ok(());
         }
+        self.frames_in += 1;
         if !phase5::annex_b_is_sane(&vf.annex_b) {
             println!("[{TAG}] access unit without a start code (seq {})", vf.seq);
             self.shared.need_keyframe.store(1, Ordering::SeqCst);
@@ -853,6 +874,15 @@ impl Pipeline {
     fn decode_and_present(&mut self, vf: &VideoFrame) -> Result<u64, String> {
         let t0 = Instant::now();
         if !self.dec.in_set {
+            // A decoder that just reported a stream change cannot resume on a P-frame: it
+            // reports another stream change, and feeding more P-frames spins forever (seen on
+            // the emulator's c2.android.avc.encoder stream, 2026-10-19). Wait for the IDR the
+            // phone sends in answer to our need-keyframe.
+            if !vf.is_keyframe() {
+                self.awaiting_keyframe = true;
+                self.shared.need_keyframe.store(1, Ordering::SeqCst);
+                return Ok(0);
+            }
             recover(&mut self.dec)?;
         }
         // ProcessInput may refuse while undrained output is pending: drain, then retry.
@@ -904,6 +934,9 @@ impl Pipeline {
                 if code == MF_E_TRANSFORM_STREAM_CHANGE {
                     println!("[{TAG}] decoder stream change; renegotiating the output type");
                     self.dec.in_set = false;
+                    // Drop non-keyframes until the IDR answer arrives, or every following
+                    // P-frame just re-reports the same stream change.
+                    self.awaiting_keyframe = true;
                     self.shared.need_keyframe.store(1, Ordering::SeqCst);
                     break;
                 }

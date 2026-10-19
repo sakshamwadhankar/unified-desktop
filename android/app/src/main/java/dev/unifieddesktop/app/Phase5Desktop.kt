@@ -20,17 +20,14 @@ import android.widget.FrameLayout
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * The Phase-5 desktop surface: a VirtualDisplay we own (no MediaProjection), rendered into
- * the SurfaceTexture the GL compositor reads, showing a `Presentation` with a TEST DESKTOP.
- * Plain views on our own display take events by direct dispatch (LESSONS 2 - no
- * INJECT_EVENTS permission, no Accessibility service, D5).
+ * The desktop surface: a VirtualDisplay we own (no MediaProjection), rendered into the
+ * SurfaceTexture the GL compositor reads, showing a `Presentation` with the PHASE-6 SHELL
+ * (taskbar, start menu, movable windows). The Phase-5 test desktop still exists as the
+ * shell's "Test" window, so every Phase-5 measurement keeps working.
  *
- * The test desktop has exactly what Phase 5 measures:
- *  - a continuously moving element (fps while something moves),
- *  - a draggable box (drag),
- *  - a real EditText (keyboard input, B-039 family),
- *  - a flash area that turns white on every key-down (typing-latency method, LESSONS 4),
- *  - a cursor drawn at the PC's mouse position.
+ * Plain views on our own display take events by direct dispatch (LESSONS 2 - no
+ * INJECT_EVENTS permission, no Accessibility service, D5). The shell sends the PC's pointer
+ * to its root as real SOURCE_MOUSE MotionEvents, so normal hit-testing routes them.
  *
  * Every method here runs on the UI thread; the link session posts to it.
  */
@@ -48,7 +45,8 @@ class Phase5Desktop(private val activity: Activity) {
     @Volatile var running = false
         private set
 
-    var desktop: TestDesktop? = null
+    /** The live shell (null until the Presentation is up). */
+    var desktop: ShellRoot? = null
         private set
 
     private var vd: VirtualDisplay? = null
@@ -89,7 +87,7 @@ class Phase5Desktop(private val activity: Activity) {
     }
 
     /**
-     * UI thread: attach the test desktop to [createDisplay]'s display. Retries because
+     * UI thread: attach the shell to [createDisplay]'s display. Retries because
      * adding the window before ColorOS finishes bringing the display up throws
      * `InvalidDisplayException: the specified display can not be found` (phone 2026-10-19).
      */
@@ -101,19 +99,19 @@ class Phase5Desktop(private val activity: Activity) {
         while (SystemClock.uptimeMillis() < deadline) {
             try {
                 val p = Presentation(activity, d.display)
-                p.setContentView(TestDesktop(activity).also { desktop = it })
+                p.setContentView(ShellRoot(activity).also { desktop = it })
                 p.setOnDismissListener { running = false }
                 p.show()
                 pres = p
                 running = true
-                android.util.Log.i(TAG, "presentation shown on display ${d.display.displayId}")
+                android.util.Log.i(TAG, "shell presentation shown on display ${d.display.displayId}")
                 return true
             } catch (t: Throwable) {
                 last = t
                 try { Thread.sleep(150) } catch (_: InterruptedException) {}
             }
         }
-        android.util.Log.e(TAG, "desktop start failed after retries", last)
+        android.util.Log.e(TAG, "shell start failed after retries", last)
         stop()
         return false
     }
@@ -130,9 +128,10 @@ class Phase5Desktop(private val activity: Activity) {
     // ------------------------------------------------------------------ input ops
     // All of these are called on the UI thread by the session.
 
-    fun setCursor(x: Int, y: Int) = desktop?.setCursor(x, y) ?: Unit
+    /** Hover move (no button held) or drag (button held): the shell decides from its state. */
+    fun setCursor(x: Int, y: Int) = desktop?.moveTo(x, y) ?: Unit
 
-    fun pointerButton(button: Int, down: Boolean, x: Int, y: Int) = desktop?.pointerButton(button, down, x, y) ?: Unit
+    fun pointerButton(button: Int, down: Boolean, x: Int, y: Int) = desktop?.mouseButton(button, down, x, y) ?: Unit
 
     fun wheel(delta: Int, x: Int, y: Int) = desktop?.wheel(delta, x, y) ?: Unit
 
@@ -141,13 +140,20 @@ class Phase5Desktop(private val activity: Activity) {
     /** Releases everything the PC still holds; returns (keys released, buttons released). */
     fun releaseAll(): Pair<Int, Int> = desktop?.releaseAll() ?: Pair(0, 0)
 
-    fun inputText(): String = desktop?.inputText() ?: ""
+    fun inputText(): String = desktop?.focusedText() ?: ""
 
     fun heldCounts(): Pair<Int, Int> = desktop?.heldCounts() ?: Pair(0, 0)
+
+    /** One line for p4.log: shell state (windows, focus, start menu, input bookkeeping). */
+    fun stats(): String = desktop?.stats() ?: "shell=down"
+
+    fun setFlashListener(l: ((Int, Long) -> Unit)?) = desktop?.setFlashListener(l) ?: Unit
+
+    fun shell(): ShellRoot? = desktop
 }
 
 /** The test desktop: custom drawing + one real EditText that takes the PC's keys. */
-class TestDesktop(context: Context) : FrameLayout(context) {
+open class TestDesktop(context: Context) : FrameLayout(context) {
     private val canvasView = SurfaceView5(context)
 
     val edit = EditText(context).apply {

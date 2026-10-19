@@ -54,6 +54,7 @@ class Phase5Session(
 
     @Volatile private var dropping = false
     @Volatile private var lastKeyframeRequestMs = 0L
+    private val videoGate = AtomicBoolean(false)
 
     /** Latency probe for the current key-down (all µs on the PHONE clock). */
     private class Probe(val tPcUs: Long, val tRecvUs: Long) {
@@ -72,9 +73,24 @@ class Phase5Session(
         statsThread = Thread({ statsLoop() }, "p5-stats").also { it.start() }
         say("P5 start video=$enableVideo")
         if (!enableVideo) return true
+        return enableVideo("start")
+    }
+
+    /**
+     * Bring up the desktop + encoder (B-047). Called the moment the PC opens the gate with
+     * `video-on`, or immediately for the app's own self-test. Idempotent and safe from any
+     * thread; returns false when video is refused or fails to come up.
+     */
+    fun enableVideo(why: String): Boolean {
+        if (!running.get()) { say("P5 video-on refused (session down) $why"); return false }
+        if (!videoGate.compareAndSet(false, true)) {
+            say("P5 video-on already on ($why)")
+            return true
+        }
         val a: Activity? = Phase5Host.activity()
         if (a == null) {
             say("P5 video DISABLED: no resumed Activity to host the Presentation")
+            videoGate.set(false)
             return false
         }
         val enc = Phase5Encoder(Phase5Desktop.W, Phase5Desktop.H, object : Phase5Encoder.Listener {
@@ -87,11 +103,13 @@ class Phase5Session(
             say("P5 encoder prepare FAILED")
             enc.stop()
             encoder = null
+            videoGate.set(false)
             return false
         }
         val st = enc.surfaceTexture
         if (st == null) {
             say("P5 encoder has no input surface")
+            videoGate.set(false)
             return false
         }
         val d = Phase5Desktop(a)
@@ -99,6 +117,7 @@ class Phase5Session(
         if (!d.createDisplay(android.view.Surface(st))) {
             say("P5 virtual display FAILED to come up")
             enc.stop(); encoder = null
+            videoGate.set(false)
             return false
         }
         val latch = java.util.concurrent.CountDownLatch(1)
@@ -115,17 +134,18 @@ class Phase5Session(
         if (!started.get()) {
             say("P5 desktop FAILED to start")
             enc.stop(); encoder = null
+            videoGate.set(false)
             return false
         }
         desktop = d
         // latency probe stage 4: the moment the flash is really drawn (not just dispatched)
         main.post {
-            d.desktop?.setFlashListener { _, ns ->
+            d.setFlashListener { _, ns ->
                 val p = probe.get()
                 if (p != null && p.tDrawUs == 0L) p.tDrawUs = ns / 1000
             }
         }
-        say("P5 desktop up ${Phase5Desktop.W}x${Phase5Desktop.H} encoder=${enc.codecName}")
+        say("P5 desktop up ${Phase5Desktop.W}x${Phase5Desktop.H} encoder=${enc.codecName} ($why)")
         Phase5Dispatch.bind(this)
         // a first keyframe so the PC can start decoding at once
         main.postDelayed({ enc.redrawNow(); enc.requestKeyframe() }, 300)
@@ -135,6 +155,7 @@ class Phase5Session(
     fun stop(why: String) {
         if (!running.compareAndSet(true, false)) return
         say("P5 stop ($why) ${statsLine()}")
+        videoGate.set(false)
         draining.set(false)
         try { drainThread?.join(500) } catch (_: Throwable) {}
         drainThread = null
@@ -280,24 +301,32 @@ class Phase5Session(
 
     // ---------------------------------------------------------------- control in
 
-    fun onControlMessage(text: String) {
-        val t = text.trim()
-        when {
-            t == Phase5Protocol.CTRL_NEED_KEYFRAME -> {
+    fun onControlMessage(text: String, gateOpen: Boolean = true) {
+        when (val c = Phase5Protocol.parseControl(text)) {
+            Phase5Protocol.Control.NeedKeyframe -> {
                 say("P5 PC asked for a keyframe (link loss)")
                 encoder?.requestKeyframe()
             }
-            t == Phase5Protocol.CTRL_RELEASE_ALL -> requestReleaseAll("PC release-all message")
-            t.startsWith("csq ") -> {
-                val tPc = t.removePrefix("csq ").trim()
+            Phase5Protocol.Control.ReleaseAll -> requestReleaseAll("PC release-all message")
+            Phase5Protocol.Control.VideoOn -> {
+                // B-047: only a PC past the channel gate may start video.
+                if (!gateOpen) {
+                    say("P5 video-on refused (gate not open)")
+                } else {
+                    say("P5 video-on received")
+                    enableVideo("video-on")
+                }
+            }
+            is Phase5Protocol.Control.ClockSyncRequest -> {
                 val tPhone = System.nanoTime() / 1000
-                writer.push(Phase4Protocol.Message.create(Phase4Protocol.CH_CONTROL, "csr $tPc $tPhone".toByteArray()))
+                writer.push(
+                    Phase4Protocol.Message.create(
+                        Phase4Protocol.CH_CONTROL, "csr ${c.pcStamp} $tPhone".toByteArray()
+                    )
+                )
             }
-            t.startsWith("vq ") -> {
-                // PC-side video stats, logged so both ends are in one file
-                say("P5 PCVID $t")
-            }
-            else -> say("P5 control unknown \"${t.take(40)}\"")
+            is Phase5Protocol.Control.PcVideoStats -> say("P5 PCVID ${c.text}")
+            is Phase5Protocol.Control.Unknown -> say("P5 control unknown \"${c.text.take(40)}\"")
         }
     }
 
@@ -334,11 +363,14 @@ class Phase5Session(
 
     fun statsLine(): String {
         val d = desktop
-        val stats = d?.desktop?.stats() ?: "desktop=down"
+        val stats = d?.stats() ?: "shell=down"
         return "sent=${sentFrames.get()} bytes=${sentBytes.get()} dropped=${dropped.get()} " +
             "keyreq=${keyframeRequests.get()} keyreqSent=${encoder?.stats() ?: ""} " +
             "inApplied=${inputApplied.get()} inDropped=${inputDropped.get()} $stats"
     }
+
+    /** The live shell, for the Phase-6 harness bridge. */
+    fun shell(): ShellRoot? = desktop?.shell()
 
     /** Harness readback (`p5text`): the EditText's real content plus the counters. */
     fun debugText(): String {
@@ -347,7 +379,7 @@ class Phase5Session(
         main.post {
             try {
                 val d = desktop
-                ref.set("text=\"${(d?.inputText() ?: "").replace("\n", "\\n").take(200)}\" ${d?.desktop?.stats() ?: ""}")
+                ref.set("text=\"${(d?.inputText() ?: "").replace("\n", "\\n").take(200)}\" ${d?.stats() ?: ""}")
             } finally { l.countDown() }
         }
         try { l.await(1, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Throwable) {}

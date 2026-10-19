@@ -84,6 +84,7 @@ object Phase4Dispatch {
                         ctx,
                         "P5TEXT ${Phase5Dispatch.lastText()}"
                     )
+                    "p6" -> Phase4Log.say(ctx, "P6 ${Phase6Dispatch.run(ctx, arg)}")
                     else -> Phase4Log.say(ctx, "PHASE4X unknown [$what]")
                 }
             } catch (t: Throwable) {

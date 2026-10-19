@@ -246,4 +246,31 @@ class Phase5ProtocolTest {
         assertEquals(200_000, done!!.size)
         assertEquals(7.toByte(), done[199_999])
     }
+
+    // ---- B-047: the PC asks for video; the phone must parse the request
+    @Test
+    fun controlVideoOnParsesAndMatchesThePcConstant() {
+        assertEquals("video-on", Phase5Protocol.CTRL_VIDEO_ON)
+        assertEquals(Phase5Protocol.Control.VideoOn, Phase5Protocol.parseControl("video-on"))
+        // trailing whitespace/newlines are tolerated
+        assertEquals(Phase5Protocol.Control.VideoOn, Phase5Protocol.parseControl("  video-on\n"))
+    }
+
+    @Test
+    fun controlParsesTheOtherMessagesExactly() {
+        assertEquals(Phase5Protocol.Control.NeedKeyframe, Phase5Protocol.parseControl("need-keyframe"))
+        assertEquals(Phase5Protocol.Control.ReleaseAll, Phase5Protocol.parseControl("release-all"))
+        assertEquals(
+            Phase5Protocol.Control.ClockSyncRequest("123456789"),
+            Phase5Protocol.parseControl("csq 123456789")
+        )
+        assertEquals(
+            Phase5Protocol.Control.PcVideoStats("vq 60 12"),
+            Phase5Protocol.parseControl("vq 60 12")
+        )
+        // prefixes that only look like known messages are unknown, never guessed
+        assertEquals(Phase5Protocol.Control.Unknown("video-on-now"), Phase5Protocol.parseControl("video-on-now"))
+        assertEquals(Phase5Protocol.Control.Unknown("csq"), Phase5Protocol.parseControl("csq"))
+        assertEquals(Phase5Protocol.Control.Unknown(""), Phase5Protocol.parseControl(""))
+    }
 }

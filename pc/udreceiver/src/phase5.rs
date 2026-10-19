@@ -34,6 +34,51 @@ pub const MOD_META: u8 = 0b1000;
 
 pub const CTRL_NEED_KEYFRAME: &str = "need-keyframe";
 pub const CTRL_RELEASE_ALL: &str = "release-all";
+/// B-047: `view` asks for video with this message; `pair` and `bench` never send it, so a
+/// bench run carries no video traffic.
+pub const CTRL_VIDEO_ON: &str = "video-on";
+/// A frame-less receiver re-asks for video this often (the phone may not have had a resumed
+/// activity yet, or the message may have raced the pairing gate).
+pub const VIDEO_ON_RETRY_MS: u64 = 2000;
+
+/// Decides when the receiver sends `video-on`: never once a frame arrived, and repeated no
+/// faster than [VIDEO_ON_RETRY_MS] until then (the phone may have had no resumed activity
+/// when the first ask arrived, B-048; this way video starts as soon as it does). Pure
+/// logic, unit-tested.
+pub struct VideoOnPacer {
+    last_ms: Option<u64>,
+    sends: u32,
+}
+
+impl VideoOnPacer {
+    pub fn new() -> Self {
+        Self { last_ms: None, sends: 0 }
+    }
+
+    pub fn sends(&self) -> u32 {
+        self.sends
+    }
+
+    pub fn due(&mut self, now_ms: u64, got_frame: bool) -> bool {
+        if got_frame {
+            return false;
+        }
+        if let Some(last) = self.last_ms {
+            if now_ms.saturating_sub(last) < VIDEO_ON_RETRY_MS {
+                return false;
+            }
+        }
+        self.last_ms = Some(now_ms);
+        self.sends += 1;
+        true
+    }
+}
+
+impl Default for VideoOnPacer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VideoFrame {
@@ -384,6 +429,38 @@ mod tests {
     #[test]
     fn empty_input_message_is_empty() {
         assert!(parse_input_events(&[]).unwrap().is_empty());
+    }
+
+    // ---- B-047: the receiver asks for video, and only `view` ever does
+    #[test]
+    fn video_on_constant_matches_the_phone() {
+        // Kotlin Phase5Protocol.CTRL_VIDEO_ON must be the same string.
+        assert_eq!(CTRL_VIDEO_ON, "video-on");
+        assert_eq!(CTRL_VIDEO_ON.as_bytes(), b"video-on");
+    }
+
+    #[test]
+    fn video_on_pacer_sends_immediately_then_throttles_until_a_frame() {
+        let mut p = VideoOnPacer::new();
+        assert!(p.due(0, false), "first ask goes out at once");
+        assert!(!p.due(1, false));
+        assert!(!p.due(VIDEO_ON_RETRY_MS - 1, false));
+        assert!(p.due(VIDEO_ON_RETRY_MS, false), "retry after the retry window");
+        assert_eq!(p.sends(), 2);
+        assert!(p.due(VIDEO_ON_RETRY_MS * 2, false));
+        assert_eq!(p.sends(), 3);
+    }
+
+    #[test]
+    fn video_on_pacer_stops_for_good_once_a_frame_arrived() {
+        let mut p = VideoOnPacer::new();
+        assert!(p.due(0, false));
+        assert!(!p.due(10_000, true), "a frame means video is running");
+        // ... and from then on the answer is always no, retry window or not.
+        for t in [11_000u64, 20_000, 60_000, 600_000] {
+            assert!(!p.due(t, true), "no ask once video flows (t={t})");
+        }
+        assert_eq!(p.sends(), 1);
     }
 
     // ---- the Rust and Kotlin test vectors must agree byte for byte

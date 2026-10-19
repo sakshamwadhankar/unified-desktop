@@ -413,7 +413,8 @@ class Phase4LinkService : Service() {
         val buf = ByteArray(16384)
         // Phase 5: video + input ride the same session, over the same priority writer.
         val p5 = Phase5Session(this, output, { line -> say(line) })
-        if (paired) p5.start(true)
+        // B-047: a paired session gets NO video until the PC asks with "video-on".
+        p5.start(false)
         try {
             while (running.get()) {
                 val n: Int
@@ -443,8 +444,8 @@ class Phase4LinkService : Service() {
                                 pendingPairing.compareAndSet(p, null)
                                 cancelPairingNotification()
                                 sock.soTimeout = Phase4Protocol.DEAD_TIMEOUT_MS.toInt()
-                                // Phase 5: video + input may start now that the gate is open
-                                p5.start(true)
+                                // B-047: video still waits for the PC's "video-on"
+                                say("P5 gate open, waiting for video-on")
                             }
                             false -> {
                                 p5.writer.push(

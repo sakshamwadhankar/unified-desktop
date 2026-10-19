@@ -113,26 +113,58 @@ class Phase5Encoder(private val width: Int, private val height: Int, private val
     private var drawScheduled = false
 
     /** Build everything and wait until the GL surface texture exists. */
+    /**
+     * Optional keys: each one is a latency/size win, but a codec may advertise a key and then
+     * reject the whole configure with it (the emulator's c2.android.avc.encoder advertises
+     * KEY_PREPEND_HEADER_TO_SYNC_FRAMES but fails configure with BAD_VALUE - 2026-10-19,
+     * BUGS B-056). If configure throws, the encoder is rebuilt without these and retried, so
+     * one bad knob cannot cost the whole session.
+     */
+    private val optionalKeys = linkedMapOf(
+        MediaFormat.KEY_BITRATE_MODE to MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR,
+        MediaFormat.KEY_PROFILE to MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
+        MediaFormat.KEY_PRIORITY to 0,                                    // 0 = realtime
+        MediaFormat.KEY_MAX_B_FRAMES to 0,
+        MediaFormat.KEY_LOW_LATENCY to 1,
+        // Qualcomm's own low-latency switch (listed by c2.qti.avc.encoder's
+        // supportedVendorParameters on the test phone); other encoders ignore the key.
+        "vendor.qti-ext-enc-low-latency.enable" to 1,
+        MediaFormat.KEY_PREPEND_HEADER_TO_SYNC_FRAMES to 1,
+    )
+
+    /** The keys every encoder must take; nothing here is optional. */
+    private fun baseFormat(): MediaFormat {
+        val fmt = MediaFormat.createVideoFormat(MIME, width, height)
+        fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+        fmt.setInteger(MediaFormat.KEY_BIT_RATE, BITRATE)
+        fmt.setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
+        fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL_S)
+        return fmt
+    }
+
     fun prepare(timeoutMs: Long = 4000): Boolean {
         try {
-            val fmt = MediaFormat.createVideoFormat(MIME, width, height)
-            fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            fmt.setInteger(MediaFormat.KEY_BIT_RATE, BITRATE)
-            fmt.setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
-            fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL_S)
-            setIntIfSupported(fmt, MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-            setIntIfSupported(fmt, MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
-            setIntIfSupported(fmt, MediaFormat.KEY_PRIORITY, 0)               // 0 = realtime
-            setIntIfSupported(fmt, MediaFormat.KEY_MAX_B_FRAMES, 0)
-            setIntIfSupported(fmt, MediaFormat.KEY_LOW_LATENCY, 1)
-            // Qualcomm's own low-latency switch (listed by c2.qti.avc.encoder's
-            // supportedVendorParameters on the test phone); other encoders ignore the key.
-            setIntIfSupported(fmt, "vendor.qti-ext-enc-low-latency.enable", 1)
-            setIntIfSupported(fmt, MediaFormat.KEY_PREPEND_HEADER_TO_SYNC_FRAMES, 1)
-            val c = MediaCodec.createEncoderByType(MIME)
-            codec = c
-            codecName = c.name
-            c.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            var droppedOptional = false
+            while (true) {
+                val fmt = baseFormat()
+                if (!droppedOptional) {
+                    for ((k, v) in optionalKeys) setIntIfSupported(fmt, k, v)
+                }
+                val c = MediaCodec.createEncoderByType(MIME)
+                try {
+                    c.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                    codec = c
+                    codecName = c.name
+                    Log.i(TAG, "encoder configured optionalKeys=${if (droppedOptional) "DROPPED" else "applied"}")
+                    break
+                } catch (e: IllegalArgumentException) {
+                    try { c.release() } catch (_: Throwable) {}
+                    if (droppedOptional) throw e
+                    droppedOptional = true
+                    Log.w(TAG, "encoder rejected the optional keys, retrying without them: $e")
+                }
+            }
+            val c = codec!!
             if (android.os.Build.VERSION.SDK_INT >= 31) try {
                 // Diagnostics: which vendor knobs could lower the encoder's own latency
                 val v = c.supportedVendorParameters.filter {

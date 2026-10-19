@@ -12,6 +12,8 @@ object Phase5Dispatch {
 
     fun bind(s: Phase5Session?) { session = s }
 
+    fun session(): Phase5Session? = session
+
     fun lastText(): String {
         val s = session ?: return "(no live phase-5 session)"
         return s.debugText()
