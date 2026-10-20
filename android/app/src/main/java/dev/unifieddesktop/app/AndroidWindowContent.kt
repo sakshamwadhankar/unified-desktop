@@ -1,33 +1,38 @@
 package dev.unifieddesktop.app
 
 import android.content.Context
+import android.graphics.SurfaceTexture
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.view.MotionEvent
 import android.view.Surface
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.view.TextureView
 import android.widget.FrameLayout
 
 /**
  * One shell window that runs a hidden Android app: the guest is imported into the engine
- * (app virtualization, DECISIONS D3), the window's SurfaceView surface is set as the output
- * of a VirtualDisplay named [GuestPresentationHost.DISPLAY_NAME], and the guest is launched
- * through the Phase-1 B1 route: [GuestPresentationHost] moves the guest's own decor into a
- * Presentation on that display, so the guest's real frames land in this window.
+ * (app virtualization, DECISIONS D3), the window's TextureView SurfaceTexture is set as the
+ * output of a VirtualDisplay named [GuestPresentationHost.DISPLAY_NAME], and the guest is
+ * launched through the Phase-1 B1 route: [GuestPresentationHost] moves the guest's own decor
+ * into a Presentation on that display, so the guest's real frames land in this window.
  *
- * Host -> guest input runs in-process: after the move the decor lives in OUR process, so PC
- * touches/keys are dispatched straight to the reparented view tree (never INJECT_EVENTS,
- * never Accessibility - D5).
+ * Host -> guest input runs over a same-uid abstract LocalSocket: the reparented decor lives in
+ * the GUEST process, so PC touches/keys are forwarded to that process and dispatched there to
+ * our own view tree (never INJECT_EVENTS, never Accessibility - D5).
  */
 class AndroidWindowContent(context: Context, private val guestPackage: String) :
     FrameLayout(context), ShellRawKeyContent, ShellTextContent {
 
-    private val view = SurfaceView(context)
+    // B-076: a TextureView, not a SurfaceView. With a SurfaceView the desktop's encoder stopped
+    // draining the moment this window appeared (phone `sent` froze at 47, PC rx=0), so the
+    // guest display now renders into a SurfaceTexture that the shell composites like any other
+    // view. Measured before/after in docs/PHASE7_RESULT.md.
+    private val view = TextureView(context)
     private val engine = EngineBridge(context)
 
     @Volatile private var display: VirtualDisplay? = null
     @Volatile private var started = false
+    @Volatile private var closing = false
     private var displayW = 0
     private var displayH = 0
     private var touchLogs = 0
@@ -38,13 +43,32 @@ class AndroidWindowContent(context: Context, private val guestPackage: String) :
         view.isFocusableInTouchMode = true
         setBackgroundColor(android.graphics.Color.BLACK)
         addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        view.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(h: SurfaceHolder) { }
-            override fun surfaceChanged(h: SurfaceHolder, format: Int, w: Int, hh: Int) =
-                start(h.surface, w, hh)
-            override fun surfaceDestroyed(h: SurfaceHolder) = release()
-        })
+        view.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, hh: Int) {
+                st.setDefaultBufferSize(w, hh)
+                start(Surface(st), w, hh)
+            }
+            override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, hh: Int) { }
+            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                // Closing (X button / harness) or minimizing destroys the texture. Either way the
+                // guest must not keep running against a display that no longer exists (B-070);
+                // the next open relaunches it.
+                if (started) requestGuestClose()
+                release()
+                return true
+            }
+            override fun onSurfaceTextureUpdated(st: SurfaceTexture) { }
+        }
         P7Log.say(context, "P7AND window guest=$guestPackage content built")
+    }
+
+    override fun onDetachedFromWindow() {
+        if (!closing) {
+            closing = true
+            requestGuestClose()
+        }
+        release()
+        super.onDetachedFromWindow()
     }
 
     /** Display -> window surface, then import + B1-launch the guest onto that display. */
@@ -75,7 +99,7 @@ class AndroidWindowContent(context: Context, private val guestPackage: String) :
                 if (!imp.ok) return@Thread
                 // B1: the guest launches normally; GuestPresentationHost moves its decor into a
                 // Presentation on the "phase1-owned" display we just created (the one whose
-                // output surface is this window's SurfaceView).
+                // output surface is this window's TextureView SurfaceTexture).
                 val res = engine.launchPathB1(guestPackage, d.display.displayId)
                 P7Log.say(context, "P7AND launch pathB1 ok=${res.ok} ${res.message ?: ""}")
             } catch (t: Throwable) {
@@ -85,10 +109,25 @@ class AndroidWindowContent(context: Context, private val guestPackage: String) :
     }
 
     private fun release() {
+        if (display == null && !started) return
         display?.release()
         display = null
         started = false
-        P7Log.say(context, "P7AND surface destroyed")
+        P7Log.say(context, "P7AND display released")
+    }
+
+    /**
+     * Ask the guest process to finish this package's activity. Runs over the same uid-checked
+     * input socket (B-073), so the close path needs no privileged API and no cross-process
+     * object. The reply is "1" when at least one guest answered.
+     */
+    private fun requestGuestClose() {
+        try {
+            val reply = guestInput("C $guestPackage")
+            P7Log.say(context, "P7AND close guest=$guestPackage reply=$reply")
+        } catch (t: Throwable) {
+            P7Log.say(context, "P7AND close failed: $t")
+        }
     }
 
     // ------------------------------------------------------------------ input

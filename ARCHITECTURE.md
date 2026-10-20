@@ -35,6 +35,39 @@
 | H8 | **Full-speed tools** | Native ARM64 programs **shipped inside the APK** as `lib*.so` (allowed to run): Node.js + code-server (VS Code), Python, Git, a shell. Their UI shows in built-in browser windows (Android WebView). Phase 3 (emulator): the first tool chain is proven end-to-end - node runs from `nativeLibraryDir`, code-server serves VS Code to `Phase3CodeActivity` (127.0.0.1 + password auth; B-037/B-038 fixes at start), the full gate flow (open folder, edit+save to disk, terminal command) runs from a WebView with injected taps/IME, APK 88.2 MiB, workbench-family ~330 MB PSS, 0.15%/core idle. Phone round open (SKIPS.md); Python/Git/tool packaging still [bet]. | **[bet]** Phase 3 |
 | H9 | **App Center** | Catalog, search, install/uninstall/update, best-version picker, compatibility ratings, "Open any .exe". | Phase 8 |
 
+### H9 detail (Phase 8, implemented)
+
+- **Catalog** `android/app/src/main/assets/app_catalog.json`: each app has `id`, `name`,
+  `aliases`, an `open` target (`files`, `browser`, `settings`, `vscode`, `x11`, `android`) and
+  one or more versions with `version`, `kind` (`builtin|android|web|linux|windows`), `rating`
+  (`Works` / `Works, slow` / `Not yet`), `fetch` (URL, package or Play page), optional
+  `sha256` and `source` (`winget`, `shipped`, `installed`, ...). Thirteen apps ship: the eleven
+  section-7 names plus GIMP and Firefox.
+- **Picker** `Catalog` (pure Kotlin, unit-tested): best rating first, then the D7 kind order
+  builtin > android > web > linux > windows, then the highest version (numeric-aware). A
+  `Not yet` version is never offered for install while any other version works; if every
+  version is `Not yet`, `pick` still returns it so the window can show the reason, and
+  `pickUsable` returns null. The rating says how the app runs on the phone, never whether an
+  installer exists.
+- **Window** `AppCenterView`: search box (name + aliases), rows with the picked kind and
+  rating, detail with installer state and fetch, Install/Open/Uninstall and a path field for
+  "Open any .exe". It is a normal `ShellRoot.App.APPCENTER` window, so the start menu and
+  taskbar need no special cases.
+- **Installers**: builtin = nothing to install; android = `EngineBridge.importInstalled` into
+  the guest engine, or the Play page in the Browser when the package is not on the phone; web
+  = nothing to install, Open loads the URL in the Browser; windows Notepad++ = official URL +
+  pinned SHA-256 from the Phase 2 pin (`Phase2Data.fetchNpp`). 7-Zip, a generic
+  winget-manifest reader and Linux `.deb` installers are **not built** (SKIPS). "Open any
+  .exe" is `Phase2Wine.openExe`: boot Wine, then run the file as data through the shipped
+  loader.
+- **Input path**: the App Center is driven by real PC mouse/keyboard events like every shell
+  window; the harness adds `p6:appcenter:*` for scripted runs (search/select/install/run/
+  uninstall/exe/summary).
+- **Tests**: `CatalogPickerTest.section7Table` reads the shipped JSON with `CatalogLoader` and
+  checks the 11 section-7 names (11/11, `tests=4 failures=0`); synthetic rows cover the
+  ordering rules.
+
+
 ## 3. The PC receiver (Windows 10/11)
 
 | Id | Part | What it does |

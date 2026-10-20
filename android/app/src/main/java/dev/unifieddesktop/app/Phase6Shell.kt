@@ -75,14 +75,19 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     // ------------------------------------------------------------------ windows
 
-    enum class App { FILES, BROWSER, SETTINGS, TEST, X11, VSCODE, ANDROID;
+    enum class App { APPCENTER, FILES, BROWSER, SETTINGS, TEST, X11, VSCODE, ANDROID;
         fun title(): String = when (this) {
+            APPCENTER -> "App Center"
             FILES -> "Files"; BROWSER -> "Browser"; SETTINGS -> "Settings"; TEST -> "Test"
             X11 -> "Notepad++ + xeyes (X11)"
             VSCODE -> "VS Code"
             ANDROID -> "Android app"
         }
     }
+
+    /** The live App Center content while its window exists (the Phase-8 harness drives it). */
+    var appCenter: AppCenterView? = null
+        private set
 
     /** Open (or re-focus) an app window. [guest] names the hidden Android app for ANDROID. */
     fun openApp(app: App, guest: String? = null): ShellWindowView {
@@ -102,6 +107,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
             testContent = frame.content as TestWindowContent
             flashListener?.let { testContent?.setFlashListener(it) }
         }
+        if (frame.content is AppCenterView) appCenter = frame.content as AppCenterView
         frames[win.id] = frame
         addView(frame, indexOfChild(startMenu)) // under the start menu and the cursor
         syncViews()
@@ -120,6 +126,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     fun closeWindow(id: Int) {
         val f = frames.remove(id) ?: return
+        if (f.content is AppCenterView) appCenter = null
         removeView(f)
         model.close(id)
         syncViews()
@@ -231,6 +238,10 @@ class ShellRoot(context: Context) : FrameLayout(context) {
             heldButtons.add(button)
             buttonsAllTime++
         } else heldButtons.remove(button)
+        if (buttonLogs++ < 30) {
+            P7Log.say(context, "P7SHELL button=$button down=$down at=$x,$y " +
+                "under=${model.windowAt(x, y)?.title ?: "desktop"} focus=${model.focusedId ?: -1}")
+        }
         moveTo(x, y)
         if (button != Phase5Protocol.BTN_LEFT) { invalidate(); return }
         // click-anywhere-focuses: the window under the pointer is raised before its content
@@ -329,6 +340,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
             "drags=${dragCount}"
 
     private var dragCount = 0
+    private var buttonLogs = 0
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         super.onLayout(changed, l, t, r, b)

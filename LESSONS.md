@@ -246,3 +246,27 @@ these facts.** Re-verify anything critical: Android changes.
   can land when MemFree dips (`lowmemorykiller ... free 18160` at 10:11:50), taking app + wine
   children + Xvfb down together. A documented clean kill is acceptable for the survival item;
   the product answer is the Phase 4 foreground service (B-027).
+
+## Phase 7 round 4 / Phase 8 (2026-10-20)
+
+- **BlackBox virtualizes uids:** inside the guest, `Process.myUid()`, `Os.getuid()` and the
+  `st_uid` of `/proc/self` all say 10009, while the kernel's `Uid:` line in
+  `/proc/self/status` says 10476. Authenticate a same-app socket peer with that kernel line,
+  never with the Java uid (B-073).
+- **A guest VirtualDisplay must not render into a SurfaceView surface.** The extra
+  SurfaceControl layer wedged the Phase-5 hardware encoder (phone `sent` froze at 47, PC
+  `rx=0`, WindowManager still said HAS_DRAWN). A TextureView's SurfaceTexture works
+  (B-076).
+- **A lost X11 KeyRelease is worse than it looks:** Xvfb auto-repeat typed ~4,900 `p` into
+  Notepad++ after the 04:17:21 reconnect, and a later release of the same key did not stop it.
+  Release every pressed key on reconnect; if the flood is already running, restart Xvfb and
+  spend no more than 15 minutes (B-077).
+- **An Android guest window can stay white for >12 s after `launch pathB1 ok=true`.** Tasks
+  drew its welcome screen at ~20 s; a surface shot at 12 s was white. Wait ~20 s before
+  calling it broken.
+- **Do not depend on the PC receiver window for the only evidence.** It died twice in this
+  round (B-072/B-067 family) and takes the video session and the shell with it; restart the
+  receiver, run `phase4x start`, and take phone-side `p6:shot` pictures as well. PC
+  captures are for the end-to-end PC-input proofs.
+- **Ctrl+A in an Android EditText does not select all** when sent as a synthetic Ctrl+key
+  event; it left the App Center search text in place. Clear with repeated Backspace.

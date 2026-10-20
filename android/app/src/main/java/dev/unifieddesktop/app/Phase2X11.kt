@@ -377,6 +377,39 @@ object Phase2X11 {
         if (!xvfbRunning()) startXvfb(ctx)
     }
 
+    /**
+     * Phase 8 App Center: start xeyes from the rootfs (the same command the Phase-2 harness
+     * used), then place it next to any other X11 clients.
+     */
+    fun startXeyes(ctx: Context) {
+        ensureXvfb(ctx)
+        val xb = File(Phase2Data.rootfsDir(ctx), "usr/bin/xeyes")
+        val pp = ProcessBuilder(Phase2Box64.libbox64(ctx).path, xb.absolutePath).apply {
+            environment().clear(); environment().putAll(clientEnv(ctx))
+        }.start()
+        g3exe("XEYES", ctx, pidOf(pp))
+        Thread { drain("XEYES_ERR", pp.errorStream) }.apply { name = "phase2-xeyes-err" }.start()
+        Thread.sleep(3000)
+        say("APPCTR xeyes started pid=${pidOf(pp)}")
+        placeWindows()
+        writeLog(ctx)
+    }
+
+    /** Phase 8 App Center: start xcalc from the rootfs, same shape as [startXeyes]. */
+    fun startXcalc(ctx: Context) {
+        ensureXvfb(ctx)
+        val xb = File(Phase2Data.rootfsDir(ctx), "usr/bin/xcalc")
+        val pp = ProcessBuilder(Phase2Box64.libbox64(ctx).path, xb.absolutePath).apply {
+            environment().clear(); environment().putAll(clientEnv(ctx))
+        }.start()
+        g3exe("XCALC", ctx, pidOf(pp))
+        Thread { drain("XCALC_ERR", pp.errorStream) }.apply { name = "phase2-xcalc-err" }.start()
+        Thread.sleep(3000)
+        say("APPCTR xcalc started pid=${pidOf(pp)}")
+        placeWindows()
+        writeLog(ctx)
+    }
+
     /** Debug helper: run one guest command from the rootfs (box64 chain), so
      *  guest tool behaviour can be probed from host intent extras.
      *  "direct:<relpath> <args...>" execs the guest binary directly from the

@@ -68,6 +68,8 @@ class ShellWindowView(
     private var captureEdges = -1      // -1 = not capturing; 0 = move; else resize edges
     private var lastX = 0
     private var lastY = 0
+    private var downLogs = 0
+    private var dragLogs = 0
 
     init {
         setWillNotDraw(false)
@@ -77,6 +79,7 @@ class ShellWindowView(
     }
 
     private fun buildContent(context: Context, app: ShellRoot.App, guest: String?): View = when (app) {
+        ShellRoot.App.APPCENTER -> AppCenterView(context)
         ShellRoot.App.FILES -> FilesView(context)
         ShellRoot.App.BROWSER -> BrowserView(context)
         ShellRoot.App.SETTINGS -> SettingsView(context)
@@ -117,6 +120,13 @@ class ShellWindowView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val edges = resizeEdges(absX, absY)
+                // B-071: log the shell's own hit-test for a real PC drag, so "the title bar did
+                // not move the window" can be told apart from "the press never reached it".
+                if (downLogs++ < 24) {
+                    P7Log.say(context, "P7WIN down id=${win.id} app=$app local=${event.x.toInt()},${event.y.toInt()} " +
+                        "abs=$absX,$absY rect=${win.rect().joinToString(",")} edges=$edges " +
+                        "titleY=${event.y < TITLE_H} hit=${if (event.y < TITLE_H) titleBarHit(event.x.toInt()) else "CONTENT"}")
+                }
                 if (edges != 0) {
                     captureEdges = edges; lastX = absX; lastY = absY
                     return true
@@ -141,6 +151,10 @@ class ShellWindowView(
                 if (captureEdges >= 0) {
                     val dx = absX - lastX
                     val dy = absY - lastY
+                    if (dragLogs++ < 24) {
+                        P7Log.say(context, "P7WIN drag id=${win.id} edges=$captureEdges d=$dx,$dy abs=$absX,$absY " +
+                            "rect=${win.rect().joinToString(",")}")
+                    }
                     if (absX != lastX || absY != lastY) {
                         onDragBy?.invoke(win.id, dx, dy, captureEdges)
                         lastX = absX; lastY = absY

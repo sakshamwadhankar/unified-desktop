@@ -101,28 +101,88 @@ final class GuestPresentationHost extends AppLifecycleCallback {
     private static LocalServerSocket inputServer;
     private static final android.os.Handler MAIN = new android.os.Handler(android.os.Looper.getMainLooper());
 
+    private static volatile boolean rejectedUidLogged;
+    /**
+     * The app's REAL Linux uid, captured when the server starts. Inside a BlackBox guest
+     * process `android.os.Process.myUid()` returns the VIRTUAL uid (measured 2026-10-20:
+     * myUid=10009 while the process and our shell are 10476), so the same-uid rule compares
+     * against the kernel uid from `Os.getuid()` as well.
+     */
+    private static volatile int realUid = -1;
+
+    /** Real Linux uid straight from the kernel: the first number of /proc/self/status "Uid:". */
+    private static int kernelUid() {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(
+                new java.io.FileReader("/proc/self/status"))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                if (line.startsWith("Uid:")) {
+                    String[] p = line.trim().split("\\s+");
+                    if (p.length > 1) return Integer.parseInt(p[1]);
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "B1_INPUT uid read failed: " + t);
+        }
+        return -1;
+    }
+
     /** Called from the guest process when the presentation shows; idempotent. */
-    static void ensureInputServer() {
+    static void ensureInputServer(Context context) {
         synchronized (GuestPresentationHost.class) {
             if (inputServer != null) return;
+            if (realUid < 0) {
+                // BlackBox virtualizes Process.myUid(), Os.getuid() AND the st_uid of
+                // /proc/self (measured: all 10009 in the guest, while /proc/<pid>/status from
+                // adb says 10476). The kernel text of /proc/self/status is the last honest
+                // source, so parse its Uid line.
+                realUid = kernelUid();
+            }
+            final LocalServerSocket server;
             try {
-                inputServer = new LocalServerSocket(INPUT_SOCKET);
+                server = new LocalServerSocket(INPUT_SOCKET);
             } catch (Throwable t) {
                 Log.w(TAG, "B1_INPUT_FAILED listen " + t);
                 return;
             }
-            Thread th = new Thread(GuestPresentationHost::inputLoop, "b1-input");
+            inputServer = server;
+            Thread th = new Thread(() -> inputLoop(server), "b1-input");
             th.setDaemon(true);
             th.start();
-            Log.i(TAG, "B1_INPUT listening " + INPUT_SOCKET);
+            Log.i(TAG, "B1_INPUT listening " + INPUT_SOCKET + " realUid=" + realUid +
+                    " myUid=" + android.os.Process.myUid());
         }
     }
 
-    private static void inputLoop() {
+    /**
+     * B-073: accept only connections from our own uid (the shell window lives in the host
+     * process of the same app), and keep serving after a bad connection. Only a failure of
+     * the server socket itself ends the loop, and clears [inputServer] so a later
+     * ensureInputServer() can start a fresh one.
+     */
+    private static void inputLoop(LocalServerSocket server) {
         while (true) {
-            LocalSocket s = null;
+            LocalSocket s;
             try {
-                s = inputServer.accept();
+                s = server.accept();
+            } catch (Throwable t) {
+                Log.w(TAG, "B1_INPUT accept failed - server stops: " + t);
+                synchronized (GuestPresentationHost.class) {
+                    if (inputServer == server) inputServer = null;
+                }
+                return;
+            }
+            try {
+                int uid = s.getPeerCredentials().getUid();
+                int me = android.os.Process.myUid();
+                if (uid != me && uid != realUid) {
+                    if (!rejectedUidLogged) {
+                        rejectedUidLogged = true;
+                        Log.w(TAG, "B1_INPUT reject uid=" + uid + " (not myUid=" + me +
+                                " realUid=" + realUid + "), connection closed");
+                    }
+                    continue;
+                }
                 java.io.BufferedReader r = new java.io.BufferedReader(
                         new java.io.InputStreamReader(s.getInputStream(), "UTF-8"));
                 String line = r.readLine();
@@ -130,8 +190,7 @@ final class GuestPresentationHost extends AppLifecycleCallback {
                 s.getOutputStream().write((reply + "\n").getBytes("UTF-8"));
                 s.getOutputStream().flush();
             } catch (Throwable t) {
-                Log.w(TAG, "B1_INPUT loop " + t);
-                return;
+                Log.w(TAG, "B1_INPUT connection failed, still serving: " + t);
             } finally {
                 if (s != null) try { s.close(); } catch (Throwable ignored) { }
             }
@@ -152,6 +211,18 @@ final class GuestPresentationHost extends AppLifecycleCallback {
                 } else if (p.length == 4 && "K".equals(p[0])) {
                     out[0] = dispatchGuestKey(Integer.parseInt(p[1]), "1".equals(p[2]),
                             Integer.parseInt(p[3]));
+                } else if (p.length >= 1 && "C".equals(p[0])) {
+                    // B-070: the shell window is closing. Its display is going away, so the
+                    // guest activity must be finished; the next open builds a fresh window and
+                    // relaunches the guest instead of presenting a dead display.
+                    final String pkg = p.length > 1 ? p[1] : "";
+                    for (Activity a : new java.util.ArrayList<>(GUESTS)) {
+                        if (pkg.isEmpty() || a.getPackageName().equals(pkg)) {
+                            Log.i(TAG, "B1_INPUT finish " + a.getClass().getName() + " pkg=" + pkg);
+                            a.finish();
+                        }
+                    }
+                    out[0] = true;
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "B1_INPUT bad '" + line + "': " + t);
@@ -735,7 +806,7 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             container.addView(decor, new android.widget.FrameLayout.LayoutParams(width, height));
             setContentView(container);
             liveContent = container;
-            ensureInputServer();
+            ensureInputServer(getContext());
             container.post(() -> {
                 container.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));

@@ -78,7 +78,7 @@ object Phase7Dispatch {
     /** Finish every live guest activity; the last destroy stops the engine daemon (B-061). */
     private fun close(ctx: Context) {
         val guests = GuestPresentationHost.liveGuests()
-        P7Log.say(ctx, "P7X close guests=${guests.size}")
+        P7Log.say(ctx, "P7X close hostGuests=${guests.size} (the live list lives in the guest process)")
         for (activity in guests) {
             try {
                 main.post { activity.finish() }
@@ -87,6 +87,27 @@ object Phase7Dispatch {
                 P7Log.say(ctx, "P7X finish failed: $t")
             }
         }
+        // B-070: the activities belong to the guest process, where GuestPresentationHost keeps
+        // its own live list. Ask it to finish them over the same uid-checked input socket.
+        val reply = guestClose("")
+        P7Log.say(ctx, "P7X close guestReply=$reply")
+    }
+
+    /** Sends "C <pkg>" to the guest-process input server; true when one guest answered. */
+    private fun guestClose(pkg: String): Boolean = try {
+        android.net.LocalSocket().use { s ->
+            s.connect(
+                android.net.LocalSocketAddress(
+                    GuestPresentationHost.INPUT_SOCKET,
+                    android.net.LocalSocketAddress.Namespace.ABSTRACT
+                )
+            )
+            s.outputStream.write(("C $pkg\n").toByteArray())
+            s.outputStream.flush()
+            java.io.BufferedReader(java.io.InputStreamReader(s.inputStream, "UTF-8")).readLine() == "1"
+        }
+    } catch (t: Throwable) {
+        false
     }
 
     private fun status(ctx: Context) {

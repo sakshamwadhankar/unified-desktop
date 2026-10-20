@@ -1,17 +1,36 @@
 package dev.unifieddesktop.app
 
 import android.content.Context
+import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.TextView
 
 /** Content that wants raw PC keys instead of View-level KeyEvents (X11 windows -> XTEST). */
 interface ShellRawKeyContent {
     fun key(down: Boolean, keyCode: Int, scan: Int, meta: Int): Boolean
+}
+
+/**
+ * B-074: retry policy for the X11 window's connection, pure so it is unit-tested. The window
+ * retries every 500 ms for up to 60 s (Xvfb may still be booting), and reconnects the same
+ * way after a later failure (Xvfb restarted).
+ */
+object X11ConnectPolicy {
+    const val STEP_MS = 500L
+    const val WINDOW_MS = 60_000L
+
+    fun shouldRetry(startedMs: Long, nowMs: Long, windowMs: Long = WINDOW_MS): Boolean =
+        nowMs - startedMs < windowMs
+
+    fun maxAttempts(windowMs: Long = WINDOW_MS, stepMs: Long = STEP_MS): Int =
+        (windowMs / stepMs).toInt().coerceAtLeast(1)
 }
 
 /**
@@ -23,11 +42,22 @@ interface ShellRawKeyContent {
  * Pointer: press/move/release on the content map to Xvfb coordinates and go out as XTEST
  * MotionNotify / Button events. Keys: Android keycode -> unicode char -> X keysym -> XTEST
  * key press/release (with Shift as the keymap demands).
+ *
+ * B-074: the window may be opened before Xvfb is listening (the user can open it, and the guest
+ * apps start asynchronously). It shows "Starting..." and retries every 500 ms for 60 s; a
+ * frame loop that later loses the server reconnects instead of dying for good.
  */
 class X11WindowContent(context: Context) :
     FrameLayout(context), ShellMouseContent, ShellRawKeyContent, ShellTextContent {
 
     private val image = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_XY }
+    private val status = TextView(context).apply {
+        text = "Starting..."
+        setTextColor(Color.WHITE)
+        textSize = 22f
+        gravity = Gravity.CENTER
+        setBackgroundColor(0xCC000000.toInt())
+    }
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile private var x11: Phase2X11.X11? = null
@@ -45,6 +75,7 @@ class X11WindowContent(context: Context) :
 
     init {
         addView(image, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(status, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     private fun submit(block: () -> Unit): Boolean {
@@ -77,40 +108,83 @@ class X11WindowContent(context: Context) :
         super.onDetachedFromWindow()
     }
 
-    /** Connect once, then grab frames until the window is gone. */
+    /** Connect (retrying), then grab frames until the window is gone or the server dies. */
     private fun loop() {
-        val x: Phase2X11.X11
-        try {
-            x = Phase2X11.X11.connect()
-            x.initXtest()
-            x.initKeyboard()
-            x11 = x
-            P7Log.say(context, "P7X11 connected")
-            // B-063: side-by-side placement even though there is no window manager. Runs on
-            // its own connection; harmless when the guest apps are not up yet.
-            P7Log.say(context, "P7X11 place ${Phase2X11.placeWindows()}")
-        } catch (t: Throwable) {
-            P7Log.say(context, "P7X11 connect failed: $t")
-            running = false
-            return
-        }
+        var everConnected = false
         while (running) {
-            val t0 = SystemClock.elapsedRealtime()
-            try {
-                val bmp = synchronized(xio) { x.getImage() }
-                frames++
-                main.post { image.setImageBitmap(bmp) }
-            } catch (t: Throwable) {
-                P7Log.say(context, "P7X11 frame failed: $t")
-                try { Thread.sleep(250) } catch (_: InterruptedException) { break }
+            val x = connectWithRetry()
+            if (x == null) break
+            everConnected = true
+            var framesThisConnection = 0L
+            while (running) {
+                val t0 = SystemClock.elapsedRealtime()
+                try {
+                    val bmp = synchronized(xio) { x.getImage() }
+                    frames++
+                    framesThisConnection++
+                    main.post { image.setImageBitmap(bmp) }
+                } catch (t: Throwable) {
+                    P7Log.say(context, "P7X11 frame failed after $framesThisConnection frames: $t")
+                    break
+                }
+                lastGrabMs = SystemClock.elapsedRealtime() - t0
+                val rest = 120 - lastGrabMs
+                if (rest > 0) try { Thread.sleep(rest) } catch (_: InterruptedException) { break }
             }
-            lastGrabMs = SystemClock.elapsedRealtime() - t0
-            val rest = 120 - lastGrabMs
-            if (rest > 0) try { Thread.sleep(rest) } catch (_: InterruptedException) { break }
+            try { x.close() } catch (_: Throwable) { }
+            x11 = null
+            if (running) {
+                // B-074: Xvfb went away (or restarted). Show the state and try again.
+                P7Log.say(context, "P7X11 connection lost, reconnecting")
+                main.post { status.text = "Starting..."; status.visibility = View.VISIBLE }
+                try { Thread.sleep(X11ConnectPolicy.STEP_MS) } catch (_: InterruptedException) { break }
+            }
         }
-        P7Log.say(context, "P7X11 loop end frames=$frames")
-        try { x.close() } catch (_: Throwable) { }
-        x11 = null
+        P7Log.say(context, "P7X11 loop end frames=$frames connected=$everConnected")
+        main.post { if (!running) status.text = "X11 window closed" }
+    }
+
+    /**
+     * B-074: wait for Xvfb. Retries every [X11ConnectPolicy.STEP_MS] for up to
+     * [X11ConnectPolicy.WINDOW_MS]; shows "Starting..." meanwhile. Null only when the window is
+     * gone or the time box ran out (then the status says so and stays visible).
+     */
+    private fun connectWithRetry(): Phase2X11.X11? {
+        val started = SystemClock.elapsedRealtime()
+        var attempt = 0
+        while (running && X11ConnectPolicy.shouldRetry(started, SystemClock.elapsedRealtime())) {
+            attempt++
+            try {
+                val x = Phase2X11.X11.connect()
+                x.initXtest()
+                x.initKeyboard()
+                x11 = x
+                P7Log.say(context, "P7X11 connected attempt=$attempt after_ms=${SystemClock.elapsedRealtime() - started}")
+                main.post { status.visibility = View.GONE }
+                // B-063: side-by-side placement even though there is no window manager. Runs on
+                // its own connection; harmless when the guest apps are not up yet.
+                try {
+                    P7Log.say(context, "P7X11 place ${Phase2X11.placeWindows()}")
+                } catch (t: Throwable) {
+                    P7Log.say(context, "P7X11 place failed: $t")
+                }
+                return x
+            } catch (t: Throwable) {
+                if (attempt == 1 || attempt % 20 == 0) {
+                    P7Log.say(context, "P7X11 connect attempt=$attempt failed: $t")
+                }
+                if (!main.post {
+                        status.text = "Starting... (attempt $attempt)"
+                        status.visibility = View.VISIBLE
+                    }) return null
+                try { Thread.sleep(X11ConnectPolicy.STEP_MS) } catch (_: InterruptedException) { return null }
+            }
+        }
+        if (running) {
+            P7Log.say(context, "P7X11 gave up after ${X11ConnectPolicy.WINDOW_MS} ms")
+            main.post { status.text = "X server did not start (retry by reopening the window)" }
+        }
+        return null
     }
 
     // ------------------------------------------------------------------ pointer

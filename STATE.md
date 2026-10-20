@@ -6,29 +6,27 @@ corrects it after review.
 
 ## Now
 
-- **Phase:** 7 of 13, **round 3 (2026-10-20 03:21) PARTIAL - not closed; the phase gate is NOT met.**
-  **New on the phone this round:** (a) **B-066 half done** - shell + WebView at density 1.0 /
-  dpi 160, `devicePixelRatio=1`, VS Code UI at 1:1 (`p7c/i2-now.png`). (b) **The Android window
-  works for rendering**: the shell window creates its own `phase1-owned` VirtualDisplay on its
-  SurfaceView and the Phase-1 B1 route moves the guest activity's decor into a Presentation on
-  it, so Google Tasks' own "Welcome to Tasks" UI appears inside the window (`p7c/s10.png`,
-  `P7AND display id=53 900x576`, `B1_PRESENTATION_SHOWN ... display=53 target=900x576`).
-  (c) **PC input reaches the guest in-process-ish**: the presentation lives in the GUEST process,
-  so a static call from the shell always saw `null`; a same-uid abstract LocalSocket
-  (`B1_INPUT listening dev.unifieddesktop.guestinput`) now carries touch/key events, and a click
-  on "Sign in" was delivered (`handled=true`) and navigated the guest. No INJECT_EVENTS, no
-  Accessibility (D3/D5). (d) **B-067 survived 61 min 40 s** of live 55-61 fps streaming with
-  `dropped=0` and no 997 (it then died on a new error, `read: cannot decrypt peer's message`,
-  B-072). (e) Numbers with everything open: PSS 197 MB, 12 of our processes, app CPU 126%
-  (~1.6 of 8 cores), phone 351-388% busy of 800%, battery 38.2 C (stable over 45 s), 22%.
-  **Not met:** one side-by-side gate screenshot (all four kinds were open together, `s17.png`/
-  `s19.png`, but the Android window went black on reopen (B-070), the NPP window's frame loop was
-  started before Xvfb (the Xvfb root capture `p7c/x11cap2.png` does show NPP + xeyes), the VS Code
-  window stayed blank because code-server was started after it, and title-bar drags stopped moving
-  windows (B-071)); `npp7` and `code7` typing are NOT proven on the phone; Tasks typing is
-  impossible without an account. Gates: Android `BUILD SUCCESSFUL in 37s`; `cargo test --release`
-  44/44; clippy clean. Record: `docs/PHASE7_RESULT.md` "Round 3". Cleanup verified: 0 of our
-  processes, no DaemonService, stayon=0, brightness=2047, no adb forwards, gradle daemon stopped.
+- **Phase 8 (App Center), 2026-10-20 06:35: PARTIAL - the catalog, picker and window are built
+  and run on the phone; the phase gate is NOT met.** Catalog 13 apps in
+  `assets/app_catalog.json` (the 11 section-7 names + GIMP, Firefox); pure picker (rating, then
+  D7 kind order, then version) with the section-7 test **11/11 PASS** against the real asset
+  file; App Center window (search, picked version/kind/rating, Install/Open/Uninstall, Not yet
+  reason, "Open any .exe"), start-menu entry, `p6:appcenter:*` harness. Phone evidence: 11
+  **phone, harness-driven** pictures (`p8/round/1_vscode.png` ... `11_paintnet.png`); PC-typed
+  end-to-end Notepad++ (pinned URL + SHA-256 downloaded/verified/unpacked, window content
+  `npp_open_pc.png`) and Excalidraw (`excalidraw_open_pc.png`); Tasks imported (`ok=true`) with
+  its own welcome screen (`pc0.png`); uninstall `ok=true msg=uninstalled` then re-import. **Not
+  built:** microsoft/winget-pkgs manifest fetch, 7-Zip silent install, Linux `.deb` installer;
+  "Open any .exe" not exercised (SKIPS row). **Not met:** only Tasks, Excalidraw and Notepad++
+  were shown with their own content after Install/Open; Zoom, Photopea, xeyes, xcalc, 7-Zip,
+  Minesweeper and VS Code were picker-only. Record `docs/PHASE8_RESULT.md`.
+- **Phase 7 round 4 (2026-10-20 05:05): PARTIAL - gate not met.** B-073 (kernel uid; mostly fixed - a one-line leftover is open, see BUGS), B-074 (X11
+  retry), B-075 (VS Code window starts code-server), B-076 (TextureView SurfaceTexture),
+  B-070 (close releases the guest) and B-071 (title-bar drag) fixed and proven on the phone (B-073 except its leftover).
+  Gate picture `p8/gate_npp.png` (04:20:50): Notepad++ + xeyes, VS Code workbench, Android Tasks
+  live together. `npp7` typed (`p8/npp7e.png`, still holds the B-077 flood); `code7` **not**
+  typed (Explorer row and Ctrl+P failed, B-078); 20 s drag fps skipped (SKIPS 4f; round 3
+  measured 55-61 fps). Record: `docs/PHASE7_RESULT.md` "Round 4".
 - **Round 2 (2026-10-19 16:30 hard stop):**
   Items 1-2 done (+ item 9 not needed): **B-061 FIXED and proven on the phone** (idle app -> 0 DaemonService
   records; headless Tasks launch -> DaemonService + neutral notification `Android app engine /
@@ -64,16 +62,16 @@ corrects it after review.
   1.0 fps, drag 30.6 fps; typing medians 0.14/8.4/26.8 ms; stuck keys 0. Emulator-only limits:
   **B-056** (mitigated in code), **B-057** (PC window black on the emulator stream; not
   reproduced on the phone).
-- **Last updated:** 2026-10-19 16:22, agent (Phase 7 round at the hard stop). Teardown verified on
-  the phone: broadcasts `phase7x close`, `phase3x cs-stop`, `phase2x killall`, then
-  `am force-stop dev.unifieddesktop.app`; `ps` shows **0** Xvfb/xeyes/wineserver/notepad/libnode/app
-  processes, `dumpsys activity services` **0** DaemonService records, `svc power stayon false`
-  (`stay_on_while_plugged_in=0`). Receiver + `adb forward` removed; Gradle daemon stopped. Evidence
-  kept in the temp p7 dir (`pc-final.png`, `x11now.png`, `gate_android.log`, `gate_cargo2.log`).
-- **Next action:** manager review of Phase 7 (decisions on B-062..B-065, the deferred input items
-  and the item-5/6/7/8 SKIPS rows). Phase 7 stays open until the input paths and the missing window
-  kinds are done. Earlier open owner items: the AOA round and the 5-step no-developer-mode check
-  (SKIPS).
+- **Last updated:** 2026-10-20 06:35, agent (Phase 8 + Phase 7 round 4 close-out; TODO and all
+  records are final - this is the last file written). Teardown
+  verified on the phone: `am force-stop dev.unifieddesktop.app`, `settings put global
+  stay_on_while_plugged_in 0`, `screen_brightness 2047`, `forward --remove-all`; `ps` shows **0**
+  app/wine/Xvfb/box64 processes, `dumpsys activity services` **0** DaemonService records. PC
+  receiver stopped; Gradle daemon stopped. Evidence kept in the temp dirs `p8/` and `p7c/`.
+- **Next action:** manager review of Phase 8 (3 apps with content vs the 11-row gate) and Phase 7
+  round 4 (B-077/B-078). Owner decisions needed on the missing installers (winget manifest,
+  7-Zip, .deb) and the "Open any .exe" exercise (SKIPS). Earlier open owner items: the AOA round
+  and the 5-step no-developer-mode check (SKIPS).
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app
@@ -133,6 +131,7 @@ corrections in `docs/PHASE1_RESULT.md`.
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6: Q1-Q4 answered (records in `docs/PHASE1_RESULT.md`...`PHASE4_RESULT.md`); Q5 NOT PROVEN - AOA round deferred (SKIPS.md row); Q6 answered (custom framed protocol over TCP + TLS 1.3, not QUIC/WebRTC). |
 | Phone round (Phase 6 item 8) | **RUN 2026-10-19 08:02-08:31, PASS** except the typing-latency samples (SKIPS.md residual: no `P5 LAT`/`LATSTAGE` during PC typing - needs the probe path explained). Evidence: `docs/PHASE6_RESULT.md` section 1b + the phone PNGs, all captured from the PC window's video rectangle. |
-| Phase 7 round (2026-10-19) | **PARTIAL at the 16:30 hard stop.** B-061 fixed + proven (phone). X11 window shows the Xvfb screen on the PC (Notepad++ + xeyes) but PC keys do not reach it (B-062), xeyes placement open (B-063), harness `:`-parser + receiver letterbox mapping logged (B-064); VS Code window never rendered (B-065); item 5 not built; item 8 fps/PSS/CPU numbers NOT RUN; items 3-4 deferred. Evidence: `docs/PHASE7_RESULT.md`, temp `p7\pc-final.png`, `x11now.png`, `gate_android.log`, `gate_cargo2.log`. |
+| Phase 8 (2026-10-20) | **PARTIAL - gate NOT met.** Catalog + picker (section-7 test 11/11) + App Center window built and run; Notepad++, Excalidraw and Tasks shown with their own content; 7-Zip/winget-manifest/.deb installers and "Open any .exe" exercise NOT built (SKIPS). Remaining: the other section-7 apps opened with content. Evidence: `docs/PHASE8_RESULT.md`, temp `p8/`. |
+| Phase 7 round 4 (2026-10-20) | **PARTIAL - gate not met.** B-070/B-071/B-073/B-074/B-075/B-076 fixed + proven; gate picture `p8/gate_npp.png`; `npp7` typed; `code7` not typed (B-078, Explorer/Quick Open). Record: `docs/PHASE7_RESULT.md` "Round 4". |
 | B-056 / B-057 / B-058 (Phase 6) | Open in BUGS.md awaiting the manager's decision: B-056 emulator encoder configure rejection (mitigated in code); B-057 PC black window on the **emulator** stream only (FIX NOW per the manager; the phone round did NOT reproduce it; its PC half is now written + tested - cargo 42/42); B-058 title-bar drag lost the y delta on the phone (a real SendInput drag this round moved nothing at all - still open). |
-| B-062..B-065 (Phase 7) | Open in BUGS.md awaiting the manager's decision: X11 window does not receive PC keys; xeyes cannot be placed (no WM); harness `phase2x` splits on `:` and the receiver ignores the video letterbox when mapping clicks; the shell Browser window did not render code-server. |
+| B-062..B-065 (Phase 7) | Mostly closed by round 4: PC keys reach Notepad++ (`npp7` landed, B-062), xeyes is placed by `place` (B-063), the harness handles multi-part commands (B-064), the VS Code window loads code-server (B-065). Open from Part A: B-077 (X11 flood after a lost key-up) and B-078 (VS Code Explorer/Ctrl+P from the PC). |

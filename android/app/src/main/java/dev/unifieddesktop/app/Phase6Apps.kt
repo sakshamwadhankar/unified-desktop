@@ -276,6 +276,51 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
                 go(); true
             } else false
         }
+        // B-075: open the window before code-server is up and it must still work. Start the
+        // server (or reuse a healthy one), then load the page; the title shows the wait.
+        if (codeServer) {
+            status.text = "Starting VS Code..."
+            post { ensureCodeServer(defaultCodeFolder()) }
+        }
+    }
+
+    /** The Phase-3 workspace code-server serves; the window opens this when nothing is given. */
+    fun defaultCodeFolder(): String =
+        java.io.File(Phase3Native.dir(context), "workspace").absolutePath
+
+    /**
+     * B-075: make sure code-server is running, then log in and load the page. A healthy
+     * session is reused; otherwise the server is started on a worker thread (the window stays
+     * responsive and says "Starting VS Code..."). Waits at most [CodeServerGate.MAX_MS];
+     * logs every step.
+     */
+    fun ensureCodeServer(folder: String = defaultCodeFolder()) {
+        status.text = "Starting VS Code..."
+        Thread({
+            val sf = Phase3Server.sessionFile(context)
+            var code = 0
+            var port = -1
+            if (sf.isFile) {
+                sf.useLines { ls ->
+                    for (l in ls) if (l.startsWith("port=")) {
+                        port = l.substringAfter('=').trim().toIntOrNull() ?: -1
+                    }
+                }
+                if (port > 0) code = Phase3Server.healthz(port).first
+            }
+            P7Log.say(context, "VSCODE gate session=${sf.isFile} port=$port healthz=$code")
+            if (CodeServerGate.needsStart(sf.isFile && port > 0, code)) {
+                P7Log.say(context, "VSCODE starting code-server (wait up to ${CodeServerGate.MAX_MS} ms)")
+                val s = Phase3Server.start(context, CodeServerGate.MAX_MS)
+                if (s == null) {
+                    post { status.text = "code-server did not start (see p3.log)" }
+                    P7Log.say(context, "VSCODE start FAILED")
+                    return@Thread
+                }
+                P7Log.say(context, "VSCODE start ok port=${s.port} health=${s.startMs} ms")
+            }
+            post { openCodeServer(folder) }
+        }, "p7-cs-gate").start()
     }
 
     fun go() {
@@ -288,6 +333,12 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         address.setText(url)
         web.loadUrl(url)
         android.util.Log.i("Phase6", "BROWSER go $url")
+    }
+
+    /** Phase 8 App Center: open a catalog web app's URL in this window. */
+    fun openUrl(url: String) {
+        address.setText(url)
+        go()
     }
 
     /**
@@ -415,6 +466,21 @@ object BrowserUrl {
             else -> "https://$t"
         }
     }
+}
+
+/**
+ * B-075's decision, pure so it is unit-tested: reuse a code-server session only when its
+ * recorded port answers /healthz with 200; otherwise start one (waiting up to [MAX_MS]).
+ */
+object CodeServerGate {
+    const val POLL_MS = 500L
+    const val MAX_MS = 90_000L
+
+    fun needsStart(sessionUsable: Boolean, healthCode: Int): Boolean =
+        !sessionUsable || healthCode != 200
+
+    fun expired(startedMs: Long, nowMs: Long, maxMs: Long = MAX_MS): Boolean =
+        nowMs - startedMs >= maxMs
 }
 
 /**

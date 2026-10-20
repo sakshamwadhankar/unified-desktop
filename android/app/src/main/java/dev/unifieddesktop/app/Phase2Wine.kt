@@ -818,6 +818,39 @@ object Phase2Wine {
         writeLog(ctx)
     }
 
+    /**
+     * Phase 8 App Center "Open any .exe": run a user-chosen Windows program as DATA under the
+     * shipped Wine loader (never an executable from app-writable storage run natively). The
+     * caller has already booted Wine/Xvfb.
+     */
+    fun openExe(ctx: Context, path: String): Boolean {
+        val exe = File(path)
+        if (!exe.isFile) { say("APPCTR exe missing $path"); return false }
+        val pid = startBin(ctx, loaderBin(ctx), waitForExit = false, exe.absolutePath)
+        say("APPCTR exe=$path pid=$pid")
+        writeLog(ctx)
+        return pid > 0
+    }
+
+    /**
+     * App Center "Open" for a catalog X11 app: make sure Xvfb + Wine are up, then start the
+     * program itself (Notepad++ through the Wine loader, xeyes from the rootfs).
+     */
+    fun openCatalogApp(ctx: Context, id: String) {
+        when (id) {
+            "notepadpp" -> { boot(ctx, null); startNpp(ctx) }
+            "xeyes" -> Phase2X11.startXeyes(ctx)
+            "xcalc" -> Phase2X11.startXcalc(ctx)
+            "minesweeper" -> {
+                boot(ctx, null)
+                val pid = startBin(ctx, loaderBin(ctx), waitForExit = false, "winemine.exe")
+                say("APPCTR winemine pid=$pid")
+                writeLog(ctx)
+            }
+            else -> say("APPCTR no X11 program for $id")
+        }
+    }
+
     fun startNpp(ctx: Context) {
         if (!nppExe(ctx).isFile) { say("WINE fail: ${nppExe(ctx)} missing"); return }
         Phase2X11.ensureXvfb(ctx)

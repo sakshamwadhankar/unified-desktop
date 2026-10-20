@@ -65,3 +65,40 @@ Evidence (`C:\\Users\\Asus\\AppData\\Local\\Temp\\opencode\\p7c`): `s10.png` (Ta
 the shell window), `s12.png`/`s17.png`/`s18.png` (cascaded windows, VS Code blank),
 `x11cap2.png` (X11 root: Notepad++ + xeyes do render in Xvfb), `view-r7.log` (55-61 fps,
 dropped=0), `view-r6.err`/`view-r7.log` (B-069), `ui3.xml` (B-048 dialog).
+
+## Round 4 (2026-10-20 03:35-05:05): fixes and the gate
+
+Fixed and proven on the phone 2c0f6edc:
+
+- **B-073**: the guest input bridge now accepts only the kernel uid of our own process. In the
+  BlackBox guest, `Process.myUid()`, `Os.getuid()` and the `st_uid` of `/proc/self` all
+  report 10009, while the kernel's `/proc/self/status` says 10476; the guest parses that
+  `Uid:` line, one bad accept no longer kills the loop. Log: `B1_INPUT listening ...
+  realUid=10476 myUid=10009`, close answered `reply=true`.
+- **B-074**: the X11 window retries every 500 ms for 60 s, shows "Starting...", and reconnects.
+  Log: window opened before Xvfb -> `attempt=1 failed ... ECONNREFUSED`, then `connected
+  attempt=11 after_ms=5218`; after the 04:35 Xvfb restart `connected attempt=37
+  after_ms=18367`. No user action.
+- **B-075**: the VS Code window starts code-server itself. Log: stale port 36031 healthz=0 ->
+  `VSCODE start ok port=32883 health=2493 ms` -> workbench loaded.
+- **B-076**: the Android window froze the Phase-5 encoder when its VirtualDisplay rendered into
+  a SurfaceView surface (phone `sent` stuck at 47, PC `rx=0`). It now uses a TextureView
+  SurfaceTexture; `sent` kept climbing with `dropped=0`.
+- **B-070**: close now sends `C <pkg>` over the input socket, the guest finishes the
+  activities and the display is released; reopening relaunches. Proven twice (04:01:33 close
+  reply=true + 04:01:53 reopen display 64 + Tasks live in `p8/reopen1.png`; 04:04:51 close,
+  04:04:56 reopen display 67).
+- **B-071**: title-bar drag moved the X11 window (60,48) -> (280,168) with `P7WIN drag` logs;
+  all three gate windows were moved by real PC drags afterwards.
+
+The gate picture is `p8/gate_npp.png` (04:20:50): one PC screenshot with Notepad++ and xeyes
+(X11), the VS Code workbench and Android Tasks, all live. Typing: `npp7` landed in
+Notepad++ (`p8/npp7e.png`; the line still holds the B-077 flood). `code7` did **not**:
+the VS Code workbench loaded, PC clicks and keys reached the shell (`P7WIN down ...
+hit=CONTENT`; `P6SHELL key` C,O,D,E,7 `handled=true`), but the Explorer's "workspace"
+row never expanded and Ctrl+P never opened Quick Open, so `phase7phone.txt` could not be
+opened; the file stayed `phone-gate`. SKIPS 4e. The 20 s drag fps measurement was skipped
+(SKIPS 4f); round 3 measured 55-61 fps.
+
+New bug: **B-077** (lost X11 key-up on the 04:17:21 reconnect -> Xvfb auto-repeat typed
+~4,900 `p` into Notepad++; open).

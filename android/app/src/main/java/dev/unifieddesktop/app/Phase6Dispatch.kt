@@ -33,6 +33,7 @@ object Phase6Dispatch {
     private val main = Handler(Looper.getMainLooper())
 
     fun run(ctx: Context, cmd: String): String {
+        P7Log.say(ctx, "P6DISPATCH cmd=$cmd")
         val out = AtomicReference("(no answer)")
         val latch = CountDownLatch(1)
         main.post {
@@ -45,6 +46,7 @@ object Phase6Dispatch {
             }
         }
         try { latch.await(8, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+        P7Log.say(ctx, "P6DISPATCH answer=${out.get()}")
         return out.get()
     }
 
@@ -57,6 +59,25 @@ object Phase6Dispatch {
         val arg = if (parts.size > 1) parts[1] else ""
         return when (what) {
             "shell" -> s.stats()
+            // Phase 8 App Center driver: search/select/install/open/uninstall/exe. The sub-command
+            // and its argument are split at the first ':' after "appcenter".
+            "appcenter" -> {
+                val ac = s.openApp(ShellRoot.App.APPCENTER).content as? AppCenterView
+                    ?: return "no app center"
+                val sub = arg.substringBefore(':').ifEmpty { "summary" }
+                val x = arg.substringAfter(':', "").trim()
+                when (sub) {
+                    "summary", "open" -> ac.summary()
+                    "search" -> ac.setQuery(x)
+                    "rows" -> ac.visibleNames()
+                    "select" -> ac.selectId(x)
+                    "install" -> ac.installSelected()
+                    "run" -> ac.openSelected()
+                    "uninstall" -> ac.uninstallSelected()
+                    "exe" -> ac.runExe(x)
+                    else -> "unknown appcenter [$sub]"
+                }
+            }
             // Per-window geometry, for the real-mouse tests (B-058/B-064b): the harness answers
             // with every window's id/title/rect so a drag can be measured, not eyeballed.
             "rects" -> s.model.all().joinToString(" ") { w ->
@@ -70,6 +91,7 @@ object Phase6Dispatch {
                     arg.lowercase() == "test" -> ShellRoot.App.TEST
                     arg.lowercase() == "x11" -> ShellRoot.App.X11
                     arg.lowercase() == "vscode" -> ShellRoot.App.VSCODE
+                    arg.lowercase() == "appcenter" -> ShellRoot.App.APPCENTER
                     arg.lowercase().startsWith("android") -> ShellRoot.App.ANDROID
                     else -> return "unknown app [$arg]"
                 }
@@ -107,9 +129,10 @@ object Phase6Dispatch {
             "vscode" -> {
                 val f = s.openApp(ShellRoot.App.VSCODE)
                 val b = f.content as BrowserView
-                val folder = if (arg.isNotEmpty()) arg
-                    else java.io.File(Phase3Native.dir(ctx), "workspace").absolutePath
-                "vscode ${b.openCodeServer(folder)}"
+                val folder = if (arg.isNotEmpty()) arg else b.defaultCodeFolder()
+                // B-075: starts code-server first when it is not running, then loads the page.
+                b.ensureCodeServer(folder)
+                "vscode starting/loading folder=$folder"
             }
             "probe" -> {
                 val b = browser(s)

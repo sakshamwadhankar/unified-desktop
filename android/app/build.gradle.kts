@@ -7,4 +7,4 @@ android { namespace = "dev.unifieddesktop.app"; compileSdk = 36
     packaging { jniLibs { useLegacyPackaging = true } }
     testOptions { unitTests.isReturnDefaultValues = true }
 }
-dependencies { implementation(project(":engine")); implementation("org.tukaani:xz:1.10"); testImplementation("junit:junit:4.13.2") }
+dependencies { implementation(project(":engine")); implementation("org.tukaani:xz:1.10"); testImplementation("junit:junit:4.13.2"); testImplementation("org.json:json:20240303") }
