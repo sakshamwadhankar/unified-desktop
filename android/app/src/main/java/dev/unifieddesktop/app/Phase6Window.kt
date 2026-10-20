@@ -246,6 +246,11 @@ class ShellWindowView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val w = width
+        // B-091: every frame owns an opaque body. Several content views intentionally have
+        // transparent gaps; without this the maximized window behind showed through a
+        // raised/focused window and it looked as if focus had not raised it.
+        paint.color = 0xFF20242C.toInt()
+        canvas.drawRect(0f, TITLE_H.toFloat(), w.toFloat(), height.toFloat(), paint)
         paint.color = if (isFocusedWindow) 0xFF2B3A67.toInt() else 0xFF3A3F4B.toInt()
         canvas.drawRect(0f, 0f, w.toFloat(), TITLE_H.toFloat(), paint)
         textPaint.color = Color.WHITE
@@ -281,7 +286,8 @@ class ShellWindowView(
         paint.style = Paint.Style.FILL
     }
 
-    private fun titleText(): String = if (win.maximized) "${app.title()} [max]" else app.title()
+    /** The title bar follows the window model, so an X11 rename (B-087) is visible here. */
+    private fun titleText(): String = if (win.maximized) "${win.title} [max]" else win.title
 }
 
 /**

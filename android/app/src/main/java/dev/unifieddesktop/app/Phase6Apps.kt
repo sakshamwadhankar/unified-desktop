@@ -229,6 +229,13 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         settings.allowFileAccess = false
         settings.allowContentAccess = false
         settings.mediaPlaybackRequiresUserGesture = false
+        // B-082: Play Store sends an Android WebView to intent://, which this Browser cannot
+        // load. A desktop Chrome UA keeps it on https (and gives sites their desktop page).
+        if (!codeServer) {
+            settings.userAgentString =
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        }
         isFocusable = true
         isFocusableInTouchMode = true
         webViewClient = object : WebViewClient() {
@@ -532,7 +539,18 @@ class KeyWebView(context: Context) : WebView(context) {
                     android.util.Log.i("Phase6", "B039 route=ime ch='$ch' ic=${ic.javaClass.simpleName}")
                     return true
                 }
-                android.util.Log.w("Phase6", "B039 ime refused ch='$ch' ic=${ic?.javaClass?.simpleName}")
+                // B-078: VS Code's editor is an EditContext and exposes no InputConnection on
+                // this WebView (ic=null after the editor gets the focus), so PC text died here.
+                // Drive the page's own insertText instead - the same operation the IME performs
+                // one layer up - one character per PC key press.
+                evaluateJavascript(
+                    "document.execCommand('insertText',false," +
+                        org.json.JSONObject.quote(ch.toString()) + ")",
+                    null
+                )
+                lastCommitted = event.keyCode
+                android.util.Log.i("Phase6", "B039 route=js-insert ch='$ch'")
+                return true
             }
         }
         return super.dispatchKeyEvent(event)

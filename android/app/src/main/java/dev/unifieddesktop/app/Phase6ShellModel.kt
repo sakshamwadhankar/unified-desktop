@@ -30,7 +30,7 @@ class ShellModel(
     /** One window. [restore] holds the normal rectangle while maximized. */
     class Win(
         val id: Int,
-        val title: String,
+        var title: String,
         var x: Int,
         var y: Int,
         var w: Int,
@@ -73,6 +73,13 @@ class ShellModel(
         wins.add(win)
         focusedId = win.id
         return win
+    }
+
+    /** Rename a window in place (B-087: an X11 frame shows the app it was asked for). */
+    fun rename(id: Int, title: String): Boolean {
+        val win = byId(id) ?: return false
+        win.title = title
+        return true
     }
 
     /** Raise + focus. Returns false for an unknown id. */

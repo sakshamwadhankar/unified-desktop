@@ -97,9 +97,57 @@ running). Android apps come from Google Play.
 - Heat: read the phone's thermal headroom; when it gets hot, lower fps, then resolution.
 
 ## 13. The PC lock (receiver)
-States: **Normal -> Locking -> Locked -> Exiting -> Normal.**
-- Locking: switch to our own Windows desktop, full screen, install the keyboard hook, hide
-  the taskbar, apply the session policies.
-- Exiting (Exit button): remove everything in reverse order and switch back.
-- Crash safety: write what was changed before changing it; on the next start, if a
-  previous session did not exit cleanly, restore it first.
+States: **Normal -> Locking -> Locked -> Exiting -> Normal.** Only those edges are legal;
+an invalid transition is an error, and `exit()` is idempotent (`Normal`/`Exiting` do nothing).
+- **Session guard:** `view` takes the single-instance mutex (`Local\udreceiver-lock-single`)
+  and the named exit event **before** recovery, then passes that guard into `Lock::prepare`,
+  which holds it through desktop and journal creation. `lock-selftest` does the same;
+  `lock-recover` and the crash guard take the same mutex for their work. A process that
+  cannot take it refuses before reading or writing the journal, switching the desktop, or
+  connecting to the phone. `--no-lock` holds the guard for the whole view, so a second view
+  is still refused.
+- **Locking** (`Lock::prepare`, on the thread that will own the windows, before any window
+  or hook exists on it): start the crash guard on the default desktop, create
+  `udreceiver-lock-<pid>` on `WinSta0`, start the watchdog and status threads,
+  `SetThreadDesktop`, create the journal. `Journal::start_at` refuses a dirty or unparseable
+  existing journal instead of overwriting the only undo record.
+- **Engage** (`Lock::engage`): create one black `WS_POPUP` window per monitor, create the
+  video window with `--x/--y/--w/--h` (primary by default) and the Exit overlay at the
+  primary monitor's top-right (120x40, DPI-scaled, `WS_EX_TOPMOST|TOOLWINDOW|NOACTIVATE`),
+  install `WH_KEYBOARD_LL` **on the lock desktop**, then `SwitchDesktop`.
+- **Blocked keys** (swallow both `WM_KEYDOWN` and `WM_KEYUP`, return 1, count per key):
+  LWIN, RWIN, Alt+Tab, Alt+Shift+Tab, Alt+Esc, Ctrl+Esc, Ctrl+Shift+Esc, Alt+F4. The hook
+  does not look at the injected flag, so a test key and a physical key follow the same
+  rule. Mouse messages always pass.
+- **Exit sources:** the Exit overlay (`request_exit()`), `WM_CLOSE`, Esc while locked, the
+  pipeline ending (phone gone, `--seconds`), the watchdog (`--lock-max-seconds`, also
+  force-switches if the main thread stops draining), and internal error. All of them set
+  the same flag and end in `Lock::exit()`; no `PostQuitMessage` path skips it.
+- **Exit order:** unhook -> `SwitchDesktop(Default)` -> **verify that the input desktop is
+  `Default`**, retrying `ensure_default_input` before any cleanup -> restore policies ->
+  journal clean/delete -> close handles -> stop the lock threads; the caller then stops the
+  pipeline. If `Default` cannot be verified, the journal, Exit window, watchdog and guard
+  stay in place; the mutex is kept until the process exits so a second view cannot race the
+  armed watchdog. A failed policy restore also leaves the journal dirty. Both are fail-closed.
+- **Journal:** line-based `clean=0`, `desktop=<name>`, `pid=<owner pid>`, then one line per
+  value in the form `policy=<root>|<path>|<name>|<type>|<value>` with its original value.
+  It is flushed **before** a change is applied and the file is deleted before the journal is
+  marked clean. The parser is strict: a missing `clean=`/`desktop=`, duplicate, malformed or
+  unknown line is an error; a missing `pid=` is accepted as an old journal. An unreadable
+  journal is left byte-for-byte untouched.
+- **Recovery:** under the session guard, restore a dirty journal and return any leftover
+  `udreceiver-lock-*` input desktop to `Default`, even when the journal is clean, missing or
+  unreadable (in the unreadable case the journal itself is not touched). A recovery error
+  aborts `view`/`lock-selftest` before the phone connection or lock creation.
+- **Crash guard:** Windows does not return input to `Default` when a process on a private
+  desktop is killed (proven 2026-10-21). `udreceiver lock-guard --parent <pid>` waits on the
+  lock PID, takes the mutex, and restores only a journal whose `pid` and
+  `udreceiver-lock-<pid>` desktop both belong to that parent. If only the parent's desktop is
+  left, it switches that to `Default` and leaves a foreign journal alone; it never switches
+  another private desktop. If the guard is also killed, the next `view` recovers first.
+- **Policies** (only elevated **and** `--policies`): Task Manager, lock workstation, logoff,
+  fast user switching and change-password values, journaled and restored. Not applied in
+  the non-admin dev tests; the HKCU round-trip is unit-tested.
+- **Multi-monitor:** black windows cover every monitor, video stays on the chosen monitor's
+  rect, Exit stays on the primary monitor. Only a single-monitor laptop was available, so
+  this layout is code-only.

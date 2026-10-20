@@ -370,7 +370,19 @@ object Phase2X11 {
 
     fun xvfbRunning(): Boolean {
         val p = xvfb ?: return false
-        return try { p.exitValue(); false } catch (_: IllegalThreadStateException) { true }
+        val alive = try { p.exitValue(); false } catch (_: IllegalThreadStateException) { true }
+        if (!alive) return false
+        // B-084: reapLeftoverProcesses kills Xvfb behind this Process object; until Java
+        // observes the exit it still looks alive, so ensureXvfb skipped the restart and every
+        // X client hit ECONNREFUSED. The listening socket is the real liveness test.
+        return try {
+            java.net.Socket().use { s ->
+                s.connect(java.net.InetSocketAddress("127.0.0.1", 6000), 300)
+                true
+            }
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     fun ensureXvfb(ctx: Context) {
@@ -399,13 +411,46 @@ object Phase2X11 {
     fun startXcalc(ctx: Context) {
         ensureXvfb(ctx)
         val xb = File(Phase2Data.rootfsDir(ctx), "usr/bin/xcalc")
-        val pp = ProcessBuilder(Phase2Box64.libbox64(ctx).path, xb.absolutePath).apply {
+        val pp = ProcessBuilder(
+            Phase2Box64.libbox64(ctx).path, xb.absolutePath,
+            // B-080: the button labels are application resources, not baked into the binary;
+            // Debian ships them in etc/X11/app-defaults, which Xt does not search by default.
+            "-fn", "fixed",
+        ).apply {
             environment().clear(); environment().putAll(clientEnv(ctx))
+            // B-080: with no locale Xlib cannot build a fontset and xcalc draws a blank
+            // window ("Unable to load any usable fontset"); the C locale falls back to the
+            // core fonts that xmessage already renders.
+            environment()["LANG"] = "C"
+            environment()["LC_ALL"] = "C"
+            // Xt reads $XAPPLRESDIR/XCalc. The rootfs copy lives at etc/X11/app-defaults
+            // (Debian), not the compiled-in /usr/share/X11/app-defaults.
+            environment()["XAPPLRESDIR"] =
+                File(Phase2Data.rootfsDir(ctx), "etc/X11/app-defaults").absolutePath
         }.start()
         g3exe("XCALC", ctx, pidOf(pp))
         Thread { drain("XCALC_ERR", pp.errorStream) }.apply { name = "phase2-xcalc-err" }.start()
         Thread.sleep(3000)
         say("APPCTR xcalc started pid=${pidOf(pp)}")
+        placeWindows()
+        writeLog(ctx)
+    }
+
+    /** Phase 8: xmessage from the Debian x11-utils .deb installed by the App Center. */
+    fun startXmessage(ctx: Context) {
+        ensureXvfb(ctx)
+        val xb = File(Phase2Data.rootfsDir(ctx), "usr/bin/xmessage")
+        if (!xb.isFile) { say("APPCTR xmessage missing ${xb.path}"); return }
+        val pp = ProcessBuilder(
+            Phase2Box64.libbox64(ctx).path, xb.absolutePath,
+            "-center", "xmessage - installed from Debian x11-utils 7.7+5",
+        ).apply {
+            environment().clear(); environment().putAll(clientEnv(ctx))
+        }.start()
+        g3exe("XMESSAGE", ctx, pidOf(pp))
+        Thread { drain("XMESSAGE_ERR", pp.errorStream) }.apply { name = "phase2-xmessage-err" }.start()
+        Thread.sleep(3000)
+        say("APPCTR xmessage started pid=${pidOf(pp)}")
         placeWindows()
         writeLog(ctx)
     }
@@ -449,7 +494,13 @@ object Phase2X11 {
     }
 
     fun killXvfb(logStop: Boolean = true) {
-        xvfb?.let { it.destroy(); if (logStop) say("XVFB_STOP pid=$xvfbPid") }
+        xvfb?.let {
+            it.destroy()
+            // Wait for the process to go away and release port 6000; a fire-and-forget
+            // destroy let the next start race the old display and exit on "already active".
+            try { it.waitFor(2, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Throwable) {}
+            if (logStop) say("XVFB_STOP pid=$xvfbPid")
+        }
         xvfb = null
     }
 
@@ -750,8 +801,10 @@ object Phase2X11 {
         fun fakeKey(evtype: Int, detail: Int) = fakeInput(evtype, detail)
 
         var shiftCode = 50
+        var ctrlCode = 37
         private fun findShift() {
             keycodeFor(0xFFE1 /* Shift_L */)?.let { shiftCode = it.first }
+            keycodeFor(0xFFE3 /* Control_L */)?.let { ctrlCode = it.first }
         }
 
         fun typeText(text: String) {

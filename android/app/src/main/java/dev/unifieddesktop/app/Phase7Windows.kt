@@ -62,6 +62,7 @@ class X11WindowContent(context: Context) :
 
     @Volatile private var x11: Phase2X11.X11? = null
     @Volatile private var running = false
+    @Volatile private var reconnectRequested = false
     private var frames = 0L
     private var lastGrabMs = 0L
 
@@ -72,6 +73,10 @@ class X11WindowContent(context: Context) :
     // One X11 socket: the frame loop and the input worker both use it, so every request/reply
     // pair must be serialized (interleaved reads desync GetImage vs GetKeyboardMapping).
     private val xio = Any()
+    // B-077: every X keycode we pressed and have not released yet. XTEST keys belong to the
+    // server's core keyboard, so when this connection dies the server keeps them down and
+    // auto-repeats them; the next connection must release them.
+    private val pressedKeys = HashSet<Int>()
 
     init {
         addView(image, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -114,6 +119,8 @@ class X11WindowContent(context: Context) :
         while (running) {
             val x = connectWithRetry()
             if (x == null) break
+            // B-077: a release that died with the old socket is retried on the fresh one.
+            releasePressed(x, "after reconnect")
             everConnected = true
             var framesThisConnection = 0L
             while (running) {
@@ -128,9 +135,16 @@ class X11WindowContent(context: Context) :
                     break
                 }
                 lastGrabMs = SystemClock.elapsedRealtime() - t0
+                if (reconnectRequested) {
+                    reconnectRequested = false
+                    P7Log.say(context, "P7X11 reconnect requested by harness")
+                    break
+                }
                 val rest = 120 - lastGrabMs
                 if (rest > 0) try { Thread.sleep(rest) } catch (_: InterruptedException) { break }
             }
+            // B-077: release every key we still hold before the old client goes away.
+            releasePressed(x, "before close")
             try { x.close() } catch (_: Throwable) { }
             x11 = null
             if (running) {
@@ -256,7 +270,8 @@ class X11WindowContent(context: Context) :
         }
         // B-062: XTEST key I/O on the input worker (main thread would throw
         // NetworkOnMainThreadException before the request leaves the app).
-        val queued = submit { fire(client, sym, down) }
+        val ctrl = (meta and android.view.KeyEvent.META_CTRL_ON) != 0
+        val queued = submit { fire(client, sym, down, ctrl) }
         if (down) {
             P7Log.say(
                 context,
@@ -267,7 +282,7 @@ class X11WindowContent(context: Context) :
         return queued
     }
 
-    private fun fire(client: Phase2X11.X11, keysym: Int, down: Boolean): Boolean {
+    private fun fire(client: Phase2X11.X11, keysym: Int, down: Boolean, ctrl: Boolean): Boolean {
         return try {
             synchronized(xio) {
                 val kc = client.keycodeFor(keysym)
@@ -276,11 +291,29 @@ class X11WindowContent(context: Context) :
                     return false
                 }
                 val evType = if (down) 2 else 3 // KeyPress / KeyRelease
+                // Press Ctrl before the key on the way down, release the key before Ctrl on the
+                // way up. The PC sends the modifier both as its own key event (dropped: no
+                // keysym) and as meta on the character event, which is what carries it here.
+                if (down && ctrl) {
+                    client.fakeKey(evType, client.ctrlCode)
+                    pressedKeys.add(client.ctrlCode)
+                }
                 // Press Shift before the key on the way down, release the key before Shift on
                 // the way up, exactly like a real keyboard.
-                if (down && kc.second) client.fakeKey(evType, client.shiftCode)
+                if (down && kc.second) {
+                    client.fakeKey(evType, client.shiftCode)
+                    pressedKeys.add(client.shiftCode)
+                }
                 client.fakeKey(evType, kc.first)
-                if (!down && kc.second) client.fakeKey(evType, client.shiftCode)
+                if (down) pressedKeys.add(kc.first) else pressedKeys.remove(kc.first)
+                if (!down && kc.second) {
+                    client.fakeKey(evType, client.shiftCode)
+                    pressedKeys.remove(client.shiftCode)
+                }
+                if (!down && ctrl) {
+                    client.fakeKey(evType, client.ctrlCode)
+                    pressedKeys.remove(client.ctrlCode)
+                }
                 true
             }
         } catch (t: Throwable) {
@@ -292,7 +325,43 @@ class X11WindowContent(context: Context) :
     /** The character a phone keyboard would produce for this keycode+meta (pure mapping). */
     private fun charFor(keyCode: Int, meta: Int): Char = Phase5Protocol.keyCodeToChar(keyCode, meta)
 
+    /**
+     * B-077: send a KeyRelease for every keycode still held, on this X connection. Runs on the
+     * frame-loop thread, serialized with the input worker; a key is kept in the set when its
+     * release could not be written so the next connection retries it.
+     */
+    private fun releasePressed(client: Phase2X11.X11?, why: String) {
+        if (client == null) return
+        try {
+            synchronized(xio) {
+                if (pressedKeys.isEmpty()) return
+                val codes = pressedKeys.toList()
+                val failed = ArrayList<Int>()
+                for (kc in codes) {
+                    try {
+                        client.fakeKey(3, kc)
+                    } catch (_: Throwable) {
+                        failed.add(kc)
+                    }
+                }
+                pressedKeys.clear()
+                pressedKeys.addAll(failed)
+                P7Log.say(
+                    context,
+                    "P7X11 release $why sent=${codes.size - failed.size} kept=${failed.size} codes=$codes"
+                )
+            }
+        } catch (t: Throwable) {
+            P7Log.say(context, "P7X11 release $why failed: $t")
+        }
+    }
+
     override fun contentText(): String = ""
+
+    /** B-077 proof hook: drop this frame connection so the loop reconnects (and releases keys). */
+    fun requestReconnect() {
+        reconnectRequested = true
+    }
 
     private companion object {
         const val W = 1280

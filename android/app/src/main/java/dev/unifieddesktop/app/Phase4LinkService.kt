@@ -176,7 +176,9 @@ class Phase4LinkService : Service() {
             val s = Phase5Session(this, sink, { line -> say(line) })
             val ok = s.start(true)
             say("P5TEST start ok=$ok")
-            Thread.sleep((seconds.coerceIn(1, 120) * 1000).toLong())
+            // Up to an hour: the App Center round needs one live local shell for many apps,
+            // and the phone-side p6:shot path does not need a PC receiver window.
+            Thread.sleep((seconds.coerceIn(1, 3600) * 1000).toLong())
             say("P5TEST ${s.statsLine()}")
             s.stop("self-test done")
             say("P5TEST end")

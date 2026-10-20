@@ -6,27 +6,38 @@ corrects it after review.
 
 ## Now
 
-- **Phase 8 (App Center), 2026-10-20 06:35: PARTIAL - the catalog, picker and window are built
-  and run on the phone; the phase gate is NOT met.** Catalog 13 apps in
-  `assets/app_catalog.json` (the 11 section-7 names + GIMP, Firefox); pure picker (rating, then
-  D7 kind order, then version) with the section-7 test **11/11 PASS** against the real asset
-  file; App Center window (search, picked version/kind/rating, Install/Open/Uninstall, Not yet
-  reason, "Open any .exe"), start-menu entry, `p6:appcenter:*` harness. Phone evidence: 11
-  **phone, harness-driven** pictures (`p8/round/1_vscode.png` ... `11_paintnet.png`); PC-typed
-  end-to-end Notepad++ (pinned URL + SHA-256 downloaded/verified/unpacked, window content
-  `npp_open_pc.png`) and Excalidraw (`excalidraw_open_pc.png`); Tasks imported (`ok=true`) with
-  its own welcome screen (`pc0.png`); uninstall `ok=true msg=uninstalled` then re-import. **Not
-  built:** microsoft/winget-pkgs manifest fetch, 7-Zip silent install, Linux `.deb` installer;
-  "Open any .exe" not exercised (SKIPS row). **Not met:** only Tasks, Excalidraw and Notepad++
-  were shown with their own content after Install/Open; Zoom, Photopea, xeyes, xcalc, 7-Zip,
-  Minesweeper and VS Code were picker-only. Record `docs/PHASE8_RESULT.md`.
-- **Phase 7 round 4 (2026-10-20 05:05): PARTIAL - gate not met.** B-073 (kernel uid; mostly fixed - a one-line leftover is open, see BUGS), B-074 (X11
-  retry), B-075 (VS Code window starts code-server), B-076 (TextureView SurfaceTexture),
-  B-070 (close releases the guest) and B-071 (title-bar drag) fixed and proven on the phone (B-073 except its leftover).
-  Gate picture `p8/gate_npp.png` (04:20:50): Notepad++ + xeyes, VS Code workbench, Android Tasks
-  live together. `npp7` typed (`p8/npp7e.png`, still holds the B-077 flood); `code7` **not**
-  typed (Explorer row and Ctrl+P failed, B-078); 20 s drag fps skipped (SKIPS 4f; round 3
-  measured 55-61 fps). Record: `docs/PHASE7_RESULT.md` "Round 4".
+- **Phase 9 (PC lock + Exit): PASS on Windows 11 2026-10-21 05:10 (review rework + manager gate).** The lock
+  is a private `udreceiver-lock-<pid>` desktop on `WinSta0` (default desktop and taskbar
+  never hidden or modified), `WH_KEYBOARD_LL` blocks 8/8 combinations on down and up
+  (counters = 2, focus stayed on the video window), and a topmost no-activate **Exit**
+  overlay calls one exit path. Watchdog, `--lock-max-seconds`, `--freeze-video-after`, named
+  `lock-exit`, strict PID journal, and a PID-aware `lock-guard`. **Review fixes:** the
+  single-session mutex/event is taken **before** recovery and held through lock creation, so
+  a second `view` is refused before connect (42 ms) and `lock-recover` refuses a live lock
+  (exit 1, journal unchanged). Recovery/start fail closed: a dirty journal plus a denied
+  restore made `view` exit in 52 ms with the journal byte-identical and no lock;
+  `lock-selftest` refused; `Journal::start_at` never overwrites a dirty/unparseable journal.
+  `Lock::exit` verifies `Default` before cleanup; on failure the journal/watchdog/guard stay
+  armed. A clean journal on a leftover lock desktop returns to Default (75 ms); an
+  unparseable one does too (59 ms) without changing its bytes. **Phone:** normal Exit 291 ms
+  to process exit (switch 21, lock path 206); key/frozen click commands 984/641 ms (lock
+  paths 211/100); phone gone 1134 ms (lock 76); guard 12 ms (426 ms wall); 8/8 keys;
+  selftest PASS 8/8. If the guard is killed too, the next `view` recovers (T17: guard and
+  lock killed, next `view --no-lock` recovered the dirty journal, returned Default and
+  removed it; 6 s phone view). Locked: 1.2 % of one core, WS 133.9 MB, 1.0 fps,
+  decode 4.3-5.4 ms (pre-review sample). **Lock is now the default** (`--no-lock` opts out,
+  guard still held); `--no-input` implies no lock. Gates: Android **149 tests / 0 failures /
+  3 skipped**, lint+assemble **BUILD SUCCESSFUL**; PC **55/0 release**, clippy clean,
+  `git diff --check` exit 0. **B-093 fixed (phone)**; **Windows 10 SKIP** (no hardware;
+  SKIPS.md row); policies **not-admin** (HKCU round-trip unit test only); multi-monitor
+  code-only. Record `docs/PHASE9_RESULT.md`; evidence `p9t4`...`p9t11`, `p9t17` (manager),
+  `p9b093` (agent review logs removed). **Manager commit: Phase 8 + Phase 9, pushed to
+  origin/main.**
+- **Phase 7: PASS on the phone (2026-10-20 09:00).** B-073 (input uid), B-077 (X11 key
+  release on reconnect/close) and B-078 (VS Code Explorer click + Ctrl/Ctrl+P + typing) are
+  fixed and proven on 2c0f6edc: `B1_INPUT realUid=10476 myUid=10010`; forced X11 reconnect ->
+  exactly `npp8npp8npp8`; `phase7phone.txt` saved with `phone-gate` + `code8`. Record:
+  `docs/PHASE7_RESULT.md` Round 5.
 - **Round 2 (2026-10-19 16:30 hard stop):**
   Items 1-2 done (+ item 9 not needed): **B-061 FIXED and proven on the phone** (idle app -> 0 DaemonService
   records; headless Tasks launch -> DaemonService + neutral notification `Android app engine /
@@ -62,16 +73,22 @@ corrects it after review.
   1.0 fps, drag 30.6 fps; typing medians 0.14/8.4/26.8 ms; stuck keys 0. Emulator-only limits:
   **B-056** (mitigated in code), **B-057** (PC window black on the emulator stream; not
   reproduced on the phone).
-- **Last updated:** 2026-10-20 06:35, agent (Phase 8 + Phase 7 round 4 close-out; TODO and all
-  records are final - this is the last file written). Teardown
-  verified on the phone: `am force-stop dev.unifieddesktop.app`, `settings put global
-  stay_on_while_plugged_in 0`, `screen_brightness 2047`, `forward --remove-all`; `ps` shows **0**
-  app/wine/Xvfb/box64 processes, `dumpsys activity services` **0** DaemonService records. PC
-  receiver stopped; Gradle daemon stopped. Evidence kept in the temp dirs `p8/` and `p7c/`.
-- **Next action:** manager review of Phase 8 (3 apps with content vs the 11-row gate) and Phase 7
-  round 4 (B-077/B-078). Owner decisions needed on the missing installers (winget manifest,
-  7-Zip, .deb) and the "Open any .exe" exercise (SKIPS). Earlier open owner items: the AOA round
-  and the 5-step no-developer-mode check (SKIPS).
+- **Last updated:** 2026-10-21 05:20, manager (Phase 9 review accepted; manager gates
+  re-run). Final tree gated: Android `:app:testDebugUnitTest --rerun-tasks`
+  **149 tests / 0 failures / 3 skipped** and `lintDebug` + `assembleDebug`
+  **BUILD SUCCESSFUL**; PC `cargo test --release` **55/0**, clippy clean; `git diff --check`
+  exit 0 after the doc edits. Final verified status: **Phase 9 PASS on Windows 11 with the
+  phone**; B-093 fixed; T17 next-view recovery passed after the review. Teardown verified:
+  app absent, `stay_on_while_plugged_in` = 0, `screen_brightness` = 2047, phone Dozing,
+  `forward --list` empty, **0** app/wine/Xvfb/box64/winemine/code-server processes,
+  `dumpsys activity services dev.unifieddesktop.app` **0** ServiceRecord. PC input
+  `Default`, receiver stopped, no journal; Gradle daemons stopped. Evidence kept in
+  `p9t4`...`p9t11`, `p9t17` (manager), `p9b093` (and the Phase 8 sets); the agent's Phase 9
+  review temp logs were removed. **Manager commit: Phase 8 + Phase 9, pushed to
+  origin/main.**
+- **Next action:** Phase 9 is closed. Phase 10 is next (manager); do not start it without the
+  manager. Open decisions: accept the Windows 10 skip, and the still-open AOA /
+  no-developer-mode checks (SKIPS).
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app
@@ -131,7 +148,8 @@ corrections in `docs/PHASE1_RESULT.md`.
 |---|---|
 | Bets: Phases 1-4 | ARCHITECTURE.md section 6: Q1-Q4 answered (records in `docs/PHASE1_RESULT.md`...`PHASE4_RESULT.md`); Q5 NOT PROVEN - AOA round deferred (SKIPS.md row); Q6 answered (custom framed protocol over TCP + TLS 1.3, not QUIC/WebRTC). |
 | Phone round (Phase 6 item 8) | **RUN 2026-10-19 08:02-08:31, PASS** except the typing-latency samples (SKIPS.md residual: no `P5 LAT`/`LATSTAGE` during PC typing - needs the probe path explained). Evidence: `docs/PHASE6_RESULT.md` section 1b + the phone PNGs, all captured from the PC window's video rectangle. |
-| Phase 8 (2026-10-20) | **PARTIAL - gate NOT met.** Catalog + picker (section-7 test 11/11) + App Center window built and run; Notepad++, Excalidraw and Tasks shown with their own content; 7-Zip/winget-manifest/.deb installers and "Open any .exe" exercise NOT built (SKIPS). Remaining: the other section-7 apps opened with content. Evidence: `docs/PHASE8_RESULT.md`, temp `p8/`. |
+| Phase 9 (2026-10-21) | **PASS (review rework + manager gate).** Private desktop lock + Exit, 8/8 blocked keys, strict PID journal + PID-aware guard, session mutex before recovery, fail-closed start/recovery, verified Default exit. Phone: second view refused 42 ms; lock-recover refused while locked; Exit 291 ms; frozen/key click 641/984 ms (lock paths 100/211); phone gone 1134 ms (lock 76); guard 12 ms/426 wall; 8/8; selftest PASS; clean/unreadable leftover desktop 75/59 ms; T17 next view after guard+lock kill recovered the dirty journal and removed it. Gates: 149 Android/0/3 skipped, 55 PC/0 release, clippy 0, diff check 0. Skips: Windows 10 (no hardware), policies (not-admin), multi-monitor (code-only). Record: `docs/PHASE9_RESULT.md`. |
+| Phase 8 (2026-10-20) | **Round 6 complete; gate PASS on the phone with fresh 10/10.** Catalog 14, picker 11/11; B-083/B-085..B-092 fixed and phone-verified; Zoom's missing package routes to the official Browser Play page (B-092). Fresh content 10/10 (VS Code, Tasks, Zoom Play, Excalidraw, Photopea, xeyes, xcalc, Notepad++, 7-Zip, Minesweeper). Gates at the time: 148 Android tests / 0 failures / 3 skipped, lint+assemble green; 45 PC tests / 0; clippy exit 0. B-093 was fixed in Phase 9 (phone: `X11 desktop — winemine`). Evidence: `docs/PHASE8_RESULT.md` Round 6, `p8r6_*`. |
 | Phase 7 round 4 (2026-10-20) | **PARTIAL - gate not met.** B-070/B-071/B-073/B-074/B-075/B-076 fixed + proven; gate picture `p8/gate_npp.png`; `npp7` typed; `code7` not typed (B-078, Explorer/Quick Open). Record: `docs/PHASE7_RESULT.md` "Round 4". |
 | B-056 / B-057 / B-058 (Phase 6) | Open in BUGS.md awaiting the manager's decision: B-056 emulator encoder configure rejection (mitigated in code); B-057 PC black window on the **emulator** stream only (FIX NOW per the manager; the phone round did NOT reproduce it; its PC half is now written + tested - cargo 42/42); B-058 title-bar drag lost the y delta on the phone (a real SendInput drag this round moved nothing at all - still open). |
 | B-062..B-065 (Phase 7) | Mostly closed by round 4: PC keys reach Notepad++ (`npp7` landed, B-062), xeyes is placed by `place` (B-063), the harness handles multi-part commands (B-064), the VS Code window loads code-server (B-065). Open from Part A: B-077 (X11 flood after a lost key-up) and B-078 (VS Code Explorer/Ctrl+P from the PC). |

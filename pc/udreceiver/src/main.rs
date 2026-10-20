@@ -9,6 +9,7 @@
 #[cfg(windows)]
 mod aoa;
 mod crypto;
+mod lock;
 mod mdns;
 mod phase5;
 mod protocol;
@@ -32,6 +33,49 @@ fn main() -> ExitCode {
         "pair" => cmd_pair(&args[2..]),
         "bench" => cmd_bench(&args[2..]),
         "view" => cmd_view(&args[2..]),
+        "lock-status" => code(lock::cmd_status()),
+        "lock-exit" => code(lock::cmd_exit()),
+        "lock-recover" => code(lock::cmd_recover()),
+        "lock-guard" => {
+            let pid: u32 = flag(&args[2..], "--parent", "0").parse().unwrap_or(0);
+            code(lock::cmd_guard(pid))
+        }
+        "lock-selftest" => {
+            let secs: u64 = flag(&args[2..], "--seconds", "10").parse().unwrap_or(10);
+            code(lock::cmd_selftest(secs))
+        }
+        "lock-inject" => {
+            let rest = &args[2..];
+            let keys = rest.iter().any(|a| a == "--keys");
+            let click_exit = rest.iter().any(|a| a == "--click-exit");
+            let click = flag(rest, "--click", "");
+            let click = if click.is_empty() {
+                None
+            } else {
+                let mut it = click.split(',');
+                match (
+                    it.next().and_then(|v| v.trim().parse::<i32>().ok()),
+                    it.next().and_then(|v| v.trim().parse::<i32>().ok()),
+                ) {
+                    (Some(x), Some(y)) => Some((x, y)),
+                    _ => {
+                        eprintln!("--click wants <x>,<y>");
+                        return ExitCode::from(2);
+                    }
+                }
+            };
+            let expect = flag(rest, "--expect", "");
+            let shot = flag(rest, "--shot", "");
+            let windows = rest.iter().any(|a| a == "--windows");
+            code(lock::cmd_inject(
+                keys,
+                click,
+                click_exit,
+                if shot.is_empty() { None } else { Some(&shot) },
+                windows,
+                if expect.is_empty() { None } else { Some(&expect) },
+            ))
+        }
         "trust" => cmd_trust(&args[2..]),
         "--help" | "-h" | "help" => {
             print_usage();
@@ -54,14 +98,27 @@ fn flag(args: &[String], name: &str, default: &str) -> String {
     default.to_string()
 }
 
+/// A lock command returns a process status; the CLI maps it to an exit code.
+fn code(status: i32) -> ExitCode {
+    ExitCode::from(u8::from(status != 0))
+}
+
 fn print_usage() {
     println!(
         "usage:\n  udreceiver discover [--seconds <s>] [--to <ip[:port]>]\n  \
          udreceiver aoa list | probe | start [--vid <hex>]      (Windows host, item 8)\n  \
          udreceiver pair --addr <ip:port|auto> [--label <label>]\n  \
          udreceiver bench --addr <ip:port|auto> [--seconds <s>] [--window-kib <n>]\n  \
-         udreceiver view --addr <ip:port|auto> [--seconds <s>] [--soft]   full-screen desktop \
-         (Esc quits, F11 windowed)\n  \
+         udreceiver view --addr <ip:port|auto> [--seconds <s>] [--soft] [--lock|--no-lock]\n  \
+         \x20        [--lock-max-seconds <s>] [--freeze-video-after <s>] [--policies]   \
+         full-screen desktop\n  \
+         \x20        (Esc quits, F11 windowed; the PC locks by default, --no-lock keeps the desktop)\n  \
+         udreceiver lock-status                          input desktop, lock state, journal, hook counters\n  \
+         udreceiver lock-exit                            signal a running lock to exit (named event)\n  \
+         udreceiver lock-recover                         restore a dirty journal / return input to Default\n  \
+         udreceiver lock-guard --parent <pid>            (internal) crash supervisor for a lock session\n  \
+         udreceiver lock-selftest [--seconds <s>]        switch, inject 8 blocked keys, restore\n  \
+         udreceiver lock-inject [--keys] [--click <x>,<y>] [--click-exit] [--expect <desktop>]\n  \
          udreceiver trust list\n  udreceiver trust forget <fpr-prefix>"
     );
 }
@@ -243,10 +300,41 @@ fn cmd_view(rest: &[String]) -> ExitCode {
     };
     let seconds: u64 = flag(rest, "--seconds", "0").parse().unwrap_or(0);
     let soft = rest.iter().any(|a| a == "--soft");
+    let x: i32 = flag(rest, "--x", "0").parse().unwrap_or(0);
+    let y: i32 = flag(rest, "--y", "0").parse().unwrap_or(0);
+    let w: i32 = flag(rest, "--w", "0").parse().unwrap_or(0);
+    let h: i32 = flag(rest, "--h", "0").parse().unwrap_or(0);
+    let no_input = rest.iter().any(|a| a == "--no-input");
+    let lock_flag = rest.iter().any(|a| a == "--lock");
+    let no_lock = rest.iter().any(|a| a == "--no-lock");
+    let policies = rest.iter().any(|a| a == "--policies");
+    let lock_max_seconds: u64 = flag(rest, "--lock-max-seconds", "0").parse().unwrap_or(0);
+    let freeze_video_after: u64 = flag(rest, "--freeze-video-after", "0").parse().unwrap_or(0);
+    // --no-input (screen only, phone driven by its own harness) can never lock the PC.
+    let lock = if no_input || no_lock {
+        false
+    } else if lock_flag {
+        true
+    } else {
+        lock::DEFAULT_LOCK
+    };
     let id = ident();
     let store = TrustedPhoneStore::open();
     crypto::ensure_ring_default();
-    match view::run(&addr, seconds, soft, &id, &store) {
+    let opts = view::ViewOptions {
+        seconds,
+        soft,
+        x,
+        y,
+        w,
+        h,
+        no_input,
+        lock,
+        lock_max_seconds,
+        freeze_video_after,
+        policies,
+    };
+    match view::run(&addr, &opts, &id, &store) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("VIEW FAILED: {e}");

@@ -174,12 +174,16 @@ final class GuestPresentationHost extends AppLifecycleCallback {
             }
             try {
                 int uid = s.getPeerCredentials().getUid();
-                int me = android.os.Process.myUid();
-                if (uid != me && uid != realUid) {
+                // B-073: the kernel uid is the only identity worth trusting inside a BlackBox
+                // guest: Process.myUid() is virtualized to 10009 there, which on the phone is
+                // another real app's uid. Accept the shell (same real uid) only.
+                int expected = realUid >= 0 ? realUid : android.os.Process.myUid();
+                if (uid != expected) {
                     if (!rejectedUidLogged) {
                         rejectedUidLogged = true;
-                        Log.w(TAG, "B1_INPUT reject uid=" + uid + " (not myUid=" + me +
-                                " realUid=" + realUid + "), connection closed");
+                        Log.w(TAG, "B1_INPUT reject uid=" + uid + " (not " + expected +
+                                (realUid >= 0 ? " realUid" : " myUid (no /proc)") +
+                                "), connection closed");
                     }
                     continue;
                 }

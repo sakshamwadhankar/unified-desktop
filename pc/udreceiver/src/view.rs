@@ -70,14 +70,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetForegroundWindow,
-    GetMessageW,
+    PeekMessageW,
     GetSystemMetrics, PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow,
     SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
-    GWL_STYLE, HWND_TOPMOST, MSG, SM_CXSCREEN, SM_CYSCREEN,
+    GWL_STYLE, HWND_TOPMOST, MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN,
     SWP_FRAMECHANGED, SWP_SHOWWINDOW, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_KEYUP,
     WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
-    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SIZE, WM_SYSKEYDOWN,
+    WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SIZE, WM_SYSKEYDOWN,
     WM_SYSKEYUP, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE, WINDOW_EX_STYLE,
+    WS_EX_NOACTIVATE,
 };
 
 use crate::phase5::{self, InputEvent, VideoFrame};
@@ -110,6 +111,14 @@ struct Shared {
     pointer: Mutex<(i32, i32)>,
     running: AtomicBool,
     fullscreen: AtomicBool,
+    win_x: i32,
+    win_y: i32,
+    win_w: i32,
+    win_h: i32,
+    /// Display-only mode: never take focus (WS_EX_NOACTIVATE) and never forward the physical
+    /// mouse or keyboard. The phone is driven by its own harness instead, so the owner's
+    /// mouse and focus stay on the main desktop while this view fills the second screen.
+    no_input: bool,
     client_w: AtomicU32,
     client_h: AtomicU32,
     need_keyframe: AtomicU32,
@@ -124,13 +133,18 @@ struct Shared {
 }
 
 impl Shared {
-    fn new() -> Arc<Self> {
+    fn new(x: i32, y: i32, w: i32, h: i32, no_input: bool) -> Arc<Self> {
         Arc::new(Shared {
             hwnd: AtomicU64::new(0),
             events: Mutex::new(Vec::new()),
             pointer: Mutex::new((960, 540)),
             running: AtomicBool::new(true),
             fullscreen: AtomicBool::new(true),
+            win_x: x,
+            win_y: y,
+            win_w: w,
+            win_h: h,
+            no_input,
             client_w: AtomicU32::new(1920),
             client_h: AtomicU32::new(1080),
             need_keyframe: AtomicU32::new(0),
@@ -182,13 +196,36 @@ impl Shared {
     }
 }
 
+/// Everything `cmd_view` parsed. A struct keeps `run()` readable as Phase 9 adds the lock.
+#[derive(Debug, Clone, Copy)]
+pub struct ViewOptions {
+    pub seconds: u64,
+    pub soft: bool,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub no_input: bool,
+    /// Phase 9: switch to a private Windows desktop and block the exam keys.
+    pub lock: bool,
+    /// 0 = no limit. The watchdog force-restores when it expires.
+    pub lock_max_seconds: u64,
+    /// 0 = never. Stop presenting after this many seconds of lock (frozen-frame test).
+    pub freeze_video_after: u64,
+    pub policies: bool,
+}
+
 pub fn run(
     addr: &str,
-    seconds: u64,
-    force_soft: bool,
+    opts: &ViewOptions,
     identity: &crate::crypto::ReceiverIdentity,
     store: &crate::crypto::TrustedPhoneStore,
 ) -> Result<(), String> {
+    // The guard is acquired BEFORE recovery and held through lock creation (and for the
+    // whole session when --no-lock is used). A second view therefore fails here, before it
+    // connects to the phone, instead of restoring/stealing the live session's journal.
+    let lock_session = crate::lock::Session::acquire()?;
+    lock_session.recover()?;
     println!("[{TAG}] connecting to {addr}");
     let (mut session, description) = crate::session::connect_and_pair(addr, identity, store, "PC")?;
     println!("[{TAG}] {description}");
@@ -199,10 +236,33 @@ pub fn run(
         .map_err(|e| format!("set_read_timeout: {e}"))?;
     let _ = session.tls.get_mut().set_nodelay(true);
 
-    let shared = Shared::new();
+    let shared = Shared::new(opts.x, opts.y, opts.w, opts.h, opts.no_input);
     SHARED.set(shared.clone()).map_err(|_| "view already running")?;
 
-    let hwnd = create_window(&shared)?;
+    // The private desktop must exist, and this thread must be switched onto it, BEFORE any
+    // window or hook of this thread is created. Nothing above this line makes a window.
+    let lock_opts = crate::lock::LockOptions {
+        max_seconds: opts.lock_max_seconds,
+        policies: opts.policies,
+    };
+    let (mut lock, _lock_session) = if opts.lock {
+        (
+            Some(crate::lock::Lock::prepare(&lock_opts, lock_session)?),
+            None,
+        )
+    } else {
+        (None, Some(lock_session))
+    };
+
+    let hwnd = match create_window(&shared) {
+        Ok(h) => h,
+        Err(e) => {
+            if let Some(l) = lock.as_mut() {
+                l.abort();
+            }
+            return Err(e);
+        }
+    };
     shared.hwnd.store(hwnd.0 as u64, Ordering::SeqCst);
     let (cw, ch) = shared.client();
     focus_window(hwnd);
@@ -212,12 +272,26 @@ pub fn run(
         foreground_is(hwnd)
     );
 
+    if let Some(l) = lock.as_mut() {
+        if let Err(e) = l.engage(hwnd, &lock_opts) {
+            l.abort();
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd);
+            }
+            return Err(format!("lock engage: {e}"));
+        }
+        println!("[{TAG}] LOCK engaged (private Phase 9 desktop)");
+    }
+
     let sh = shared.clone();
+    let (soft, secs, freeze) = (opts.soft, opts.seconds, opts.freeze_video_after);
     let pipeline = std::thread::Builder::new()
         .name("p5-pipeline".into())
         .spawn(move || {
-            let r = pipeline_loop(&mut session, &sh, force_soft, seconds);
+            let r = pipeline_loop(&mut session, &sh, soft, secs, freeze);
             sh.running.store(false, Ordering::SeqCst);
+            // Wake the message loop. On a locked run this is just a wake-up: every exit path
+            // ends in Lock::exit() on the owner thread below.
             let h = HWND(sh.hwnd.load(Ordering::SeqCst) as *mut std::ffi::c_void);
             unsafe {
                 let _ = PostMessageW(Some(h), WM_CLOSE, WPARAM(0), LPARAM(0));
@@ -232,14 +306,40 @@ pub fn run(
         .spawn(move || stats_loop(sh2))
         .map_err(|e| format!("spawn stats: {e}"))?;
 
-    unsafe {
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+    // PeekMessage instead of a blocking GetMessage: the Exit button, the watchdog, `lock-exit`
+    // and the pipeline all raise a flag that must be noticed within one tick, and a blocking
+    // GetMessage would sit on WM_QUIT until something else woke the queue.
+    let mut quit = false;
+    while !quit {
+        if crate::lock::take_exit_request() {
+            println!("[{TAG}] exit requested (button/watchdog/lock-exit/Esc)");
+            break;
         }
+        let mut msg = MSG::default();
+        while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
+            if msg.message == WM_QUIT {
+                quit = true;
+                break;
+            }
+            unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        if quit || !shared.running.load(Ordering::SeqCst) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
     shared.running.store(false, Ordering::SeqCst);
+    // Order matters (ALGORITHMS.md section 13): restore the PC before the pipeline is joined,
+    // so the phone can never be left with a key held while the desktop is still locked.
+    if let Some(l) = lock.as_mut() {
+        match l.exit() {
+            Ok(()) => println!("[{TAG}] LOCK exited, input desktop={}", l.input_desktop()),
+            Err(e) => eprintln!("[{TAG}] LOCK exit error: {e}"),
+        }
+    }
     let r = pipeline.join().map_err(|_| "pipeline panicked")?;
     let _ = stats.join();
     println!("[{TAG}] window closed");
@@ -260,14 +360,18 @@ fn stats_loop(shared: Arc<Shared>) {
         }
         // Keep the keyboard on this window: without it, PC keystrokes go to whatever else is
         // open and the phone never sees them. Re-claimed at most every 2 s.
-        let hwnd = HWND(shared.hwnd.load(Ordering::Relaxed) as *mut std::ffi::c_void);
-        if !hwnd.0.is_null()
-            && !foreground_is(hwnd)
-            && last_focus_claim.elapsed() >= Duration::from_secs(2)
-        {
-            focus_window(hwnd);
-            last_focus_claim = Instant::now();
-            println!("[{TAG}] keyboard focus reclaimed by the session window");
+        // Phase 9: while the lock is active this thread is on the default desktop and cannot
+        // see or take the lock desktop's foreground; the lock's own window keeps focus.
+        if !crate::lock::is_active() {
+            let hwnd = HWND(shared.hwnd.load(Ordering::Relaxed) as *mut std::ffi::c_void);
+            if !hwnd.0.is_null()
+                && !foreground_is(hwnd)
+                && last_focus_claim.elapsed() >= Duration::from_secs(2)
+            {
+                focus_window(hwnd);
+                last_focus_claim = Instant::now();
+                println!("[{TAG}] keyboard focus reclaimed by the session window");
+            }
         }
         let now = Instant::now();
         let dt = now.duration_since(last).as_secs_f64().max(1e-6);
@@ -308,8 +412,16 @@ fn foreground_is(hwnd: HWND) -> bool {
 /// synthetic ALT events puts us in that state (the documented workaround), after which a plain
 /// SetForegroundWindow succeeds. The session window must hold the keyboard, or PC keystrokes
 /// land in whatever else the user has open.
+///
+/// Phase 9: on the private lock desktop the process owns the input already, and the ALT trick
+/// would be needless synthetic input on a locked machine, so it is skipped.
 fn focus_window(hwnd: HWND) {
     unsafe {
+        if crate::lock::is_active() {
+            let _ = SetForegroundWindow(hwnd);
+            let _ = SetFocus(Some(hwnd));
+            return;
+        }
         let alt = VK_MENU.0 as u8;
         keybd_event(alt, 0, KEYBD_EVENT_FLAGS(0), 0);
         keybd_event(alt, 0, KEYEVENTF_KEYUP, 0);
@@ -333,22 +445,30 @@ fn create_window(shared: &Arc<Shared>) -> Result<HWND, String> {
         let _ = RegisterClassW(&wc);
         let sw = GetSystemMetrics(SM_CXSCREEN);
         let sh = GetSystemMetrics(SM_CYSCREEN);
+        // A non-zero --w/--h places the full-screen view on an extended display; the
+        // default is the primary screen (0,0,primary width/height).
+        let (wx, wy, ww, wh) = if shared.win_w > 0 && shared.win_h > 0 {
+            (shared.win_x, shared.win_y, shared.win_w, shared.win_h)
+        } else {
+            (0, 0, sw, sh)
+        };
+        let ex_style = if shared.no_input { WS_EX_NOACTIVATE } else { WINDOW_EX_STYLE(0) };
         let hwnd = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
+            ex_style,
             PCWSTR(class_name.as_ptr()),
             PCWSTR(title.as_ptr()),
             WS_POPUP | WS_VISIBLE,
-            0,
-            0,
-            sw,
-            sh,
+            wx,
+            wy,
+            ww,
+            wh,
             None,
             None,
             Some(HINSTANCE(hinstance.0)),
             Some(Arc::as_ptr(shared) as *const std::ffi::c_void),
         )
         .map_err(|e| format!("CreateWindowExW: {e}"))?;
-        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, sw, sh, SWP_SHOWWINDOW);
+        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), wx, wy, ww, wh, SWP_SHOWWINDOW);
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = SetFocus(Some(hwnd));
         focus_window(hwnd);
@@ -398,7 +518,34 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_CLOSE | WM_DESTROY => {
             shared.running.store(false, Ordering::SeqCst);
             shared.release_all.store(1, Ordering::SeqCst);
-            PostQuitMessage(0);
+            // Phase 9: while locked, closing must go through Lock::exit() (unhook, switch to
+            // Default, restore the journal) instead of quitting the loop outright.
+            if crate::lock::is_locked() {
+                crate::lock::request_exit();
+            } else {
+                PostQuitMessage(0);
+            }
+            LRESULT(0)
+        }
+        // Display-only mode: the physical mouse and keyboard cannot reach the phone, so the
+        // owner's pointer and focus are never borrowed. The phone harness drives input.
+        _ if shared.no_input
+            && matches!(
+                msg,
+                WM_MOUSEMOVE
+                    | WM_LBUTTONDOWN
+                    | WM_LBUTTONUP
+                    | WM_RBUTTONDOWN
+                    | WM_RBUTTONUP
+                    | WM_MBUTTONDOWN
+                    | WM_MBUTTONUP
+                    | WM_MOUSEWHEEL
+                    | WM_KEYDOWN
+                    | WM_KEYUP
+                    | WM_SYSKEYDOWN
+                    | WM_SYSKEYUP
+            ) =>
+        {
             LRESULT(0)
         }
         WM_SIZE => {
@@ -462,11 +609,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if vk == 0x1B && down {
                 shared.running.store(false, Ordering::SeqCst);
                 shared.release_all.store(1, Ordering::SeqCst);
-                PostQuitMessage(0);
+                if crate::lock::is_locked() {
+                    crate::lock::request_exit();
+                } else {
+                    PostQuitMessage(0);
+                }
                 return LRESULT(0);
             }
             if vk == 0x7A && down {
-                toggle_fullscreen(hwnd, &shared);
+                // F11 is meaningless on the private lock desktop (one window, no frame).
+                if !crate::lock::is_locked() {
+                    toggle_fullscreen(hwnd, &shared);
+                }
                 return LRESULT(0);
             }
             // Alt+Enter must not be handled by DefWindowProc (no menu beeps either).
@@ -490,8 +644,13 @@ fn toggle_fullscreen(hwnd: HWND, shared: &Shared) {
         } else {
             let sw = GetSystemMetrics(SM_CXSCREEN);
             let sh = GetSystemMetrics(SM_CYSCREEN);
+            let (wx, wy, ww, wh) = if shared.win_w > 0 && shared.win_h > 0 {
+                (shared.win_x, shared.win_y, shared.win_w, shared.win_h)
+            } else {
+                (0, 0, sw, sh)
+            };
             let _ = SetWindowLongPtrW(hwnd, GWL_STYLE, (WS_POPUP | WS_VISIBLE).0 as isize);
-            let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, sw, sh,
+            let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), wx, wy, ww, wh,
                 SWP_SHOWWINDOW | SWP_FRAMECHANGED);
             shared.fullscreen.store(true, Ordering::SeqCst);
         }
@@ -521,6 +680,12 @@ struct Pipeline {
     frames: std::collections::VecDeque<(u32, i64, i64)>,
     /// Latency reports that arrived before their frame.
     pending_lat: Vec<PendingLat>,
+    /// Phase 9: 0 = never freeze. After this many seconds of lock, stop presenting so the
+    /// last frame stays on screen (the frozen-video exit test).
+    freeze_video_after: u64,
+    frozen_logged: bool,
+    /// Phase 9: the first frame that reached the screen, for `LOCK first_frame_after_engage_ms`.
+    first_frame_logged: bool,
 }
 
 fn pipeline_loop(
@@ -528,6 +693,7 @@ fn pipeline_loop(
     shared: &Arc<Shared>,
     force_soft: bool,
     seconds: u64,
+    freeze_video_after: u64,
 ) -> Result<(), String> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -563,6 +729,9 @@ fn pipeline_loop(
         frames_in: 0,
         frames: std::collections::VecDeque::with_capacity(FRAME_RING),
         pending_lat: Vec::new(),
+        freeze_video_after,
+        frozen_logged: false,
+        first_frame_logged: false,
     };
 
     let start = Instant::now();
@@ -862,6 +1031,16 @@ impl Pipeline {
                 self.frames.push_back((vf.seq, rx, shown));
                 self.resolve_lat(vf.seq, rx, shown);
                 self.logged_frames += 1;
+                if !self.first_frame_logged {
+                    self.first_frame_logged = true;
+                    if let Some(t) = crate::lock::engaged_at() {
+                        println!(
+                            "[{TAG}] LOCK first_frame_after_engage_ms={} seq={}",
+                            t.elapsed().as_millis(),
+                            vf.seq
+                        );
+                    }
+                }
                 if self.logged_frames % 120 == 1 {
                     println!(
                         "[{TAG}] frame seq={} key={} au={}B decode={}us",
@@ -913,6 +1092,16 @@ impl Pipeline {
             }
         }
         let produced = self.drain_outputs()?;
+        if produced > 0 && self.frozen() {
+            if !self.frozen_logged {
+                self.frozen_logged = true;
+                println!(
+                    "[{TAG}] LOCK video frozen after {}s: presenting stopped, last frame stays",
+                    self.freeze_video_after
+                );
+            }
+            return Ok(0);
+        }
         if produced > 0 {
             unsafe {
                 let _ = self.swap.Present(1, DXGI_PRESENT(0));
@@ -925,6 +1114,19 @@ impl Pipeline {
             Ok(us)
         } else {
             Ok(0)
+        }
+    }
+
+    /// Phase 9 frozen-frame test: after `--freeze-video-after` seconds of lock, stop
+    /// presenting. The flip-model swap chain keeps the last frame on screen, so the picture
+    /// is frozen (not black) and the pipeline keeps consuming the phone's stream.
+    fn frozen(&self) -> bool {
+        if self.freeze_video_after == 0 {
+            return false;
+        }
+        match crate::lock::engaged_at() {
+            Some(t) => t.elapsed() >= Duration::from_secs(self.freeze_video_after),
+            None => false,
         }
     }
 
@@ -1413,8 +1615,9 @@ fn blit_dxgi(
             .map_err(|e| format!("CreateVideoProcessorOutputView: {e}"))?;
         let out_view = out_view.ok_or("no output view")?;
 
-        // Keep the aspect ratio: fit the desktop inside the window.
-        let (dw, dh) = fit(in_w, in_h, out_w, out_h);
+        // Keep the aspect ratio: fit the visible desktop inside the window.
+        let (vis_w, vis_h) = visible_size(in_w, in_h);
+        let (dw, dh) = fit(vis_w, vis_h, out_w, out_h);
         let dest = RECT {
             left: (out_w - dw) / 2,
             top: (out_h - dh) / 2,
@@ -1429,6 +1632,8 @@ fn blit_dxgi(
             true,
             None,
         );
+        let src = RECT { left: 0, top: 0, right: vis_w, bottom: vis_h };
+        video_ctx.VideoProcessorSetStreamSourceRect(&v.processor, 0, true, Some(&src));
         video_ctx.VideoProcessorSetStreamDestRect(&v.processor, 0, true, Some(&dest));
         let full = RECT { left: 0, top: 0, right: out_w, bottom: out_h };
         video_ctx.VideoProcessorSetOutputTargetRect(&v.processor, true, Some(&full));
@@ -1500,13 +1705,33 @@ fn blit_soft(d3d_ctx: &ID3D11DeviceContext, dec: &mut Decoder, swap: &IDXGISwapC
         let mut bdesc = D3D11_TEXTURE2D_DESC::default();
         back.GetDesc(&mut bdesc);
         let (bw, bh) = (bdesc.Width as i32, bdesc.Height as i32);
-        let (dw, dh) = fit(w, h, bw, bh);
-        let src_box = D3D11_BOX { left: 0, top: 0, front: 0, right: w as u32, bottom: h as u32, back: 1 };
+        // Crop the decoder's macroblock padding, exactly as the hardware path does.
+        let (vis_w, vis_h) = visible_size(w, h);
+        let (dw, dh) = fit(vis_w, vis_h, bw, bh);
+        let src_box = D3D11_BOX {
+            left: 0,
+            top: 0,
+            front: 0,
+            right: vis_w as u32,
+            bottom: vis_h as u32,
+            back: 1,
+        };
         let dst_x = ((bw - dw) / 2).max(0) as u32;
         let dst_y = ((bh - dh) / 2).max(0) as u32;
         d3d_ctx.CopySubresourceRegion(&back, 0, dst_x, dst_y, 0, tex, 0, Some(&src_box));
         Ok(())
     }
+}
+
+/// H.264 codes picture in 16x16 macroblocks, so the decoder pads a 1920x1080 desktop to
+/// 1920x1088. Those last eight rows contain no picture data: scaled into the window they leave
+/// the green band seen below the taskbar (B-085). The input type declares the real desktop size,
+/// so the visible rectangle is the coded size clamped to that size.
+fn visible_size(in_w: i32, in_h: i32) -> (i32, i32) {
+    (
+        in_w.clamp(2, phase5::DESKTOP_W),
+        in_h.clamp(2, phase5::DESKTOP_H),
+    )
 }
 
 /// Fit `iw x ih` inside `ow x oh`, keeping the aspect ratio.
@@ -1580,6 +1805,19 @@ mod tests {
         );
         assert_eq!(classify_output_code(-1), OutputOutcome::Fatal);
         assert_eq!(classify_output_code(0x8000_4005u32 as i32), OutputOutcome::Fatal);
+    }
+
+    /// B-085: the decoder reports macroblock-padded dimensions (1920x1088 for a 1920x1080
+    /// desktop). Only the declared desktop area is picture; the padding must be cropped.
+    #[test]
+    fn macroblock_padding_is_cropped() {
+        assert_eq!(visible_size(1920, 1088), (1920, 1080));
+        assert_eq!(visible_size(1920, 1080), (1920, 1080));
+        assert_eq!(visible_size(1280, 720), (1280, 720));
+        assert_eq!(visible_size(640, 480), (640, 480));
+        // Never produce an empty or oversized rectangle.
+        assert_eq!(visible_size(1, 1), (2, 2));
+        assert_eq!(visible_size(4096, 2160), (1920, 1080));
     }
 
     /// B-067: raw Windows timeout/pending codes from a socket read are transient (the loop

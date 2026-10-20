@@ -420,6 +420,76 @@ object Phase2Wine {
     /** The identifying facts of one /proc entry for the reaper. */
     internal class ProcFact(val pid: Int, val uid: Int, val cmdlineHead: String)
 
+    /**
+     * B-088: catalog X11 programs are the only processes the shell may close when it opens
+     * another catalog app. The names are the program file names, matched per argv token so
+     * Wine's own services (explorer.exe, wineserver, wineboot.exe) never match.
+     */
+    private val CATALOG_PROGRAMS = linkedMapOf(
+        "notepadpp" to "notepad++.exe",
+        "sevenzip" to "7zFM.exe",
+        "minesweeper" to "winemine.exe",
+        "xeyes" to "xeyes",
+        "xcalc" to "xcalc",
+        "xmessage" to "xmessage",
+    )
+
+    /** Which catalog app a process command line belongs to, or null for every other process. */
+    internal fun catalogProcessId(cmdline: String): String? {
+        for (token in cmdline.split('\u0000', ' ', '\t')) {
+            val base = token.trim('"', '\'').substringAfterLast('/').substringAfterLast('\\')
+            if (base.isEmpty()) continue
+            for ((id, exe) in CATALOG_PROGRAMS) {
+                if (base.equals(exe, ignoreCase = true)) return id
+            }
+        }
+        return null
+    }
+
+    /** True when this process belongs to a catalog app other than [keepId] (null = all). */
+    internal fun shouldCloseCatalogProcess(cmdline: String, keepId: String?): Boolean {
+        val id = catalogProcessId(cmdline) ?: return false
+        return keepId == null || !id.equals(keepId, ignoreCase = true)
+    }
+
+    private fun cmdlineAll(dir: File): String = try {
+        File(dir, "cmdline").readBytes().toString(Charsets.UTF_8)
+    } catch (_: Throwable) {
+        ""
+    }
+
+    /**
+     * B-088/B-089: close the previous catalog X11 program before starting another one.
+     * Without a window manager an old Wine/X11 client keeps its window and content alive
+     * under the new app's title, and a second copy of a slow-starting app can block against
+     * the same wineserver. [keepId] is left alone (re-opening the running app only focuses
+     * its frame).
+     */
+    fun closeCatalogApps(ctx: Context, keepId: String? = null) {
+        try {
+            val uid = android.os.Process.myUid()
+            val me = android.os.Process.myPid()
+            val kills = ArrayList<Int>()
+            File("/proc").listFiles { f -> f.name.all { it.isDigit() } }?.forEach { d ->
+                try {
+                    val pid = d.name.toInt()
+                    if (pid == me || readUid(d) != uid) return@forEach
+                    val cmd = cmdlineAll(d)
+                    if (shouldCloseCatalogProcess(cmd, keepId)) {
+                        val app = catalogProcessId(cmd) ?: "?"
+                        say("CATALOG_CLOSE pid=$pid app=$app keep=${keepId ?: "-"}")
+                        kills.add(pid)
+                    }
+                } catch (_: Throwable) { }
+            }
+            for (pid in kills) android.os.Process.killProcess(pid)
+            if (kills.isNotEmpty()) Thread.sleep(400)
+            say("CATALOG_CLOSE done killed=${kills.size} pids=$kills")
+        } catch (t: Throwable) {
+            say("CATALOG_CLOSE fail $t")
+        }
+    }
+
     /** Pure selection (unit-tested): every process of our uid except our own pid
      *  and the app's own process family. An empty cmdline (kernel threads,
      *  races) contains no package name, so such a same-uid entry is reaped. */
@@ -547,6 +617,10 @@ object Phase2Wine {
 
     /** True when a live wineserver accepts connections (a stale socket file does not). */
     private var lastProbeErr = ""
+
+    /** Phase 8 "Open any .exe": boot only when Wine is not already up; boot reaps Xvfb. */
+    fun wineserverAlive(ctx: Context): Boolean = serverAlive(ctx)
+
     private fun serverAlive(ctx: Context): Boolean {
         lastProbeErr = ""
         for (srv in serverDirs(ctx)) {
@@ -756,6 +830,9 @@ object Phase2Wine {
 
     fun boot(ctx: Context, winedebug: String? = null) {
         reapLeftoverProcesses(ctx, "boot")   // B-029: one orphan set per boot no more
+        // The reaper kills the managed Xvfb too; forget and reap it before ensureXvfb, or a
+        // socket that is closing can still look alive and skip the restart (B-084).
+        Phase2X11.killXvfb(false)
         Phase2X11.ensureXvfb(ctx)
         // B-021: kill the server BEFORE touching the hives. A live server keeps
         // the registry in memory and re-saves system.reg while the heal deletes
@@ -826,6 +903,8 @@ object Phase2Wine {
     fun openExe(ctx: Context, path: String): Boolean {
         val exe = File(path)
         if (!exe.isFile) { say("APPCTR exe missing $path"); return false }
+        // B-088: the chosen program replaces whatever catalog app was showing.
+        closeCatalogApps(ctx)
         val pid = startBin(ctx, loaderBin(ctx), waitForExit = false, exe.absolutePath)
         say("APPCTR exe=$path pid=$pid")
         writeLog(ctx)
@@ -837,18 +916,247 @@ object Phase2Wine {
      * program itself (Notepad++ through the Wine loader, xeyes from the rootfs).
      */
     fun openCatalogApp(ctx: Context, id: String) {
+        // B-088/B-089: one catalog program at a time. Close the old client (including a
+        // previous copy of this app) before starting: without a window manager its window
+        // otherwise lingers under the new title, and a second slow copy can block on the
+        // same wineserver pipe. The X11 frame itself reconnects to the fresh server content.
+        closeCatalogApps(ctx)
         when (id) {
-            "notepadpp" -> { boot(ctx, null); startNpp(ctx) }
+            "notepadpp" -> {
+                ensureLivePrefix(ctx, "open notepadpp")
+                val installed = installedExe(ctx, "notepadpp")
+                if (installed != null) {
+                    say("APPCTR npp installed=${installed.path}")
+                    startBin(ctx, loaderBin(ctx), waitForExit = false, installed.absolutePath)
+                } else {
+                    startNpp(ctx)
+                }
+            }
+            "sevenzip" -> {
+                ensureLivePrefix(ctx, "open sevenzip")
+                val installed = installedExe(ctx, "sevenzip")
+                if (installed == null) say("APPCTR 7-Zip not installed yet")
+                else {
+                    say("APPCTR 7zip installed=${installed.path}")
+                    startBin(ctx, loaderBin(ctx), waitForExit = false, installed.absolutePath)
+                }
+            }
             "xeyes" -> Phase2X11.startXeyes(ctx)
             "xcalc" -> Phase2X11.startXcalc(ctx)
+            "xmessage" -> Phase2X11.startXmessage(ctx)
             "minesweeper" -> {
-                boot(ctx, null)
+                ensureLivePrefix(ctx, "open minesweeper")
                 val pid = startBin(ctx, loaderBin(ctx), waitForExit = false, "winemine.exe")
                 say("APPCTR winemine pid=$pid")
                 writeLog(ctx)
             }
             else -> say("APPCTR no X11 program for $id")
         }
+    }
+
+    /** Where a winget-installed program lands inside the Wine prefix. */
+    fun installedExe(ctx: Context, id: String): File? {
+        // Wine's MSI maps ProgramFiles64Folder to windows/syswow64 for these WiX packages
+        // (7-Zip and Notepad++ both land there); accept the normal layout too so a fixed
+        // Wine build or a hand install is found without another change.
+        val rels = when (id) {
+            "notepadpp" -> listOf(
+                "Program Files/Notepad++/notepad++.exe",
+                "windows/syswow64/Notepad++/notepad++.exe",
+                "Program Files (x86)/Notepad++/notepad++.exe",
+            )
+            "sevenzip" -> listOf(
+                "Program Files/7-Zip/7zFM.exe",
+                "windows/syswow64/7-Zip/7zFM.exe",
+                "Program Files (x86)/7-Zip/7zFM.exe",
+            )
+            else -> return null
+        }
+        return rels.map { File(prefixDir(ctx), "drive_c/$it") }.firstOrNull { it.isFile }
+    }
+
+    /**
+     * Run a downloaded Windows installer as DATA under the shipped Wine loader and wait for
+     * it. Returns the exit code (-1 when Wine itself could not start). No network, no native
+     * execution from app storage: the installer is argv[1] to libbox64 + wine.
+     */
+    fun runInstaller(ctx: Context, exe: File, silent: String): Int {
+        // B-021/B-081: a wineserver started on saved hives rewrites the
+        // HKLM\System\CurrentControlSet link as plain data, after which every registry
+        // create/open recurses until the stack overflows (the exact log line the winget
+        // installers show). A fresh boot from empty hives is the accepted workaround, so
+        // every installer run starts there and waits for wineboot before touching the file.
+        boot(ctx, null)
+        val bootProc = wineProc
+        val bootFinished = try {
+            bootProc?.waitFor(150, java.util.concurrent.TimeUnit.SECONDS) == true
+        } catch (_: Throwable) { false }
+        if (!bootFinished || !bootMarker(ctx).isFile) {
+            say("WINE_INSTALL abort: prefix boot did not complete (finished=$bootFinished)")
+            writeLog(ctx)
+            return -1
+        }
+        say("WINE_INSTALL boot ok; running ${exe.name}")
+        Phase2X11.ensureXvfb(ctx)
+        ensureWinePatched(ctx)
+        Phase2Data.ensureFontconfigStub(ctx)
+        ensurePrefixBinaries(ctx)
+        if (!ensureWineserver(ctx)) { say("WINE fail: no wineserver"); return -1 }
+        startSafetyGuard(ctx)
+        val argv = ArrayList<String>()
+        argv.add(Phase2Box64.libbox64(ctx).path)
+        argv.add(loaderBin(ctx).path)
+        if (exe.name.endsWith(".msi", ignoreCase = true)) {
+            // Wine's msiexec avoids the SFX/shlwapi crash the Nullsoft and 7-Zip exe
+            // installers hit under box64 (B-081). /qn = fully silent, no UI.
+            val msiexec = File(pinRoot(ctx), "lib/wine/x86_64-windows/msiexec.exe")
+            if (!msiexec.isFile) { say("WINE fail: msiexec missing ${msiexec.path}"); return -1 }
+            say("WINE_INSTALL msi=${exe.name} via msiexec /qn")
+            argv.add(msiexec.absolutePath)
+            argv.add("/i")
+            argv.add(exe.absolutePath)
+            argv.add("/qn")
+        } else {
+            argv.add(exe.absolutePath)
+            if (silent.isNotBlank()) argv.add(silent)
+        }
+        val p = ProcessBuilder(argv).apply {
+            environment().clear()
+            environment().putAll(wineEnv(ctx))
+            redirectErrorStream(true)
+        }.start()
+        wineProc = p
+        winePid = Phase2X11.pidOf(p)
+        say("WINE_INSTALL pid=$winePid exe=${exe.name} silent=$silent")
+        Phase2X11.g3exe("WINE_INSTALL", ctx, winePid)
+        val out = StringBuilder()
+        val reader = Thread {
+            try {
+                p.inputStream.use { ins ->
+                    val buf = ByteArray(8192)
+                    while (true) {
+                        val n = ins.read(buf)
+                        if (n <= 0) break
+                        out.append(String(buf, 0, n).replace('\n', ' '))
+                        if (out.length > 6000) out.delete(0, out.length - 6000)
+                    }
+                }
+            } catch (_: Throwable) { }
+        }.apply { name = "wine-installer-out"; start() }
+        val finished = p.waitFor(180, java.util.concurrent.TimeUnit.SECONDS)
+        if (!finished) { p.destroy(); say("WINE_INSTALL timeout 180s") }
+        reader.join(5000)
+        val code = try { if (finished) p.exitValue() else -2 } catch (_: Throwable) { -1 }
+        say("WINE_INSTALL_EXIT code=$code out=[${out.toString().trim()}]")
+        writeLog(ctx)
+        return code
+    }
+
+    /**
+     * B-086: keep an already-live prefix instead of calling [boot]. `boot` deliberately drops
+     * the registry hives every time (B-021), which also erases the MSI registration that a
+     * just-installed app needs for `msiexec /x`. A cold prefix still boots normally.
+     */
+    private fun ensureLivePrefix(ctx: Context, why: String): Boolean {
+        if (wineserverAlive(ctx) && Phase2X11.xvfbRunning()) {
+            say("WINE_LIVE reuse prefix ($why); no boot, MSI registration kept")
+            Phase2X11.ensureXvfb(ctx)
+            ensureWinePatched(ctx)
+            Phase2Data.ensureFontconfigStub(ctx)
+            ensurePrefixBinaries(ctx)
+            if (!ensureWineserver(ctx)) { say("WINE_LIVE fail: no wineserver"); return false }
+            startSafetyGuard(ctx)
+            return true
+        }
+        boot(ctx, null)
+        val p = wineProc
+        val finished = try {
+            p?.waitFor(150, java.util.concurrent.TimeUnit.SECONDS) == true
+        } catch (_: Throwable) { false }
+        if (!finished || !bootMarker(ctx).isFile) {
+            say("WINE_LIVE abort: prefix boot did not complete (finished=$finished)")
+            writeLog(ctx)
+            return false
+        }
+        return true
+    }
+
+    /** Run one Windows tool under box64 + the shipped loader, returning its exit and output. */
+    private fun runCaptured(
+        ctx: Context,
+        argv: List<String>,
+        timeoutSec: Int,
+        tag: String,
+    ): Pair<Int, String> {
+        val p = ProcessBuilder(argv).apply {
+            environment().clear()
+            environment().putAll(wineEnv(ctx))
+            redirectErrorStream(true)
+        }.start()
+        wineProc = p
+        winePid = Phase2X11.pidOf(p)
+        val out = StringBuilder()
+        val reader = Thread {
+            try {
+                p.inputStream.bufferedReader().forEachLine { line ->
+                    out.append(line).append('\n')
+                    if (out.length > 200_000) out.delete(0, out.length - 200_000)
+                }
+            } catch (_: Throwable) { }
+        }.apply { name = "wine-capture"; start() }
+        val finished = try {
+            p.waitFor(timeoutSec.toLong(), java.util.concurrent.TimeUnit.SECONDS)
+        } catch (_: Throwable) { false }
+        if (!finished) p.destroy()
+        reader.join(3000)
+        val code = try { if (finished) p.exitValue() else -2 } catch (_: Throwable) { -1 }
+        say("$tag exit=$code bytes=${out.length}")
+        writeLog(ctx)
+        return code to out.toString()
+    }
+
+    /**
+     * B-086: the installer's Uninstall registry subtree, as `reg query /s` prints it. Must
+     * run while the install session's wineserver is alive: the output is parsed for the MSI
+     * ProductCode that a later `msiexec /x` needs.
+     */
+    fun queryUninstallRegistry(ctx: Context): String {
+        val reg = File(pinRoot(ctx), "lib/wine/x86_64-windows/reg.exe")
+        if (!reg.isFile) { say("WINE_REG fail: reg.exe missing ${reg.path}"); return "" }
+        Phase2X11.ensureXvfb(ctx)
+        if (!ensureWineserver(ctx)) { say("WINE_REG fail: no wineserver"); return "" }
+        val key = "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+        val argv = listOf(
+            Phase2Box64.libbox64(ctx).path,
+            loaderBin(ctx).path,
+            reg.absolutePath,
+            "query", key, "/s",
+        )
+        val (code, out) = runCaptured(ctx, argv, 45, "WINE_REG")
+        if (code != 0) { say("WINE_REG query failed, output=[${out.take(500)}]"); return "" }
+        return out
+    }
+
+    /**
+     * B-086: silent MSI removal through the shipped Wine loader. Called with the stored
+     * ProductCode; the live-prefix rule in [ensureLivePrefix] is what keeps the MSI
+     * registration available to msiexec.
+     */
+    fun runMsiUninstall(ctx: Context, productCode: String): Int {
+        if (!ensureLivePrefix(ctx, "msiexec /x")) return -1
+        val msiexec = File(pinRoot(ctx), "lib/wine/x86_64-windows/msiexec.exe")
+        if (!msiexec.isFile) { say("WINE fail: msiexec missing ${msiexec.path}"); return -1 }
+        val args = Installers.msiUninstallArgs(productCode)
+        say("WINE_UNINSTALL args=${args.joinToString(" ")}")
+        val argv = listOf(
+            Phase2Box64.libbox64(ctx).path,
+            loaderBin(ctx).path,
+            msiexec.absolutePath,
+        ) + args
+        val (code, out) = runCaptured(ctx, argv, 180, "WINE_UNINSTALL")
+        say("WINE_UNINSTALL out=[${out.trim().take(1500)}]")
+        writeLog(ctx)
+        return code
     }
 
     fun startNpp(ctx: Context) {

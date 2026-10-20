@@ -102,3 +102,20 @@ opened; the file stayed `phone-gate`. SKIPS 4e. The 20 s drag fps measurement wa
 
 New bug: **B-077** (lost X11 key-up on the 04:17:21 reconnect -> Xvfb auto-repeat typed
 ~4,900 `p` into Notepad++; open).
+## Round 5 (2026-10-20 08:00-09:10): the three FIX NOW items, phone-verified
+
+| Item | What was done | Files | Test | Verified on | Numbers / evidence |
+|---|---|---|---|---|---|
+| 2a B-073 input uid | The guest input bridge accepts only the kernel uid read from `/proc/self/status` (`realUid`); `myUid()` is used only when that read failed. | `GuestPresentationHost.java` | install + live click | **phone** | `B1_INPUT listening dev.unifieddesktop.guestinput realUid=10476 myUid=10010`; click `P7AND touch x=450 y=264 -> guest 450.0,264.0 handled=true` (08:07:07, `files/p7.log`). |
+| 2b B-077 key release | A `pressedKeys` set is kept per X11 client; every pressed keycode is released before the old client is closed and after a reconnect; harness hook `p6:x11reconnect`. Ctrl now reaches the X11 path (`Control_L` keycode around the key) because `X11Keys.keysym` dropped the meta state. | `Phase7Windows.kt`, `Phase6Dispatch.kt` | clear NPP, force reconnect, type `npp8` x3, Xvfb capture | **phone** | `P7X11 release before close sent=1 kept=0 codes=[24]` (08:19:56); `p8f/npp8_three.png` (08:18:07) is exactly `npp8npp8npp8` (12 chars); held-key run `p8f/npp8_held.png` (08:19:58) is `npp8npp8npp8q`, no flood. |
+| 3 B-078 / B-066 VS Code | Ctrl is delivered as meta (`code=113 meta=4096`); Ctrl+P opened Quick Open; the Explorer row click opened `phase7phone.txt`; `code8` was typed into the editor and Ctrl+S saved it. Added an `execCommand('insertText')` fallback for the EditContext (`ic=null`) case. | `Phase6Apps.kt`, `Phase7Windows.kt` | live PC keys + `run-as cat` | **phone** | `files/p7.log` 08:32:37 Ctrl+P; 08:33:08 keys c,o,d,e,8; 08:38:47 Explorer click; `run-as ... cat files/phase3/workspace/phase7phone.txt` printed `phone-gate` + `code8` (16 B, 08:39). A later probe at 08:50 appended `a` and auto-saved it (file now 18 B); the 08:39 state is the proof. Capture `p8f/vsc_saved.png`. |
+| B-079 (new) | Two concurrent `ensureCodeServer` starts raced: the running node kept the first `PASSWORD` while `files/phase3/session.txt` was rewritten with the second; login rejected the session password. Logged, not fixed. | BUGS.md | code inspection + log | **phone** | `files/p7.log` 08:22:35.752/.875 and 08:35:52.447/.453 show two `VSCODE starting code-server` lines; one `VSCODE start ok port=40919` then `VSCODE start FAILED`. |
+
+Gate: the round-4 picture `p8/gate_npp.png` (04:20:50) already held all four kinds with their
+own content (Notepad++ + xeyes, VS Code, Android Tasks). Round 5 adds the two missing typing
+proofs to those same windows: Notepad++ `npp8` after a forced reconnect, VS Code `code8` saved
+in the file. **Phase 7 gate: PASS (phone).**
+
+The phone was taken by the owner at about 09:10 (the top resumed activity changed from our app
+to a non-test app, then a call); from then on no input was sent and the Phase 8 phone round was
+paused.

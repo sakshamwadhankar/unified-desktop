@@ -71,6 +71,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         taskbar.onStart = { toggleStartMenu() }
         taskbar.onWindowButton = { id -> onTaskbarWindowClick(id) }
         startMenu.onLaunch = { app -> openApp(app); closeStartMenu() }
+        startMenu.onLaunchInstalled = { id -> openCatalogApp(id); closeStartMenu() }
     }
 
     // ------------------------------------------------------------------ windows
@@ -79,7 +80,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         fun title(): String = when (this) {
             APPCENTER -> "App Center"
             FILES -> "Files"; BROWSER -> "Browser"; SETTINGS -> "Settings"; TEST -> "Test"
-            X11 -> "Notepad++ + xeyes (X11)"
+            X11 -> X11Title.BASE
             VSCODE -> "VS Code"
             ANDROID -> "Android app"
         }
@@ -89,15 +90,35 @@ class ShellRoot(context: Context) : FrameLayout(context) {
     var appCenter: AppCenterView? = null
         private set
 
-    /** Open (or re-focus) an app window. [guest] names the hidden Android app for ANDROID. */
-    fun openApp(app: App, guest: String? = null): ShellWindowView {
-        val existing = model.all().firstOrNull { it.title == app.title() }
-        if (existing != null) {
-            model.focus(existing.id)
-            syncViews()
-            return frames[existing.id]!!
+    /**
+     * Open (or re-focus) an app window. [guest] names the hidden Android app for ANDROID;
+     * [title] names the app inside an X11 window (B-087), reusing the one X11 window.
+     */
+    fun openApp(app: App, guest: String? = null, title: String? = null): ShellWindowView {
+        // B-090: the Android window hosts exactly one guest. Opening a different package
+        // must not reuse the old TextureView/display, and an uninstall must close it so the
+        // next import launches against a fresh display instead of a black stale surface.
+        if (app == App.ANDROID) {
+            frames.values.firstOrNull {
+                it.app == App.ANDROID && !it.guest.equals(guest, ignoreCase = true)
+            }?.let { closeWindow(it.win.id) }
         }
-        val win = model.open(app.title(), 900, 620)
+        val existing = frames.values.firstOrNull { it.app == app }
+        if (existing != null) {
+            if (app == App.X11) {
+                val t = title?.takeIf { it.isNotBlank() } ?: X11Title.BASE
+                model.rename(existing.win.id, t)
+            }
+            model.focus(existing.win.id)
+            syncViews()
+            return existing
+        }
+        val initialTitle = if (app == App.X11) {
+            title?.takeIf { it.isNotBlank() } ?: X11Title.BASE
+        } else {
+            app.title()
+        }
+        val win = model.open(initialTitle, 900, 620)
         val frame = ShellWindowView(context, win, app, guest)
         frame.onDragBy = { id, dx, dy, edges -> frameDrag(id, dx, dy, edges) }
         frame.onClose = { closeWindow(it) }
@@ -116,6 +137,70 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     private var testContent: TestWindowContent? = null
 
+    /** The live X11 window content, if that window is open (B-077 reconnect proof). */
+    fun x11Content(): X11WindowContent? =
+        frames.values.firstNotNullOfOrNull { it.content as? X11WindowContent }
+
+    /** The catalog, read once; the start menu and the App Center share these entries. */
+    private val catalog: List<CatalogApp> by lazy {
+        try {
+            CatalogLoader.load(context)
+        } catch (t: Throwable) {
+            P7Log.say(context, "APPCTR catalog fail ${t.javaClass.simpleName}: ${t.message}")
+            emptyList()
+        }
+    }
+
+    /** B-083: the one launch path for an installed/catalog app (start menu and App Center). */
+    private fun packageInstalled(pkg: String): Boolean = try {
+        context.packageManager.getPackageInfo(pkg, 0)
+        true
+    } catch (_: Throwable) {
+        false
+    }
+
+    fun openCatalogApp(id: String): String {
+        val app = catalog.firstOrNull { it.id.equals(id, ignoreCase = true) }
+            ?: return "no catalog app [$id]"
+        val v = Catalog.pick(app) ?: return "no version for ${app.name}"
+        if (!Catalog.isUsable(v)) return "Not yet: ${v.note.ifEmpty { v.rating }}"
+        return applyTarget(OpenRoute.of(app, v))
+    }
+
+    private fun applyTarget(t: OpenTarget): String = when (t.action) {
+        "files" -> { openApp(App.FILES); "opened Files" }
+        "browser" -> {
+            val w = openApp(App.BROWSER)
+            (w.content as? BrowserView)?.openUrl(t.url)
+            "opened Browser ${t.url}"
+        }
+        "settings" -> { openApp(App.SETTINGS); "opened Settings" }
+        "vscode" -> { openApp(App.VSCODE); "opened VS Code" }
+        "x11" -> {
+            openApp(App.X11, title = t.title)
+            Thread { Phase2Wine.openCatalogApp(context, t.catalogId) }.start()
+            "opened ${t.title}"
+        }
+        "android" -> {
+            if (t.guest.isEmpty()) "no package name"
+            else if (!packageInstalled(t.guest)) {
+                // B-092: no guest window for a package that is not on the phone. The Browser
+                // Play page is the only truthful target; Install/Open share this policy.
+                val fallback = AndroidOpen.browserFallback(t)
+                val w = openApp(App.BROWSER)
+                (w.content as? BrowserView)?.openUrl(fallback.url)
+                val name = catalog.firstOrNull {
+                    it.id.equals(t.catalogId, ignoreCase = true)
+                }?.name ?: t.guest
+                "$name is not installed; opened its Google Play page."
+            } else {
+                openApp(App.ANDROID, t.guest)
+                "opening Android ${t.guest}"
+            }
+        }
+        else -> "no window for [${t.title}]"
+    }
+
     /** Latency-probe hook: the Test window's flash reports its draw time (Phase-5 method). */
     private var flashListener: ((Int, Long) -> Unit)? = null
 
@@ -130,6 +215,22 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         removeView(f)
         model.close(id)
         syncViews()
+    }
+
+    /** Close the X11 frame (its content reconnects when the next X11 app opens). */
+    fun closeX11Window(): Boolean {
+        val f = frames.values.firstOrNull { it.app == App.X11 } ?: return false
+        closeWindow(f.win.id)
+        return true
+    }
+
+    /** B-090: close the Android window showing [pkg] (after its import is removed/replaced). */
+    fun closeGuestWindow(pkg: String): Boolean {
+        val f = frames.values.firstOrNull {
+            it.app == App.ANDROID && it.guest.equals(pkg, ignoreCase = true)
+        } ?: return false
+        closeWindow(f.win.id)
+        return true
     }
 
     fun minimizeWindow(id: Int) {
@@ -172,7 +273,19 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         if (startMenu.visibility == View.VISIBLE) closeStartMenu() else openStartMenu()
     }
 
+    /** Rebuild the installed section from the records (after an install or uninstall). */
+    fun refreshInstalledRows() {
+        startMenu.setInstalledRows(InstalledMenu.rows(Installed.read(context), catalog))
+    }
+
+    /** Harness: every start-menu row, fixed entries first. */
+    fun menuRows(): String {
+        refreshInstalledRows()
+        return startMenu.rowsText()
+    }
+
     fun openStartMenu() {
+        refreshInstalledRows()
         startMenu.visibility = View.VISIBLE
         // Anchor the menu's bottom edge to the top of the taskbar and let it grow upward:
         // a fixed 300px panel clipped the fourth row at 240 dpi (seen in the first gate capture,

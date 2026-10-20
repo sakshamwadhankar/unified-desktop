@@ -81,16 +81,29 @@
       ]
     },
     {
+      "id": "xmessage",
+      "name": "xmessage",
+      "aliases": ["xmessage", "x11-utils", "message"],
+      "open": "x11",
+      "versions": [
+        {"version": "7.7+5", "kind": "linux", "rating": "Works",
+         "fetch": "https://deb.debian.org/debian/pool/main/x/x11-utils/x11-utils_7.7+5_amd64.deb",
+         "sha256": "64f2b157e6f00590c4d8633333bfdc890b66fc26ad61ce5e6f1fddcd0527ed1d",
+         "source": "deb",
+         "note": "Debian bookworm amd64 x11-utils; unpacked into the rootfs"}
+      ]
+    },
+    {
       "id": "notepadpp",
       "name": "Notepad++",
       "aliases": ["npp", "notepad", "notepad plus plus"],
       "open": "x11",
       "versions": [
         {"version": "8.9.8.1", "kind": "windows", "rating": "Works",
-         "fetch": "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.8.1/npp.8.9.8.1.portable.x64.zip",
-         "sha256": "beddf5548e75c97930d1575ba1c7d113e6e2b33d0a200310e734ca08e225f414",
+         "fetch": "https://raw.githubusercontent.com/microsoft/winget-pkgs/bbae0d184157eac4b3d8eebc815d814839bb799d/manifests/n/Notepad++/Notepad++/8.9.8.1/Notepad++.Notepad++.installer.yaml",
+         "sha256": "0c4f4fe82babd7688f5c1431b1357392491563af6ffedf4e37f5de0bd71babb4",
          "source": "winget",
-         "note": "runs under Wine; typed into on the phone (p8/npp7e.png)"}
+         "note": "winget: Notepad++.Notepad++ 8.9.8.1 (x64 MSI, silent /qn)"}
       ]
     },
     {
@@ -99,10 +112,11 @@
       "aliases": ["7z", "zip", "archive"],
       "open": "x11",
       "versions": [
-        {"version": "24.09", "kind": "windows", "rating": "Works",
-         "fetch": "winget 7zip.7zip (silent installer)",
+        {"version": "26.04", "kind": "windows", "rating": "Works",
+         "fetch": "https://raw.githubusercontent.com/microsoft/winget-pkgs/bbae0d184157eac4b3d8eebc815d814839bb799d/manifests/7/7zip/7zip/26.04/7zip.7zip.installer.yaml",
+         "sha256": "0b01334a418654293513449f61d6bfc99e5196ca371e3c3dc961eda57cd535c6",
          "source": "winget",
-         "note": "assumed Works until a real run fails"}
+         "note": "winget: 7zip.7zip 26.04 (x64 MSI, silent /qn)"}
       ]
     },
     {

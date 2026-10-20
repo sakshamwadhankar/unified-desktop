@@ -41,8 +41,8 @@
   `aliases`, an `open` target (`files`, `browser`, `settings`, `vscode`, `x11`, `android`) and
   one or more versions with `version`, `kind` (`builtin|android|web|linux|windows`), `rating`
   (`Works` / `Works, slow` / `Not yet`), `fetch` (URL, package or Play page), optional
-  `sha256` and `source` (`winget`, `shipped`, `installed`, ...). Thirteen apps ship: the eleven
-  section-7 names plus GIMP and Firefox.
+  `sha256` and `source` (`winget`, `deb`, `shipped`, `installed`, ...). Fourteen apps ship:
+  the eleven section-7 names plus GIMP, Firefox and xmessage.
 - **Picker** `Catalog` (pure Kotlin, unit-tested): best rating first, then the D7 kind order
   builtin > android > web > linux > windows, then the highest version (numeric-aware). A
   `Not yet` version is never offered for install while any other version works; if every
@@ -54,27 +54,69 @@
   "Open any .exe". It is a normal `ShellRoot.App.APPCENTER` window, so the start menu and
   taskbar need no special cases.
 - **Installers**: builtin = nothing to install; android = `EngineBridge.importInstalled` into
-  the guest engine, or the Play page in the Browser when the package is not on the phone; web
-  = nothing to install, Open loads the URL in the Browser; windows Notepad++ = official URL +
-  pinned SHA-256 from the Phase 2 pin (`Phase2Data.fetchNpp`). 7-Zip, a generic
-  winget-manifest reader and Linux `.deb` installers are **not built** (SKIPS). "Open any
-  .exe" is `Phase2Wine.openExe`: boot Wine, then run the file as data through the shipped
-  loader.
+  the guest engine when the package is already on the phone; there is no headless Play
+  installer. When the package is missing, both Open and Install route to the official Play
+  page in Browser (`AndroidOpen.browserFallback`), never a guest window or a fabricated
+  install (B-092); web
+  = nothing to install, Open loads the URL in the Browser; windows = the pinned
+  `microsoft/winget-pkgs` manifest URL is fetched, the x64 **WiX MSI** entry preferred, its
+  catalog/PV SHA-256 checked, the MSI downloaded and verified, then `runInstaller` boots Wine
+  from empty hives first (B-021/B-081) and runs `msiexec /i ... /qn` through the loader;
+  Notepad++ 8.9.8.1 and 7-Zip 26.04 install exit 0. Wine maps `ProgramFiles64Folder` to
+  `drive_c/windows/syswow64` for these packages, so `installedExe` accepts
+  `Program Files`, `Program Files (x86)` and `windows/syswow64` before opening; linux `.deb`
+  = pinned Debian URL + SHA-256, downloaded, verified and `data.tar` unpacked into the rootfs
+  (xmessage, x11-utils 7.7+5). Installed records live in `files/appcenter/installed.json`
+  as `id -> {version, productCode}` (plain string values still read as version-only);
+  `Update` is shown when the catalog version is newer. Windows uninstall (B-086) reads the
+  MSI `ProductCode` after install (`reg.exe query HKLM\...\Uninstall /s`), keeps the live
+  wineserver (`ensureLivePrefix`; `boot()` drops the hives) and runs
+  `msiexec /x {code} /qn`; a missing code is refused truthfully. "Open any .exe" is
+  `Phase2Wine.openExe`: boot only when Xvfb/wineserver are down (B-084), then run the file as
+  data through the loader.
+- **Installed rows + launch**. `InstalledMenu.rows(installed, apps)` is the pure start-menu
+  list (fixed rows first, then installed apps whose catalog entry exists); the start menu is
+  rebuilt on install/import/uninstall. `OpenRoute.of(app, version)` resolves the one open
+  target, and both the App Center and the start menu call `ShellRoot.openCatalogApp(id)`.
+- **X11 titles (B-087/B-088)**. There is one X11 shell window; it is reused and renamed through
+  `X11Title`/`ShellModel.rename`: `X11 desktop` when no app is named, otherwise
+  `X11 desktop — <app>`. The frame title bar reads `win.title` (not the fixed app name).
+  Before another catalog launch, `Phase2Wine.closeCatalogApps` closes the previous catalog X
+  client (winemine/notepad++/7zFM/xeyes/xcalc/xmessage, matched per argv token), so an old
+  window cannot linger under the new title; `openExe` and Windows uninstall use the same rule.
+- **Window chrome (B-091)**. Every `ShellWindowView` paints an opaque body below its title bar;
+  content views with transparent gaps therefore cannot let the maximized window behind show
+  through a focused/raised window. `ShellModel.focus` still moves the window to the top of the
+  z-order and `syncViews` mirrors that order with `bringChildToFront`.
+- **Android guest windows (B-090/B-092)**. A shell Android window hosts one package.
+  Uninstalling or re-importing a package closes the old window
+  (`ShellRoot.closeGuestWindow`), and opening a different package closes the previous Android
+  window, so the next Open builds a fresh `VirtualDisplay`/TextureView instead of reusing a
+  dead surface. `ShellRoot.openCatalogApp` checks PackageManager first: a missing package
+  opens the official Play page in Browser and reports the truth, so no black Android window is
+  created (B-092).
 - **Input path**: the App Center is driven by real PC mouse/keyboard events like every shell
   window; the harness adds `p6:appcenter:*` for scripted runs (search/select/install/run/
-  uninstall/exe/summary).
+  uninstall/exe/summary) and a virtual pointer (`p6:move/tap/key`) that injects into the
+  phone's own desktop, so a test round needs no PC mouse. The receiver's `--no-input` mode
+  (round-3 work, `WS_EX_NOACTIVATE`) makes the view display-only: physical
+  mouse/keyboard events are ignored and the owner's pointer and focus stay on the main
+  desktop; `--x/--y/--w/--h` place the full-screen view on an extended display.
 - **Tests**: `CatalogPickerTest.section7Table` reads the shipped JSON with `CatalogLoader` and
-  checks the 11 section-7 names (11/11, `tests=4 failures=0`); synthetic rows cover the
-  ordering rules.
+  checks the 11 section-7 names (11/11); `InstallersTest` covers both real manifests, x64
+  pick, SHA/version mismatch, update check and the tiny `.deb` ar/tar reader (7 tests);
+  `Phase8CatalogProcessesTest` covers the catalog-process close rule, and
+  `Phase8OpenTest` covers focus above a maximized window in addition to titles/routes,
+  including a missing Android package routing to Browser/Play (not Android).
 
 
 ## 3. The PC receiver (Windows 10/11)
 
 | Id | Part | What it does |
 |---|---|---|
-| P1 | **Lock + Exit** | Full screen on its own Windows desktop; a low-level keyboard hook swallows Win, Alt+Tab, Alt+Esc and Ctrl+Esc; the taskbar is hidden. One **Exit** button restores everything. Crash-safe: anything changed is restored on the next start too. Modelled on Safe Exam Browser. |
-| P2 | **Decode + present** | Hardware video decode (H.264 is supported by almost every PC GPU since about 2010), low-latency present. Software decode at a lower resolution as fallback. **Built in Phase 5** (`udreceiver view`): the Microsoft H.264 MFT with an `IMFDXGIDeviceManager` on D3D11 (DXVA), `CODECAPI_AVLowLatencyMode`, NV12 D3D11 surfaces converted by `ID3D11VideoProcessor` into a flip-model swap chain (FLIP_DISCARD, max frame latency 1); `--soft` runs the same MFT in system memory. On a decode error or gap it asks for a keyframe and drops until one arrives. |
-| P3 | **Input** | Captures mouse and keyboard and sends them at once on the input channel. **Built in Phase 5:** window messages (mouse, wheel, keys with scan codes) scaled through the letterbox to desktop coordinates; release-all on focus loss and on exit. The phone dispatches them to its own views (no INJECT_EVENTS, no Accessibility); key/button events are never coalesced; the phone keeps held-key bookkeeping and releases everything on release-all or session end. |
+| P1 | **Lock + Exit** | Full screen on a **separate Windows desktop** (`CreateDesktopW("udreceiver-lock-<pid>")` on `WinSta0`), switched to with `SwitchDesktop`; the default desktop and its taskbar are never hidden or modified. A `WH_KEYBOARD_LL` hook, armed before the switch, swallows Win, Alt+Tab, Alt+Shift+Tab, Alt+Esc, Ctrl+Esc, Ctrl+Shift+Esc and Alt+F4 on both down and up (per-key atomic counters); the mouse is never swallowed. One topmost `WS_EX_NOACTIVATE` **Exit** overlay calls `Lock::request_exit()`; a watchdog force-exits at `--lock-max-seconds`. A single-session mutex/event (`Local\udreceiver-lock-single`) is acquired **before** crash recovery and held through lock creation, so a second `view` is refused before it connects or touches the journal. The line journal (`%LOCALAPPDATA%\unified-desktop-receiver\lock-state.txt`) records `clean`, `desktop`, `pid` and each policy; the parser is strict, `Journal::start_at` refuses a dirty/unreadable file, and recovery leaves unreadable journals untouched. `Lock::exit` verifies `input_desktop == Default` (with retries) before restoring/deleting the journal; if it cannot, the journal, watchdog and guard stay armed. `udreceiver lock-guard --parent <pid>`, started on the default desktop, waits for the PID, re-checks the mutex, and restores only that parent's journal/desktop (Windows leaves a dead process's private desktop as the input desktop — verified). Policies (Ctrl+Alt+Del options) apply only when elevated **and** `--policies` is passed; default off. Modelled on Safe Exam Browser. |
+| P2 | **Decode + present** | Hardware video decode (H.264 is supported by almost every PC GPU since about 2010), low-latency present. Software decode at a lower resolution as fallback. **Built in Phase 5** (`udreceiver view`): the Microsoft H.264 MFT with an `IMFDXGIDeviceManager` on D3D11 (DXVA), `CODECAPI_AVLowLatencyMode`, NV12 D3D11 surfaces converted by `ID3D11VideoProcessor` into a flip-model swap chain (FLIP_DISCARD, max frame latency 1); `--soft` runs the same MFT in system memory. On a decode error or gap it asks for a keyframe and drops until one arrives. **B-085:** the decoder pads NV12 to 1920x1088 (1080 + 8 macroblock rows); the receiver crops to the visible 1920x1080 with `VideoProcessorSetStreamSourceRect` (hardware) or a visible-rect copy (soft), so no green band reaches the client. |
+| P3 | **Input** | Captures mouse and keyboard and sends them at once on the input channel. **Built in Phase 5:** window messages (mouse, wheel, keys with scan codes) scaled through the letterbox to desktop coordinates; release-all on focus loss and on exit. The phone dispatches them to its own views (no INJECT_EVENTS, no Accessibility); key/button events are never coalesced; the phone keeps held-key bookkeeping and releases everything on release-all or session end. `view --no-input` is a display-only mode (`WS_EX_NOACTIVATE`, all physical mouse/key events ignored) for a second-screen view while the owner keeps their own pointer; `--x/--y/--w/--h` choose the display rect. |
 | P4 | **Link + pairing** | USB (the AOA host side, with a driver installed once) and Wi-Fi; 6-digit pairing; trusted-PC list. Phase-4 measured (phone): Wi-Fi + USB tethering + pairing + silent reconnect proven with numbers (`docs/PHASE4_RESULT.md` 9-11); AOA host side NOT PROVEN tonight. Windows detail: a USB tether can take the laptop's default route (RNDIS metric 25 beats Wi-Fi 30) - keep it on Wi-Fi with a one-time admin metric pin (9999, active store) or the route removal. |
 | P5 | **Audio** | Plays the desktop's sound. |
 

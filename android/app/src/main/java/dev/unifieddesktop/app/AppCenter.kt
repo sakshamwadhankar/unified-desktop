@@ -65,6 +65,7 @@ class AppCenterView(context: Context) : LinearLayout(context) {
     private var selected: CatalogApp? = null
     private var picked: CatalogVersion? = null
     private val engine by lazy { EngineBridge(context) }
+    private val installBtn = ShellUi.button(context, "Install") { installSelected() }
 
     init {
         orientation = VERTICAL
@@ -98,7 +99,7 @@ class AppCenterView(context: Context) : LinearLayout(context) {
 
     private fun actionRow(): LinearLayout = LinearLayout(context).apply {
         orientation = HORIZONTAL
-        addView(ShellUi.button(context, "Install") { installSelected() })
+        addView(installBtn)
         addView(ShellUi.button(context, "Open") { openSelected() })
         addView(ShellUi.button(context, "Uninstall") { uninstallSelected() })
         gravity = Gravity.START
@@ -149,11 +150,18 @@ class AppCenterView(context: Context) : LinearLayout(context) {
         }
         val usable = Catalog.isUsable(v)
         val installer = installerState(v)
+        val have = Installed.version(context, app.id)
+        installBtn.text = if (v.kind == "windows" || v.kind == "linux") {
+            Winget.actionLabel(v.version, have)
+        } else {
+            "Install"
+        }
         detail.text = buildString {
             append(app.name).append('\n')
             append("version ").append(v.version).append("  ·  ").append(v.kind)
                 .append("  ·  ").append(v.rating).append('\n')
             append("installer: ").append(installer).append('\n')
+            if (have.isNotEmpty()) append("installed: ").append(have).append('\n')
             if (!usable) append("Not yet: ").append(v.note.ifEmpty { v.rating }).append('\n')
             else if (v.note.isNotEmpty()) append(v.note).append('\n')
             append("fetch: ").append(v.fetch.ifEmpty { "-" })
@@ -163,7 +171,11 @@ class AppCenterView(context: Context) : LinearLayout(context) {
     private fun installerState(v: CatalogVersion): String = when {
         v.kind == "builtin" || v.kind == "web" -> "none needed"
         v.kind == "android" && v.packageName.isNotEmpty() -> "Android import if installed, else Play page"
-        v.kind == "windows" && v.source == "winget" && v.sha256.isNotEmpty() -> "winget manifest (URL + SHA-256)"
+        v.kind == "windows" && v.source == "winget" && v.sha256.isNotEmpty() ->
+            "winget: ${v.note.removePrefix("winget: ").ifEmpty { v.version }} (manifest URL + SHA-256)"
+        v.kind == "linux" && v.source == "deb" && v.sha256.isNotEmpty() ->
+            "Debian .deb (URL + SHA-256 -> rootfs)"
+        v.kind == "linux" -> "shipped with the app"
         else -> "installer not available yet"
     }
 
@@ -211,77 +223,94 @@ class AppCenterView(context: Context) : LinearLayout(context) {
                     false
                 }
                 if (!onPhone) {
-                    // Zoom et al: the Play page is the install path; the tap/sign-in is the owner's.
+                    // B-092: the same missing-package policy as Open. One Play URL, no APK
+                    // download and no guest window; the install tap/sign-in are the owner's.
                     val s = shell() ?: return "no shell"
+                    val url = AndroidOpen.playUrl(OpenRoute.of(app, v))
                     val w = s.openApp(ShellRoot.App.BROWSER)
-                    (w.content as? BrowserView)?.openUrl(v.fetch)
-                    say("install ${app.id}: not on the phone, opened Play page ${v.fetch}")
-                    return "opened Play page for ${v.packageName} (install + sign-in are the owner's step)"
+                    (w.content as? BrowserView)?.openUrl(url)
+                    val msg = "${app.name} is not installed; opened its Google Play page."
+                    status.text = msg
+                    say("install ${app.id}: not on the phone, opened Play page $url")
+                    return msg
                 }
                 say("install ${app.id}: import ${v.packageName}")
                 Thread {
                     val r = engine.importInstalled(v.packageName)
-                    post { status.text = "install ${v.packageName}: ${if (r.ok) "ok" else "failed"} ${r.message ?: ""}" }
+                    if (r.ok) {
+                        Installed.record(context, app.id, v.version)
+                        // B-090: a window left from the previous import points at a dead
+                        // display; close it so the next Open builds a fresh one.
+                        post { shell()?.closeGuestWindow(v.packageName) }
+                    }
+                    post {
+                        status.text = "install ${v.packageName}: ${if (r.ok) "ok" else "failed"} ${r.message ?: ""}"
+                        shell()?.refreshInstalledRows()
+                    }
                     P7Log.say(context, "APPCTR install pkg=${v.packageName} ok=${r.ok} msg=${r.message}")
                 }.start()
                 "importing ${v.packageName}..."
             }
             "windows" -> {
-                if (v.source != "winget" || v.sha256.isEmpty()) {
+                if (v.source != "winget" || v.sha256.isEmpty() || !v.fetch.startsWith("https://")) {
                     "installer not available yet: no pinned winget manifest"
-                } else if (app.id == "notepadpp") {
-                    if (v.sha256 != Phase2Data.NPP_SHA256 || v.fetch != Phase2Data.NPP_URL) {
-                        "installer manifest mismatch (catalog pin differs from Phase2Data)"
-                    } else {
-                        say("install ${app.id}: winget pin ${v.version} sha=${v.sha256.take(12)}...")
-                        Thread {
-                            try {
-                                Phase2Data.fetchNpp(context)
-                                post { status.text = "install Notepad++: ok (pinned zip verified)" }
-                            } catch (t: Throwable) {
-                                post { status.text = "install Notepad++ failed: ${t.message}" }
-                                P7Log.say(context, "APPCTR install npp fail ${t.javaClass.simpleName}: ${t.message}")
-                            }
-                        }.start()
-                        "downloading + verifying ${v.version}..."
-                    }
                 } else {
-                    "installer not available yet: no pinned manifest for ${app.name}"
+                    say("install ${app.id}: winget manifest ${v.fetch} sha=${v.sha256.take(12)}...")
+                    Thread {
+                        val r = try {
+                            Installers.installWinget(context, app.id, app.name, v) { msg ->
+                                post { status.text = msg }
+                            }
+                        } catch (t: Throwable) {
+                            android.util.Log.e("Phase6", "APPCTR install ${app.id} fail", t)
+                            P7Log.say(context, "APPCTR install ${app.id} fail ${t.javaClass.simpleName}: ${t.message}")
+                            "failed: ${t.message}"
+                        }
+                        post {
+                            status.text = "install ${app.name}: $r"
+                            shell()?.refreshInstalledRows()
+                            if (selected?.id == app.id) renderDetail()
+                        }
+                        P7Log.say(context, "APPCTR install ${app.id} -> $r")
+                    }.start()
+                    "winget: ${v.note.removePrefix("winget: ").ifEmpty { v.version }}"
                 }
             }
-            "linux" -> "installer not available yet: deb installer not built"
+            "linux" -> {
+                if (v.source == "deb" && v.sha256.isNotEmpty() && v.fetch.startsWith("https://")) {
+                    say("install ${app.id}: deb ${v.fetch} sha=${v.sha256.take(12)}...")
+                    Thread {
+                        val r = try {
+                            Installers.installDeb(context, app.id, v) { msg ->
+                                post { status.text = msg }
+                            }
+                        } catch (t: Throwable) {
+                            P7Log.say(context, "APPCTR deb ${app.id} fail ${t.javaClass.simpleName}: ${t.message}")
+                            "failed: ${t.message}"
+                        }
+                        post { status.text = "install ${app.name}: $r" }
+                        P7Log.say(context, "APPCTR install ${app.id} -> $r")
+                    }.start()
+                    "downloading + unpacking ${v.version}..."
+                } else {
+                    "shipped with the app (no download)"
+                }
+            }
             else -> "installer not available yet"
         }
     }
 
-    /** Open the selected app's shell window (or the Android window with its package). */
+    /**
+     * Open the selected app through [ShellRoot.openCatalogApp], the same route the start
+     * menu's installed rows use (B-083), so both can never drift apart.
+     */
     fun openSelected(): String {
         val app = selected ?: return "no app selected"
-        val v = picked ?: Catalog.pick(app) ?: return "no version"
+        val v = picked ?: return "no version"
         if (!Catalog.isUsable(v)) return "Not yet: ${v.note.ifEmpty { v.rating }}"
         val s = shell() ?: return "no shell"
-        val r = when (app.open) {
-            "files" -> { s.openApp(ShellRoot.App.FILES); "opened Files" }
-            "browser" -> {
-                val w = s.openApp(ShellRoot.App.BROWSER)
-                (w.content as? BrowserView)?.openUrl(v.fetch)
-                "opened Browser ${v.fetch}"
-            }
-            "settings" -> { s.openApp(ShellRoot.App.SETTINGS); "opened Settings" }
-            "vscode" -> { s.openApp(ShellRoot.App.VSCODE); "opened VS Code" }
-            "x11" -> {
-                s.openApp(ShellRoot.App.X11)
-                Thread { Phase2Wine.openCatalogApp(context, app.id) }.start()
-                "opened X11 (${app.name})"
-            }
-            "android" -> {
-                val pkg = v.packageName.ifEmpty { app.packageName }
-                if (pkg.isEmpty()) return "no package name"
-                s.openApp(ShellRoot.App.ANDROID, pkg)
-                "opening Android $pkg"
-            }
-            else -> "no window for [${app.open}]"
-        }
+        val r = s.openCatalogApp(app.id)
+        status.text = r
         say("open ${app.id}: $r")
         return r
     }
@@ -294,12 +323,45 @@ class AppCenterView(context: Context) : LinearLayout(context) {
                 val pkg = v.packageName.ifEmpty { app.packageName }
                 if (pkg.isEmpty()) return "no package name"
                 val r = engine.uninstallGuest(pkg)
+                if (r.ok) {
+                    Installed.clear(context, app.id)
+                    // B-090: do not leave the old TextureView/display for the next import.
+                    shell()?.closeGuestWindow(pkg)
+                    shell()?.refreshInstalledRows()
+                    renderDetail()
+                }
                 say("uninstall ${app.id} pkg=$pkg ok=${r.ok} msg=${r.message}")
                 "uninstall $pkg: ${if (r.ok) "ok" else "failed"} ${r.message ?: ""}"
             }
+            "windows" -> {
+                val rec = Installed.read(context)[app.id]
+                Installers.uninstallRefusal(rec)?.let { return it }
+                say("uninstall ${app.id} productCode=${rec!!.productCode}")
+                // B-088: close the program (and its X11 frame) before msiexec runs; a live
+                // client kept its window and content alive after a successful uninstall.
+                Phase2Wine.closeCatalogApps(context)
+                shell()?.closeX11Window()
+                Thread {
+                    val r = try {
+                        Installers.uninstallWinget(context, app.id) { msg ->
+                            post { status.text = msg }
+                        }
+                    } catch (t: Throwable) {
+                        P7Log.say(context, "APPCTR uninstall ${app.id} fail ${t.javaClass.simpleName}: ${t.message}")
+                        "failed: ${t.message}"
+                    }
+                    post {
+                        status.text = "uninstall ${app.name}: $r"
+                        shell()?.refreshInstalledRows()
+                        if (selected?.id == app.id) renderDetail()
+                    }
+                    P7Log.say(context, "APPCTR uninstall ${app.id} -> $r")
+                }.start()
+                "uninstalling ${app.name}..."
+            }
             "builtin" -> "cannot uninstall: built into the app"
             "web" -> "nothing to uninstall (web)"
-            else -> "cannot uninstall: shipped with the app"
+            else -> "cannot uninstall: the Linux rootfs copy is shared, not per-app"
         }
     }
 
@@ -311,9 +373,18 @@ class AppCenterView(context: Context) : LinearLayout(context) {
         if (!f.isFile) return "no such file: $p"
         say("open exe $p bytes=${f.length()}")
         status.text = "starting $p (Wine)..."
+        // B-093: openExe reuses the one X11 frame, so rename it here; otherwise the previous
+        // catalog app's title stays above the new program. UI thread, before Wine starts.
+        val title = X11Title.exeTitle(f.name)
+        shell()?.openApp(ShellRoot.App.X11, title = title)
+        say("exe frame title \"$title\"")
         Thread {
             try {
-                Phase2Wine.boot(context, null)
+                // boot() reaps every process of ours, Xvfb included, so a running desktop would
+                // be torn down and left reconnecting (B-084). Only boot when Wine is down.
+                if (!Phase2X11.xvfbRunning() || !Phase2Wine.wineserverAlive(context)) {
+                    Phase2Wine.boot(context, null)
+                }
                 val ok = Phase2Wine.openExe(context, p)
                 post { status.text = if (ok) "started $p" else "failed to start $p (see p7.log)" }
             } catch (t: Throwable) {

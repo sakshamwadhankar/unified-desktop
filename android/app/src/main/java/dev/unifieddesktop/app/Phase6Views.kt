@@ -120,12 +120,25 @@ class TaskbarView(context: Context) : View(context) {
 }
 
 /**
- * The start menu: Files, Browser, Settings and Test (the Phase-5 test desktop, kept
- * reachable so the Phase-5 measurements still work on this build).
+ * The start menu: Programs, App Center, Files, Browser, Settings, Test, then one row per
+ * app that is really installed/imported (B-083). Installed rows route through the same
+ * [ShellRoot.openCatalogApp] path as the App Center and disappear when the record is cleared.
  */
 class StartMenuView(context: Context) : LinearLayout(context) {
 
+    companion object {
+        /** The fixed rows; X11/VS Code/Android windows are opened by the App Center. */
+        val FIXED = listOf(
+            ShellRoot.App.APPCENTER,
+            ShellRoot.App.FILES,
+            ShellRoot.App.BROWSER,
+            ShellRoot.App.SETTINGS,
+            ShellRoot.App.TEST,
+        )
+    }
+
     var onLaunch: ((ShellRoot.App) -> Unit)? = null
+    var onLaunchInstalled: ((String) -> Unit)? = null
 
     private val title = TextView(context).apply {
         text = "Programs"
@@ -135,11 +148,14 @@ class StartMenuView(context: Context) : LinearLayout(context) {
         setPadding(18, 12, 18, 12)
     }
 
+    private val installedCol = LinearLayout(context).apply { orientation = VERTICAL }
+    private var installed: List<MenuRow> = emptyList()
+
     init {
         orientation = VERTICAL
         setBackgroundColor(0xFF20242C.toInt())
         addView(title)
-        for (app in ShellRoot.App.values()) {
+        for (app in FIXED) {
             val row = TextView(context).apply {
                 text = app.title()
                 setTextColor(Color.WHITE)
@@ -150,8 +166,31 @@ class StartMenuView(context: Context) : LinearLayout(context) {
             }
             addView(row, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         }
+        addView(installedCol)
         isClickable = true
     }
+
+    /** Replace the installed-app section; called on every menu open and after a change. */
+    fun setInstalledRows(rows: List<MenuRow>) {
+        installedCol.removeAllViews()
+        installed = rows
+        for (r in rows) {
+            val row = TextView(context).apply {
+                text = if (r.version.isBlank()) r.label else "${r.label}  ·  ${r.version}"
+                setTextColor(0xFFB9E6C8.toInt())
+                textSize = 22f
+                setPadding(40, 18, 18, 18)
+                isClickable = true
+                setOnClickListener { onLaunchInstalled?.invoke(r.appId) }
+            }
+            installedCol.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        }
+    }
+
+    /** Harness proof: fixed rows plus the real installed rows. */
+    fun rowsText(): String =
+        (listOf(title.text.toString()) + FIXED.map { it.title() } + installed.map { it.label })
+            .joinToString(" | ")
 }
 
 /** Our own pointer: a desktop-sized arrow, drawn on top of everything. */
