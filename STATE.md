@@ -73,7 +73,7 @@ corrects it after review.
   1.0 fps, drag 30.6 fps; typing medians 0.14/8.4/26.8 ms; stuck keys 0. Emulator-only limits:
   **B-056** (mitigated in code), **B-057** (PC window black on the emulator stream; not
   reproduced on the phone).
-- **Last updated:** 2026-10-21 05:20, manager (Phase 9 review accepted; manager gates
+- **Last updated:** 2026-10-21 05:25, manager (Phase 9 review accepted; manager gates
   re-run). Final tree gated: Android `:app:testDebugUnitTest --rerun-tasks`
   **149 tests / 0 failures / 3 skipped** and `lintDebug` + `assembleDebug`
   **BUILD SUCCESSFUL**; PC `cargo test --release` **55/0**, clippy clean; `git diff --check`
@@ -87,7 +87,7 @@ corrects it after review.
   review temp logs were removed. **Manager commit: Phase 8 + Phase 9, pushed to
   origin/main.**
 - **Next action:** Phase 9 is closed. Phase 10 is next (manager); do not start it without the
-  manager. Open decisions: accept the Windows 10 skip, and the still-open AOA /
+  manager. Accepted skip: Windows 10 (no hardware; SKIPS.md row); still open: the AOA /
   no-developer-mode checks (SKIPS).
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
