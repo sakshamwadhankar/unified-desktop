@@ -1,11 +1,14 @@
 # Phase 10 result: phone-first session continuity
 
-**Date:** 2026-10-21  
-**Status:** **INCOMPLETE / not a phase pass**  
+**Date:** 2026-10-22 (Round 2 post-soak)
+
+**Status:** **FAIL - Phase 9 Exit did not exit after the soak (B-098); resource governor is still PARTIAL**
 **Phone:** `2c0f6edc`, OnePlus CPH2619, Android 16, SDK 36, ColorOS  
 **PC:** Windows 11 26H2 build 26300, Intel UHD hardware decode  
-**Transport label:** phone smoke was run through the development `adb forward tcp:47600`
-harness; this is not a no-ADB user-path proof.
+**Transport label:** the Round 1 short smoke used the development `adb forward tcp:47600`
+harness. The final 4c and soak runs used the phone's Wi-Fi address
+`192.168.1.16:47600`; ADB was used only to drive test commands and never as the video
+transport. This is not a no-ADB user-path proof.
 
 ## Scope implemented
 
@@ -30,8 +33,8 @@ harness; this is not a no-ADB user-path proof.
 
 | Item | What was done | Evidence | Test / result | Verified on |
 |---|---|---|---|---|
-| Android build | Unit tests, lint, debug APK | `android/app/build/` | `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` — BUILD SUCCESSFUL; 152 tests, 0 failures, 3 skipped | code-only |
-| PC build | Receiver tests and static checks | `pc/target/release/` | `cargo test --release` — 57 passed / 0 failed; clippy clean; release build successful | code-only / Windows 11 |
+| Android build | Unit tests, lint, debug APK | `android/app/build/` | `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` — BUILD SUCCESSFUL; 155 tests, 0 failures, 3 skipped | code-only |
+| PC build | Receiver tests and static checks | `pc/target/release/` | `cargo test --release` — 58 passed / 0 failed; clippy clean; release build successful | code-only / Windows 11 |
 | Wakelock | Session acquire/release | `evidence/phase10/t10-final-view.log`; phone `files/p4/p4.log` | `WAKELOCK acquire session=4`; release after `--seconds 3` session end | phone via dev harness |
 | Service-owned desktop | Link attached with service context | phone `p4.log` | `P5 desktop up ... context=service (video-on)` | phone via dev harness |
 | Governor | Real thermal status observed during a short session | phone `files/p4/p4.log` (manager re-read 2026-10-21) | Phone: `GOVERNOR action=SetFps(fps=15)`, `LowerResolution` (logged `resolution request deferred` - **not applied**), `WarnPc`, all on `thermal=3` (SEVERE). PC: the warning line is **not** in the cited `t10-final-view.log` (manager check) | phone; PC side unproven |
@@ -68,28 +71,50 @@ The same trusted phone identity was reused and the receiver continued to decode 
 reconnect attempts. A controlled physical cable/Wi-Fi pull with guest PID and window-list
 comparison was not run, so the required 3/3 under-5-second gate remains open.
 
+## Round 2 final phone gates (2026-10-22)
+
+| Item | Result | Evidence | Numbers / notes | Verified on |
+|---|---|---|---|---|
+| 4a activity-free WhatsApp 60 s | **PASS** | `p10/whatsapp60.csv` | App pid 608 unchanged; CPU ticks 5569/3584 -> 9754/5799; P5 `sent=302 -> 1406`; PC 13.9-15.0 fps; no input/screenshots during the run | phone |
+| 4b real call for 1 minute | **SKIPPED** | `SKIPS.md` row 106; `p10/owner-call.csv` | No qualifying call by the manager's 23:15 cutoff. The only call was 22:29:29-22:30:05 (<1 min); every later sample was `mCallState=0|0` | phone sample only |
+| 4c three Wi-Fi reconnects, connected-first gate | **PASS 3/3** | `p10/reconnect-retest2.csv`, `p10/reconnect-retest2-rects.txt`, `p10/reconnect-retest2.log` | Cycle times (Wi-Fi CONNECTED -> first new frame): **3668 / 2798 / 2774 ms** (all <= 5000). Legacy enable -> picture: **5954 / 5329 / 5322 ms**; TLS handshake 40.5 / 48.5 / 42.2 ms. X11 id=6 stayed `96,80,900,620` and App Center id=3 stayed `60,48,900,620` before/after all cycles. Xvfb 29047, wineserver 29086, explorer 29110 and notepad++ 30161 were unchanged. B-097 did **not** reproduce under script-only input; it remains FIX LATER as real-PC-input, not a reconnect layout regression. | phone |
+| 4d different-PC policy | **PASS** | `p10/different-pc.txt` | Fresh PC identity `231A34891876AE5A`; receiver printed `PAIR FAILED: phone closed the connection while pairing`; phone log `SESSION refused different PC while desktop is live fpr=231A34891876AE5A`; the first view continued (sent 1158 -> 1325, windows=3) | phone |
+| 4e OEM onboarding persistence | **PASS** | `p10/phase10-4e.txt` | ColorOS "Allow background activity" checked=true; summary "No restrictions on any background activity."; after force-stop/restart `shared_prefs/phase10.xml` still `<boolean name="oem_background_confirmed" value="true" />`; new tap logged `10-21 23:18:42.102 ... Phase10 : OEM background activity user-confirmed` | phone |
+| 5 two-hour charger soak | **PASS** | `p10/soak.csv`, `p10/soak-note.txt`, `p10/soak-view-restarts.txt` | **25 samples, 121.0 min**, 23:45:42 -> 01:46:42; battery 47 -> 57 %, max battery temp **38.2 C**, thermal max 3, app pid **28212 unchanged**, CPU ticks **90,749 -> 265,728**, **CPU advancing 24/24 intervals**, LMK **0**, TLS failures **0**. Receiver 43824 viewed continuously **00:01:36-01:47:02 (105.4 min)**, `dropped=0`; earlier 37532/10912 restarts are in `p10/soak-note.txt`. | phone |
+| B-049 clock | **PASS (phone)** | `p10/soak-view.log`, `p10/soak.csv` | Full-width stamps and wrap tests pass; receiver 43824 ran 105.4 min continuously with 2,866+ `clock: phone-pc=... us` lines and no gap; exceeds the 71.6-minute proof. | phone |
+| B-072 continuous TLS | **PASS (phone)** | `p10/soak-view.log`, `p10/soak-view.err`, `p10/soak.csv` | 105.4 min continuous TLS, 4,663+ VSTAT, `dropped=0`, empty stderr, zero `cannot decrypt`. | phone |
+| B-094 cold-Wine uninstall | **PASS (phone)** | `p10/b094-result.txt`, `p10/b094-p7.log`, `p10/b094-wine.log` | After `run-as ... killall` left `pidof` empty, Notepad++ exit **0** (`{5C6F8543-7EA8-40B9-B78F-04C78300DE7F}`, restore 3/3, clear true) and 7-Zip exit **0** (`{23170F69-40C1-2702-2604-000001000000}`, restore 3/3, clear true). Both cold boots logged `PREFIX_BOOT_OK`; menu rows went `... Test / Notepad++ / 7-Zip` -> `... Test / 7-Zip` -> `... Test`. | phone |
+| ONE MOUSE | **PASS (phone)** | `BUGS.md` B-095; `p10/phone-b095-*` | `Phase5Desktop.kt:126 it.setPcPointerVisible(false)`; `view.rs:471` `hCursor: LoadCursorW(None, IDC_ARROW)`, `view.rs:574-580` `WM_SETCURSOR` -> `SetCursor(IDC_ARROW)`; phone `hCursor=0x10003`, exactly one arrow, real click `(70,1108)` opened Start. | phone |
+| Resource governor | **PARTIAL** | `docs/PHASE10_RESULT.md`; phone `files/p4/p4.log` | Thermal status 3 exercised the policy actions; the lower-resolution output change and before/after CPU/RAM/FPS numbers are still not proven. | phone; PC unproven |
+| Phase 9 Exit after soak | **FAIL** | `p10/phase9-exit.txt`, `p10/phase9-lock.log`, `p10/phase9-post.txt`; B-098 | `lock-exit` restored `input desktop=Default` in 78 ms, but the view process stayed alive for the full 60 s wait (`elapsed_ms=60107`) and had to be killed; PC then clean (`lock-state=Normal`, journal clean). Root cause/fix decision in B-098. | Windows 11 |
+
 ## Gate status
 
 | Gate | Status | Reason |
 |---|---|---|
-| Activity-free WhatsApp 60 s | **OPEN** | No final 60-second foreground-app capture with process/CPU/RSS evidence. |
-| Real call for 1 minute | **OPEN** | Not run in this session. |
-| 2-hour charger soak | **OPEN** | Not run; no phone survival/LMK/standby/wakelock time series. |
-| Three real reconnects | **OPEN** | Only development-harness reconnect evidence exists; no physical link-pull timing or guest PID proof. |
-| Same trusted PC / different PC policy | **PARTIAL** | Code path exists; different-PC refusal was not exercised on the phone. |
-| OEM onboarding persistence | **OPEN** | UI and intent are implemented; ColorOS setting and confirmation persistence were not manually verified. |
-| Resource governor | **PARTIAL** | Thermal status 3 exercised all policy actions; lower-resolution output change and before/after resource numbers are not proven. |
-| B-049 clock | **PARTIAL** | Full-width stamps and wrap tests pass; 71.6-minute drift proof is not run. |
-| B-072 continuous TLS | **PARTIAL** | Timeout removal, watchdog, and timed shutdown are implemented; full continuous TLS soak is not run. |
-| Phase 9 Exit after soak | **OPEN** | No post-soak lock/Exit run. |
+| Activity-free WhatsApp 60 s | **PASS** | Round 2, phone: pid 608 unchanged; CPU ticks `5569/3584 -> 9754/5799`; P5 `sent=302 -> 1406`; PC 13.9-15.0 fps (`p10/whatsapp60.csv`). |
+| Real call for 1 minute | **SKIPPED** | No qualifying 1-minute call by 23:15. `SKIPS.md` row 106; only the 22:29:29-22:30:05 (<1 min) call was observed; all later samples were `mCallState=0|0`. |
+| 2-hour charger soak | **PASS** | 121.0 min, 25 samples, app pid 28212 unchanged, CPU advancing 24/24, LMK 0, TLS 0, max temp 38.2 C, receiver 43824 continuous 105.4 min (`p10/soak.csv`). |
+| Three Wi-Fi reconnects | **PASS 3/3** | Connected -> picture 3668 / 2798 / 2774 ms under the manager's 23:50 definition; legacy enable -> picture 5954 / 5329 / 5322 ms; X11/App Center rects and guest PIDs unchanged (`p10/reconnect-retest2*`). |
+| Same trusted PC / different PC policy | **PASS** | Fresh PC identity refused; live view continued (`p10/different-pc.txt`). |
+| OEM onboarding persistence | **PASS** | ColorOS checked=true; preference survived force-stop/restart (`p10/phase10-4e.txt`). |
+| Resource governor | **PARTIAL** | Policy exercised on thermal 3; lower-resolution output/before-after resource numbers still missing. |
+| B-049 clock | **PASS (phone)** | 105.4 min continuous, 2,866+ clock lines, no gap. |
+| B-072 continuous TLS | **PASS (phone)** | 105.4 min, dropped=0, zero `cannot decrypt`, empty stderr. |
+| B-094 cold uninstall | **PASS (phone)** | Notepad++ exit 0, 7-Zip exit 0 after real cold stops; MSI state restored and cleared. |
+| Phase 9 Exit after soak | **FAIL** | Lock restored in 78 ms but view process did not exit within 60 s; B-098 open; PC manually recovered clean. |
 
-The open work is recorded in `SKIPS.md`. Phase 10 must not be marked PASS until those rows are
-closed with phone-labelled evidence.
+**Phase 10 is not a pass.** All other post-soak gates passed, but the Phase 9 Exit gate failed
+(B-098) and the resource governor lower-resolution/resource proof remains PARTIAL. The open
+work is recorded in `SKIPS.md` and `BUGS.md`.
 
 ## Cleanup
 
-- The final timed receiver process exited; no `udreceiver.exe` was left running.
-- The development forward was used only for verification and should be removed before the
-  next phone gate or final handoff.
-- No APK, receiver binary, or other build artifact was added to the repository; only source,
-  docs, and text evidence are in the working tree.
+- Final teardown at 02:02: no `udreceiver.exe` running, no ADB forwards, phone
+  `stay_on_while_plugged_in=0`, `screen_brightness=699`, Wi-Fi enabled and connected on
+  `192.168.1.16`; PC `input-desktop=Default`, `lock-state=Normal`, journal clean.
+- The development forward was used only for verification and was removed; the final 4c/soak
+  used the phone's Wi-Fi address.
+- No APK, receiver binary, installation file, or other build artifact was added to the
+  repository; only source, docs, and text evidence are in the working tree.
+- Evidence stays under `C:\Users\Asus\AppData\Local\Temp\opencode\p10`, not in the repo.

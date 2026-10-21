@@ -395,6 +395,8 @@ object Installers {
         )
         if (product != null) {
             Installed.record(ctx, appId, m.version, product.code)
+            // B-094: keep what msiexec /x needs across the next cold boot, per app.
+            Phase2Wine.saveMsiRegistration(ctx, appId)
             return "installed ${m.identifier} ${m.version} (product ${product.code})"
         }
         Installed.record(ctx, appId, m.version)
@@ -426,7 +428,7 @@ object Installers {
         val rec = Installed.read(ctx)[appId]
         uninstallRefusal(rec)?.let { return it }
         post("uninstalling $appId (${rec!!.productCode})...")
-        val code = Phase2Wine.runMsiUninstall(ctx, rec.productCode)
+        val code = Phase2Wine.runMsiUninstall(ctx, appId, rec.productCode)
         P7Log.say(ctx, "APPCTR uninstall $appId code=${rec.productCode} exit=$code")
         if (code != 0) return "uninstall failed: msiexec exit $code (see p2.log)"
         Installed.clear(ctx, appId)

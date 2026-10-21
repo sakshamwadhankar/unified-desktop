@@ -65,13 +65,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     GetClassNameW, GetClientRect, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
-    KillTimer, PeekMessageW, PostMessageW, RegisterClassW, SetForegroundWindow, SetTimer,
-    SetWindowPos, SetWindowsHookExW, ShowWindow, TranslateMessage, UnhookWindowsHookEx,
-    HC_ACTION, HWND_TOPMOST, KBDLLHOOKSTRUCT, MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_SHOW, WH_KEYBOARD_LL,
-    WINDOW_EX_STYLE, WM_APP, WM_DPICHANGED, WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEACTIVATE,
-    WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
-    WS_VISIBLE,
+    KillTimer, LoadCursorW, PeekMessageW, PostMessageW, RegisterClassW, SetCursor,
+    SetForegroundWindow, SetTimer, SetWindowPos, SetWindowsHookExW, ShowWindow, TranslateMessage,
+    UnhookWindowsHookEx, HC_ACTION, HTCLIENT, HWND_TOPMOST, IDC_ARROW, KBDLLHOOKSTRUCT, MSG,
+    PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_SHOWWINDOW, SW_SHOW, WH_KEYBOARD_LL, WINDOW_EX_STYLE, WM_APP, WM_DPICHANGED,
+    WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_PAINT, WM_SETCURSOR, WM_TIMER, WNDCLASSW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
 };
 
 /// Lock is the default for `view` (flipped 2026-10-21 after G4+G5 passed on the phone).
@@ -1059,6 +1059,18 @@ fn paint_solid(hwnd: HWND, color: COLORREF) {
     }
 }
 
+/// B-095: a client area always shows the standard arrow, never the app-starting busy cursor.
+unsafe fn arrow_cursor(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if (lparam.0 & 0xFFFF) as u32 == HTCLIENT {
+        if let Ok(cursor) = LoadCursorW(None, IDC_ARROW) {
+            SetCursor(Some(cursor));
+        }
+        LRESULT(1)
+    } else {
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+}
+
 unsafe extern "system" fn black_wndproc(
     hwnd: HWND,
     msg: u32,
@@ -1071,6 +1083,7 @@ unsafe extern "system" fn black_wndproc(
             paint_solid(hwnd, COLORREF(0x000000));
             LRESULT(0)
         }
+        WM_SETCURSOR => arrow_cursor(hwnd, msg, wparam, lparam),
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
@@ -1146,6 +1159,7 @@ unsafe extern "system" fn exit_wndproc(
             LRESULT(0)
         }
         WM_MOUSEACTIVATE => LRESULT(3), // MA_NOACTIVATE
+        WM_SETCURSOR => arrow_cursor(hwnd, msg, wparam, lparam),
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
@@ -1160,6 +1174,9 @@ fn register_class(name: &str, proc: unsafe extern "system" fn(HWND, u32, WPARAM,
             lpfnWndProc: Some(proc),
             hInstance: hinstance,
             lpszClassName: PCWSTR(class.as_ptr()),
+            // B-095: the Exit overlay (and the black lock backgrounds) must not inherit the
+            // app-starting busy cursor from a null class cursor.
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             hbrBackground: CreateSolidBrush(brush),
             ..Default::default()
         };

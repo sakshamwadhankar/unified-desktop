@@ -122,36 +122,8 @@ object Phase6Dispatch {
                 c.requestReconnect()
                 "x11 reconnect requested"
             }
-            // Virtual mouse/keyboard for the second-screen round: injected on the phone's own
-            // desktop, so the owner's physical PC mouse and focus are never used. x,y are
-            // desktop pixels (1920x1080); key is <android-keycode>,<0|1>[,meta].
-            "move" -> {
-                val p = arg.split(",")
-                if (p.size != 2) return "move needs x,y"
-                val x = p[0].trim().toIntOrNull() ?: return "bad x"
-                val y = p[1].trim().toIntOrNull() ?: return "bad y"
-                s.moveTo(x, y)
-                "moved $x,$y ${s.stats()}"
-            }
-            "tap" -> {
-                val p = arg.split(",")
-                if (p.size != 2) return "tap needs x,y"
-                val x = p[0].trim().toIntOrNull() ?: return "bad x"
-                val y = p[1].trim().toIntOrNull() ?: return "bad y"
-                s.mouseButton(Phase5Protocol.BTN_LEFT, true, x, y)
-                s.mouseButton(Phase5Protocol.BTN_LEFT, false, x, y)
-                "tap $x,$y ${s.stats()}"
-            }
-            "key" -> {
-                val p = arg.split(",")
-                if (p.size < 2) return "key needs code,down[,meta]"
-                val code = p[0].trim().toIntOrNull() ?: return "bad code"
-                val down = p[1].trim() == "1" || p[1].trim().equals("true", true)
-                val meta = p.getOrNull(2)?.trim()?.toIntOrNull() ?: 0
-                val handled = s.key(down, code, 0, meta)
-                "key code=$code down=$down handled=$handled ${s.stats()}"
-            }
-            "menu" -> { s.toggleStartMenu(); "startMenu=${s.startMenuOpen()}" }            "close" -> {
+            "menu" -> { s.toggleStartMenu(); "startMenu=${s.startMenuOpen()}" }
+            "close" -> {
                 val id = s.model.focusedId ?: return "nothing focused"
                 s.closeWindow(id)
                 "closed $id ${s.stats()}"

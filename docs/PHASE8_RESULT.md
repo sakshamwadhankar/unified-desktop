@@ -394,3 +394,5 @@ Round-6 guard proofs:
 both route to the official Browser Play page with no Android window (B-092 fixed and
 phone-verified). B-093 is a minor, non-blocking title cleanup for the arbitrary-.exe path.
 No Phase 9 work started; nothing committed or pushed.
+
+`--no-input` and the virtual pointer were removed on 2026-10-21 (owner); historical runs above used them.

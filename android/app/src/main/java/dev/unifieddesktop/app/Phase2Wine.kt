@@ -1138,12 +1138,125 @@ object Phase2Wine {
     }
 
     /**
+     * B-094: the MSI registration that a cold prefix loses. `boot()` drops the hives by
+     * design (B-021), so the keys below are exported while the install's wineserver is
+     * alive and imported into the fresh server before `msiexec /x`. Importing through
+     * reg.exe writes live registry values; it never loads a saved hive file.
+     */
+    internal fun msiStatePlan(): List<Pair<String, String>> = listOf(
+        "HKLM\\Software\\Classes\\Installer" to "hklm-classes-installer.reg",
+        "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Installer" to "hklm-installer.reg",
+        "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall" to "hklm-uninstall.reg",
+        "HKCU\\Software\\Microsoft\\Installer" to "hkcu-installer.reg",
+    )
+
+    /** Pure restore plan: plan order, only files that exist. */
+    internal fun msiRestoreNames(present: Set<String>): List<String> =
+        msiStatePlan().map { it.second }.filter { it in present }
+
+    /**
+     * B-094: the saved registration is per catalog app. One shared folder would let the
+     * second install overwrite the first app's keys, so each app gets its own directory.
+     * Only [A-Za-z0-9._-] survives; path separators and traversal cannot escape the root.
+     */
+    internal fun msiStateDirName(appId: String): String {
+        val safe = appId.lowercase().map { c ->
+            if (c in 'a'..'z' || c in '0'..'9' || c == '.' || c == '_' || c == '-') c else '_'
+        }.joinToString("").trim('.', '_', '-').take(80)
+        return if (safe.isEmpty() || safe == "." || safe == "..") "app" else safe
+    }
+
+    /** Pure path helper so the per-app layout is unit-tested without an Android context. */
+    internal fun msiStateDirFor(root: File, appId: String): File =
+        File(File(root, "wine-msi-state"), msiStateDirName(appId))
+
+    private fun msiStateDir(ctx: Context, appId: String): File =
+        msiStateDirFor(Phase2Data.rootDir(ctx), appId)
+
+    /**
+     * Wine's Z: drive is the Unix root. `reg.exe` is a Windows program and does not accept
+     * an Android `/data/...` path, so hand it the same file as `Z:\data\...`.
+     */
+    internal fun winePath(path: String): String =
+        if (path.startsWith("/")) "Z:" + path.replace('/', '\\') else path
+
+    private fun regArgv(ctx: Context, args: List<String>): List<String> {
+        val reg = File(pinRoot(ctx), "lib/wine/x86_64-windows/reg.exe")
+        return listOf(Phase2Box64.libbox64(ctx).path, loaderBin(ctx).path, reg.absolutePath) + args
+    }
+
+    /** Export the MSI/installer keys while the install session is still live. */
+    fun saveMsiRegistration(ctx: Context, appId: String): Boolean {
+        val dir = msiStateDir(ctx, appId)
+        if (dir.exists() && !dir.deleteRecursively()) {
+            say("WINE_MSI_STATE app=$appId fail: cannot replace ${dir.path}")
+            writeLog(ctx)
+            return false
+        }
+        if (!dir.mkdirs() && !dir.isDirectory) {
+            say("WINE_MSI_STATE app=$appId fail: cannot create ${dir.path}")
+            writeLog(ctx)
+            return false
+        }
+        var saved = 0
+        for ((key, name) in msiStatePlan()) {
+            val file = File(dir, name)
+            val argv = regArgv(ctx, listOf("export", key, winePath(file.absolutePath), "/y"))
+            val (code, out) = runCaptured(ctx, argv, 60, "WINE_MSI_EXPORT")
+            if (code == 0 && file.isFile && file.length() > 0) {
+                saved++
+            } else {
+                say("WINE_MSI_EXPORT app=$appId skip key=$key exit=$code bytes=${file.length()} out=[${out.trim().take(300)}]")
+            }
+        }
+        say("WINE_MSI_STATE app=$appId saved=$saved/${msiStatePlan().size} dir=${dir.path}")
+        writeLog(ctx)
+        return saved > 0
+    }
+
+    /** Import only this app's saved MSI keys into the fresh/current server before msiexec /x. */
+    fun restoreMsiRegistration(ctx: Context, appId: String): Int {
+        val dir = msiStateDir(ctx, appId)
+        val names = msiRestoreNames((dir.listFiles() ?: emptyArray()).map { it.name }.toSet())
+        if (names.isEmpty()) {
+            say("WINE_MSI_RESTORE app=$appId none saved in ${dir.path}")
+            return 0
+        }
+        var ok = 0
+        for (name in names) {
+            val file = File(dir, name)
+            val argv = regArgv(ctx, listOf("import", winePath(file.absolutePath)))
+            val (code, out) = runCaptured(ctx, argv, 120, "WINE_MSI_IMPORT")
+            if (code == 0) {
+                ok++
+            } else {
+                say("WINE_MSI_IMPORT app=$appId fail $name exit=$code out=[${out.trim().take(300)}]")
+            }
+        }
+        say("WINE_MSI_RESTORE app=$appId imported=$ok/${names.size}")
+        writeLog(ctx)
+        return ok
+    }
+
+    /** Drop one app's saved keys only after its uninstall succeeded. */
+    internal fun clearMsiRegistration(ctx: Context, appId: String): Boolean {
+        val dir = msiStateDir(ctx, appId)
+        val removed = dir.exists() && dir.deleteRecursively()
+        say("WINE_MSI_CLEAR app=$appId removed=$removed dir=${dir.path}")
+        writeLog(ctx)
+        return removed
+    }
+
+    /**
      * B-086: silent MSI removal through the shipped Wine loader. Called with the stored
      * ProductCode; the live-prefix rule in [ensureLivePrefix] is what keeps the MSI
      * registration available to msiexec.
      */
-    fun runMsiUninstall(ctx: Context, productCode: String): Int {
+    fun runMsiUninstall(ctx: Context, appId: String, productCode: String): Int {
         if (!ensureLivePrefix(ctx, "msiexec /x")) return -1
+        // B-094: a cold boot rebuilt the prefix without the registration. Put only this
+        // app's saved keys back through reg.exe before asking msiexec to remove it.
+        restoreMsiRegistration(ctx, appId)
         val msiexec = File(pinRoot(ctx), "lib/wine/x86_64-windows/msiexec.exe")
         if (!msiexec.isFile) { say("WINE fail: msiexec missing ${msiexec.path}"); return -1 }
         val args = Installers.msiUninstallArgs(productCode)
@@ -1154,7 +1267,12 @@ object Phase2Wine {
             msiexec.absolutePath,
         ) + args
         val (code, out) = runCaptured(ctx, argv, 180, "WINE_UNINSTALL")
-        say("WINE_UNINSTALL out=[${out.trim().take(1500)}]")
+        say("WINE_UNINSTALL app=$appId out=[${out.trim().take(1500)}]")
+        if (code == 0) {
+            clearMsiRegistration(ctx, appId)
+        } else {
+            say("WINE_MSI_RESTORE app=$appId kept after msiexec exit=$code")
+        }
         writeLog(ctx)
         return code
     }

@@ -4,8 +4,16 @@
 05:10). Receiver: `pc/udreceiver`; phone 2c0f6edc (USB, `adb forward tcp:47600`); Windows 11
 26H2 build 26300, UBR 9711, **not elevated**.
 
+**Post-soak recheck 2026-10-22 01:57-01:59: FAIL (B-098).** A real `view --lock
+--lock-max-seconds 180` against the phone Wi-Fi address restored the PC to `Default`
+(`[lock] exited: switch_ms=45 total_ms=78`), but the view process stayed alive for the
+whole 60 s wait (`phase9_exit.ps1` stopped at `elapsed_ms=60107`) and had to be killed.
+`lock-recover` then reported `input-desktop=Default`, `lock-state=Normal` and a clean
+journal (`p10/phase9-post.txt`). The historical 2026-10-21 PASS below remains the record
+of the earlier build, but Phase 9 Exit is **not PASS after the Phase 10 soak**.
+
 ```
-PHASE 9 GATE (Windows 11 26H2 build 26300.9711): PASS - private lock desktop, 8/8 key
+PHASE 9 GATE (Windows 11 26H2 build 26300.9711): PASS (historical 2026-10-21; post-soak FAIL above) - private lock desktop, 8/8 key
 combinations blocked, Exit restores, watchdog/phone-gone/frozen-video restore, crash guard
 returns input to Default; Windows 10 and policies are declared SKIPs (no hardware / not admin);
 multi-monitor is code-only
@@ -210,3 +218,5 @@ kept under `p9t17/` for audit (not committed).
 - `SKIPS.md`: Windows 10 row.
 - `TODO.md`: Phase 9 items closed; review rework added.
 - `STATE.md`: updated last.
+
+`--no-input` and the virtual pointer were removed on 2026-10-21 (owner); historical runs above used them.

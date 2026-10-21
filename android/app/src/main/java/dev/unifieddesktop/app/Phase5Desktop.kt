@@ -121,7 +121,11 @@ class Phase5Desktop(private val context: Context, private val fallbackContext: C
                 android.util.Log.i(TAG, "shell density=" + shellContext.resources.displayMetrics.density +
                         " dpi=" + shellContext.resources.displayMetrics.densityDpi +
                         " displayDensity=" + displayContext.resources.displayMetrics.density)
-                p.setContentView(ShellRoot(shellContext).also { desktop = it })
+                p.setContentView(ShellRoot(shellContext).also {
+                    // B-095: the PC draws the only mouse pointer during a PC session.
+                    it.setPcPointerVisible(false)
+                    desktop = it
+                })
                 p.setOnDismissListener { running = false }
                 p.show()
                 pres = p

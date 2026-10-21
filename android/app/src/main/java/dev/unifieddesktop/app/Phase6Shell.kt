@@ -54,6 +54,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     private val heldKeys = HashSet<Int>()
     private val heldButtons = HashSet<Int>()
+    private var pcPointerVisible = true
     private var keysAllTime = 0
     private var keyFlashes = 0
     private var buttonsAllTime = 0
@@ -315,6 +316,18 @@ class ShellRoot(context: Context) : FrameLayout(context) {
     fun startMenuOpen(): Boolean = startMenu.visibility == View.VISIBLE
 
     // ------------------------------------------------------------------ pointer
+
+    /**
+     * B-095: while a PC session is connected, the PC draws the one real arrow over the video.
+     * Keep tracking the pointer for hover and clicks, but do not paint a second one on the
+     * phone's own desktop surface.
+     */
+    fun setPcPointerVisible(visible: Boolean) {
+        pcPointerVisible = visible
+        cursorView.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
+    fun pcPointerIsVisible(): Boolean = pcPointerVisible
 
     /**
      * Move the pointer without a button held (hover). Nothing is dispatched as a touch: a

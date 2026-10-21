@@ -1,6 +1,8 @@
 package dev.unifieddesktop.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -246,5 +248,46 @@ class InstallersTest {
             threw = true
         }
         assertTrue("a non-ar file must fail, not unpack", threw)
+    }
+
+    @Test
+    fun msiRegistrationRestoreUsesOnlySavedKeysInPlanOrder() {
+        val plan = Phase2Wine.msiStatePlan()
+        assertEquals(4, plan.size)
+        val names = plan.map { it.second }
+        assertEquals(
+            listOf("hklm-installer.reg", "hkcu-installer.reg"),
+            Phase2Wine.msiRestoreNames(setOf(names[3], names[1])),
+        )
+        assertTrue(plan.any { it.first == "HKLM\\Software\\Classes\\Installer" })
+        assertTrue(plan.any { it.first == "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall" })
+    }
+
+    @Test
+    fun msiRegistrationIsSavedPerAppAndStaysInsideTheStateRoot() {
+        val root = tempDir("msistate")
+        val npp = Phase2Wine.msiStateDirFor(root, "notepadpp")
+        val seven = Phase2Wine.msiStateDirFor(root, "sevenzip")
+
+        assertEquals(File(root, "wine-msi-state/notepadpp"), npp)
+        assertEquals(File(root, "wine-msi-state/sevenzip"), seven)
+        assertNotEquals("each app needs its own saved registration", npp, seven)
+
+        // A catalog id is data, not a path: separators and traversal cannot leave the root.
+        val odd = Phase2Wine.msiStateDirFor(root, "../evil:dir")
+        assertEquals(File(root, "wine-msi-state/evil_dir"), odd)
+        assertFalse(odd.path.contains(".."))
+        assertTrue(odd.parentFile == File(root, "wine-msi-state"))
+    }
+
+    @Test
+    fun msiStateFilesArePassedToWineAsZDrivePaths() {
+        assertEquals(
+            "Z:\\data\\user\\0\\dev.unifieddesktop.app\\files\\win86\\wine-msi-state\\notepadpp\\hklm-uninstall.reg",
+            Phase2Wine.winePath(
+                "/data/user/0/dev.unifieddesktop.app/files/win86/wine-msi-state/notepadpp/hklm-uninstall.reg",
+            ),
+        )
+        assertEquals("C:\\already\\windows", Phase2Wine.winePath("C:\\already\\windows"))
     }
 }

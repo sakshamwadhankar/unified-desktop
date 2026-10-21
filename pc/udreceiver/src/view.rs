@@ -71,15 +71,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetForegroundWindow,
-    PeekMessageW,
+    LoadCursorW, PeekMessageW, SetCursor,
     GetSystemMetrics, PostMessageW, PostQuitMessage, RegisterClassW, SetForegroundWindow,
     SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
-    GWL_STYLE, HWND_TOPMOST, MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN,
+    GWL_STYLE, HTCLIENT, HWND_TOPMOST, IDC_ARROW, MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN,
     SWP_FRAMECHANGED, SWP_SHOWWINDOW, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_KEYUP,
     WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
-    WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SIZE, WM_SYSKEYDOWN,
-    WM_SYSKEYUP, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE, WINDOW_EX_STYLE,
-    WS_EX_NOACTIVATE,
+    WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SIZE,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSW, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
+    WINDOW_EX_STYLE,
 };
 
 use crate::phase5::{self, InputEvent, VideoFrame};
@@ -117,10 +117,6 @@ struct Shared {
     win_y: i32,
     win_w: i32,
     win_h: i32,
-    /// Display-only mode: never take focus (WS_EX_NOACTIVATE) and never forward the physical
-    /// mouse or keyboard. The phone is driven by its own harness instead, so the owner's
-    /// mouse and focus stay on the main desktop while this view fills the second screen.
-    no_input: bool,
     client_w: AtomicU32,
     client_h: AtomicU32,
     need_keyframe: AtomicU32,
@@ -135,7 +131,7 @@ struct Shared {
 }
 
 impl Shared {
-    fn new(x: i32, y: i32, w: i32, h: i32, no_input: bool) -> Arc<Self> {
+    fn new(x: i32, y: i32, w: i32, h: i32) -> Arc<Self> {
         Arc::new(Shared {
             hwnd: AtomicU64::new(0),
             events: Mutex::new(Vec::new()),
@@ -146,7 +142,6 @@ impl Shared {
             win_y: y,
             win_w: w,
             win_h: h,
-            no_input,
             client_w: AtomicU32::new(1920),
             client_h: AtomicU32::new(1080),
             need_keyframe: AtomicU32::new(0),
@@ -207,7 +202,6 @@ pub struct ViewOptions {
     pub y: i32,
     pub w: i32,
     pub h: i32,
-    pub no_input: bool,
     /// Phase 9: switch to a private Windows desktop and block the exam keys.
     pub lock: bool,
     /// 0 = no limit. The watchdog force-restores when it expires.
@@ -233,7 +227,7 @@ pub fn run(
     println!("[{TAG}] {description}");
     let _ = session.tls.get_mut().set_nodelay(true);
 
-    let shared = Shared::new(opts.x, opts.y, opts.w, opts.h, opts.no_input);
+    let shared = Shared::new(opts.x, opts.y, opts.w, opts.h);
     SHARED.set(shared.clone()).map_err(|_| "view already running")?;
 
     // The private desktop must exist, and this thread must be switched onto it, BEFORE any
@@ -474,6 +468,7 @@ fn create_window(shared: &Arc<Shared>) -> Result<HWND, String> {
             lpfnWndProc: Some(wndproc),
             hInstance: HINSTANCE(hinstance.0),
             lpszClassName: PCWSTR(class_name.as_ptr()),
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             hbrBackground: windows::Win32::Graphics::Gdi::CreateSolidBrush(COLORREF(0x000000)),
             ..Default::default()
         };
@@ -488,9 +483,8 @@ fn create_window(shared: &Arc<Shared>) -> Result<HWND, String> {
         } else {
             (0, 0, sw, sh)
         };
-        let ex_style = if shared.no_input { WS_EX_NOACTIVATE } else { WINDOW_EX_STYLE(0) };
         let hwnd = CreateWindowExW(
-            ex_style,
+            WINDOW_EX_STYLE(0),
             PCWSTR(class_name.as_ptr()),
             PCWSTR(title.as_ptr()),
             WS_POPUP | WS_VISIBLE,
@@ -563,27 +557,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             LRESULT(0)
         }
-        // Display-only mode: the physical mouse and keyboard cannot reach the phone, so the
-        // owner's pointer and focus are never borrowed. The phone harness drives input.
-        _ if shared.no_input
-            && matches!(
-                msg,
-                WM_MOUSEMOVE
-                    | WM_LBUTTONDOWN
-                    | WM_LBUTTONUP
-                    | WM_RBUTTONDOWN
-                    | WM_RBUTTONUP
-                    | WM_MBUTTONDOWN
-                    | WM_MBUTTONUP
-                    | WM_MOUSEWHEEL
-                    | WM_KEYDOWN
-                    | WM_KEYUP
-                    | WM_SYSKEYDOWN
-                    | WM_SYSKEYUP
-            ) =>
-        {
-            LRESULT(0)
-        }
         WM_SIZE => {
             let w = (lparam.0 & 0xFFFF) as u32;
             let h = ((lparam.0 >> 16) & 0xFFFF) as u32;
@@ -597,6 +570,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             // Never leave a key or a button down on the phone.
             shared.release_all.store(1, Ordering::SeqCst);
             LRESULT(0)
+        }
+        WM_SETCURSOR => {
+            // B-095: the video is a normal PC client area, so the real mouse must always see
+            // the standard arrow here. Without this the class cursor was null and Windows kept
+            // the app-starting busy icon over the whole view.
+            if (lparam.0 & 0xFFFF) as u32 == HTCLIENT {
+                if let Ok(cursor) = LoadCursorW(None, IDC_ARROW) {
+                    SetCursor(Some(cursor));
+                }
+                LRESULT(1)
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
         }
         WM_MOUSEMOVE => {
             let x = (lparam.0 & 0xFFFF) as i16 as i32;
@@ -843,13 +829,7 @@ fn pipeline_loop(
             break;
         }
         // ---- outgoing: input, control, clock, keep-alive (all through the priority writer)
-        let events = shared.drain_events();
-        if !events.is_empty() {
-            let payload = phase5::pack_input_events(&events);
-            let mut w = PriorityWriter::new(&mut session.tls);
-            let _ = w.push(Message::new(CH_INPUT, payload)?);
-            let _ = w.emit_all();
-        }
+        flush_input(&mut session.tls, shared)?;
         if shared.release_all.swap(0, Ordering::SeqCst) == 1 {
             let mut w = PriorityWriter::new(&mut session.tls);
             let _ = w.push(Message::new(CH_CONTROL, phase5::CTRL_RELEASE_ALL.as_bytes().to_vec())?);
@@ -902,6 +882,10 @@ fn pipeline_loop(
                 println!("[{TAG}] --seconds {seconds} reached");
                 break 'pipeline;
             }
+            // The inner loop can stay here for the whole session while video is flowing.
+            // Input must not wait for a read timeout, or the phone sees clicks seconds late
+            // (or only after the next transient read error).
+            flush_input(&mut session.tls, shared)?;
             let Some(m) = pending.pop_front() else {
                 match std::io::Read::read(&mut session.tls, &mut read_buf) {
                     Ok(0) => {
@@ -986,6 +970,22 @@ fn pipeline_loop(
     unsafe {
         let _ = MFShutdown();
     }
+    Ok(())
+}
+
+/// Send every locally queued input event now. Called at both levels of the pipeline loop:
+/// the inner loop is the one that runs while video is continuous, so draining only in the
+/// outer loop leaves a real mouse click sitting in the queue indefinitely.
+fn flush_input<W: std::io::Write>(tls: &mut W, shared: &Shared) -> Result<(), String> {
+    let events = shared.drain_events();
+    if events.is_empty() {
+        return Ok(());
+    }
+    let payload = phase5::pack_input_events(&events);
+    let mut w = PriorityWriter::new(tls);
+    w.push(Message::new(CH_INPUT, payload).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    w.emit_all().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1938,6 +1938,30 @@ mod tests {
         assert!(is_transient_read(&Error::from_raw_os_error(10060))); // WSAETIMEDOUT
         assert!(!is_transient_read(&Error::from_raw_os_error(10054))); // WSAECONNRESET: fatal
         assert!(!is_transient_read(&Error::from_raw_os_error(9))); // EBADF: fatal
+    }
+
+    /// B-095 follow-up: a real mouse click queued while video is flowing must be written by
+    /// the inner pipeline loop, not left until the outer loop gets a transient read.
+    #[test]
+    fn flush_input_sends_and_clears_queued_events() {
+        let shared = Shared::new(0, 0, 1920, 1080);
+        let events = vec![
+            InputEvent::Move { x: 1, y: 2 },
+            InputEvent::Button { button: 0, down: true, x: 1, y: 2, t_pc_us: 3 },
+        ];
+        for e in &events {
+            shared.push(e.clone());
+        }
+        let mut wire = Vec::new();
+        flush_input(&mut wire, &shared).unwrap();
+        assert!(!wire.is_empty());
+        assert!(shared.drain_events().is_empty(), "flush must consume the queue");
+
+        let mut dec = crate::protocol::FrameDecoder::new();
+        let msgs = dec.feed(&wire).unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].channel, CH_INPUT);
+        assert_eq!(phase5::parse_input_events(&msgs[0].payload).unwrap(), events);
     }
 
     #[test]

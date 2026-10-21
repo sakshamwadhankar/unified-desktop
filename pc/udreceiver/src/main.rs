@@ -312,14 +312,12 @@ fn cmd_view(rest: &[String]) -> ExitCode {
     let y: i32 = flag(rest, "--y", "0").parse().unwrap_or(0);
     let w: i32 = flag(rest, "--w", "0").parse().unwrap_or(0);
     let h: i32 = flag(rest, "--h", "0").parse().unwrap_or(0);
-    let no_input = rest.iter().any(|a| a == "--no-input");
     let lock_flag = rest.iter().any(|a| a == "--lock");
     let no_lock = rest.iter().any(|a| a == "--no-lock");
     let policies = rest.iter().any(|a| a == "--policies");
     let lock_max_seconds: u64 = flag(rest, "--lock-max-seconds", "0").parse().unwrap_or(0);
     let freeze_video_after: u64 = flag(rest, "--freeze-video-after", "0").parse().unwrap_or(0);
-    // --no-input (screen only, phone driven by its own harness) can never lock the PC.
-    let lock = if no_input || no_lock {
+    let lock = if no_lock {
         false
     } else if lock_flag {
         true
@@ -336,7 +334,6 @@ fn cmd_view(rest: &[String]) -> ExitCode {
         y,
         w,
         h,
-        no_input,
         lock,
         lock_max_seconds,
         freeze_video_after,
