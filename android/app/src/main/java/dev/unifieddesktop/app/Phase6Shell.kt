@@ -305,6 +305,13 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         onChanged?.invoke()
     }
 
+    /** Governor step one: ensure minimized windows are detached from the render path. */
+    fun stopRenderingHiddenWindows(): Int {
+        val hidden = model.all().count { it.minimized }
+        if (hidden > 0) syncViews()
+        return hidden
+    }
+
     fun startMenuOpen(): Boolean = startMenu.visibility == View.VISIBLE
 
     // ------------------------------------------------------------------ pointer

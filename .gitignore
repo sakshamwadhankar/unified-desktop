@@ -135,3 +135,6 @@ android/app/src/main/assets/win86/libfontconfig.so.1
 
 # Kotlin compiler cache (Gradle 9 / Kotlin 2), never committed
 android/.kotlin/
+
+# Agent evidence (logs, phone UI dumps) stays local, never committed
+evidence/

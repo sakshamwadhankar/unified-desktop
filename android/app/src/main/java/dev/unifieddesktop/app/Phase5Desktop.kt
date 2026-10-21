@@ -1,6 +1,5 @@
 package dev.unifieddesktop.app
 
-import android.app.Activity
 import android.app.Presentation
 import android.content.Context
 import android.graphics.Canvas
@@ -31,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * Every method here runs on the UI thread; the link session posts to it.
  */
-class Phase5Desktop(private val activity: Activity) {
+class Phase5Desktop(private val context: Context, private val fallbackContext: Context? = null) {
     companion object {
         const val W = Phase5Protocol.DESKTOP_W
         const val H = Phase5Protocol.DESKTOP_H
@@ -66,7 +65,7 @@ class Phase5Desktop(private val activity: Activity) {
      */
     fun createDisplay(surface: Surface): Boolean {
         return try {
-            val dm = activity.getSystemService(DisplayManager::class.java)
+            val dm = context.getSystemService(DisplayManager::class.java)
             // OWN_CONTENT_ONLY only: the proven Phase-1 configuration for this phone
             // (HarnessActivity.createDisplay). Adding VIRTUAL_DISPLAY_FLAG_PUBLIC makes the
             // window add fail with InvalidDisplayException on ColorOS (phone 2026-10-19).
@@ -98,19 +97,26 @@ class Phase5Desktop(private val activity: Activity) {
         var last: Throwable? = null
         while (SystemClock.uptimeMillis() < deadline) {
             try {
-                val p = Presentation(activity, d.display)
+                val p = try {
+                    Presentation(context, d.display)
+                } catch (first: Throwable) {
+                    val fallback = fallbackContext
+                    if (fallback == null) throw first
+                    android.util.Log.w(TAG, "service Presentation context failed; trying resumed activity", first)
+                    Presentation(fallback, d.display)
+                }
                 // The shell must render at the desktop's own scale (1.0): building it with the
                 // activity context uses the phone's density (up to 480 = 3x), which makes every
                 // sp-sized part (taskbar, WebView, code-server) 2-3x too large on a 1920x1080
                 // PC-size desktop (owner report + ph-vscode-max1.png, 2026-10-19).
-                val config = android.content.res.Configuration(activity.resources.configuration)
+                val config = android.content.res.Configuration(context.resources.configuration)
                 config.densityDpi = DPI
                 // B-066 round 3: the configuration override fixed the shell's own sp text but the
                 // WebView inside it still reported devicePixelRatio=3 (measured on the phone:
                 // innerWidth=300 in an 835-px-wide window). A WebView derives its scale from the
                 // display it is attached to, so build the shell context from the virtual display
                 // (created at DPI) and only then apply the density override.
-                val displayContext = activity.createDisplayContext(d.display)
+                val displayContext = context.createDisplayContext(d.display)
                 val shellContext = displayContext.createConfigurationContext(config)
                 android.util.Log.i(TAG, "shell density=" + shellContext.resources.displayMetrics.density +
                         " dpi=" + shellContext.resources.displayMetrics.densityDpi +
@@ -139,6 +145,20 @@ class Phase5Desktop(private val activity: Activity) {
         desktop = null
         try { vd?.release() } catch (_: Throwable) {}
         vd = null
+    }
+
+    /** Replace only the encoder surface; the Presentation and its shell remain intact. */
+    fun rebindSurface(surface: Surface): Boolean = try {
+        vd?.surface = surface
+        true
+    } catch (t: Throwable) {
+        android.util.Log.e(TAG, "virtual display surface rebind failed", t)
+        false
+    }
+
+    /** Detach an encoder before its Surface is released during a link loss. */
+    fun detachSurface() {
+        try { vd?.surface = null } catch (_: Throwable) {}
     }
 
     // ------------------------------------------------------------------ input ops

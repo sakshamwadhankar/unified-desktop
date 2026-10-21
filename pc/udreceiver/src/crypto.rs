@@ -62,6 +62,7 @@ fn receiver_dir() -> PathBuf {
     base
 }
 
+#[derive(Clone)]
 pub struct ReceiverIdentity {
     pub cert_der: Vec<u8>,
     #[allow(dead_code)]

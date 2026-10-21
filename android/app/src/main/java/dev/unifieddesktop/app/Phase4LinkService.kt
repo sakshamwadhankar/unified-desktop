@@ -5,11 +5,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.ActivityManager
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.ParcelFileDescriptor
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import java.io.File
@@ -21,6 +23,7 @@ import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
@@ -37,6 +40,17 @@ import javax.net.ssl.X509TrustManager
  * reuses the same session engine over the accessory streams (item 8).
  */
 class Phase4LinkService : Service() {
+    /** The desktop outlives a replaceable TLS transport until the user explicitly stops the link. */
+    internal val desktopRuntime = Phase10Runtime()
+    private val sessionGuard = Any()
+    @Volatile private var currentLive: LiveSession? = null
+    @Volatile private var currentPhase5: Phase5Session? = null
+    @Volatile private var sessionWakeLock: PowerManager.WakeLock? = null
+    @Volatile private var trimLevel = 0
+    @Volatile private var governorStage = Phase10GovernorStage.NORMAL
+    private var governorThread: Thread? = null
+    private var stopping = false
+
     companion object {
         const val TAG = "Phase4"
         const val PORT = 47600
@@ -65,6 +79,7 @@ class Phase4LinkService : Service() {
         private var nsdListener: NsdManager.RegistrationListener? = null
         private val pendingPairing = AtomicReference<Pairing?>(null)
         private val liveSessions = java.util.concurrent.ConcurrentHashMap.newKeySet<LiveSession>()
+        private val sessionIds = AtomicLong(0)
 
         /** Open AOA accessory FD handed over by the USB attach path (manager 21:55). */
         @Volatile private var accessoryPfd: ParcelFileDescriptor? = null
@@ -89,7 +104,12 @@ class Phase4LinkService : Service() {
      * stopAll can force-close it so a thread blocked in read()/write() on a dead or
      * stalled link wakes up and logs SESSION_END.
      */
-    class LiveSession(val sock: SSLSocket, val peerHex: String) {
+    class LiveSession(
+        val sock: SSLSocket,
+        val peerHex: String,
+        val fingerprintHex: String,
+        val id: Long,
+    ) {
         @Volatile var lastInboundMs: Long = SystemClock.elapsedRealtime()
 
         /** The dead-link rule applies only after the session is paired (item 10 failover). */
@@ -140,6 +160,106 @@ class Phase4LinkService : Service() {
     }
 
     override fun onBind(intent: Intent?) = null
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Do not call stopSelf here: swiping the launcher task is not an explicit session stop.
+        // START_NOT_STICKY is intentional; an OS kill must not resurrect a user-stopped link.
+        say("TASK_REMOVED service kept alive running=${running.get()} live=${liveSessions.size}")
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onTrimMemory(level: Int) {
+        trimLevel = level
+        say("TRIM_MEMORY level=$level")
+        super.onTrimMemory(level)
+    }
+
+    override fun onDestroy() {
+        stopping = true
+        try { stopAll() } catch (t: Throwable) { say("DESTROY stop failed ${t.javaClass.simpleName}") }
+        releaseSessionWakeLock("service destroyed")
+        super.onDestroy()
+    }
+
+    private fun acquireSessionWakeLock(sessionId: Long) {
+        synchronized(sessionGuard) {
+            if (sessionWakeLock?.isHeld == true) return
+            val pm = getSystemService(PowerManager::class.java)
+            val wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "unified-desktop:session")
+            wl.setReferenceCounted(false)
+            wl.acquire()
+            sessionWakeLock = wl
+            say("WAKELOCK acquire session=$sessionId")
+        }
+    }
+
+    private fun releaseSessionWakeLock(why: String) {
+        synchronized(sessionGuard) {
+            val wl = sessionWakeLock ?: return
+            try { if (wl.isHeld) wl.release() } catch (_: Throwable) {}
+            sessionWakeLock = null
+            say("WAKELOCK release why=$why")
+        }
+    }
+
+    private fun releaseSessionWakeLockIfIdle(why: String) {
+        if (liveSessions.isEmpty()) releaseSessionWakeLock(why)
+    }
+
+    private fun startGovernor() {
+        if (governorThread?.isAlive == true) return
+        governorThread = Thread({ governorLoop() }, "p10-governor").also { it.start() }
+    }
+
+    private fun governorLoop() {
+        val am = getSystemService(ActivityManager::class.java)
+        val pm = getSystemService(PowerManager::class.java)
+        val info = ActivityManager.MemoryInfo()
+        while (running.get()) {
+            try {
+                if (currentLive == null && !desktopRuntime.isUp()) {
+                    governorStage = Phase10GovernorStage.NORMAL
+                    Thread.sleep(2_000L)
+                    continue
+                }
+                am.getMemoryInfo(info)
+                val input = Phase10GovernorInput(
+                    lowMemory = info.lowMemory,
+                    trimLevel = trimLevel,
+                    memAvailableKb = info.availMem / 1024L,
+                    thermalStatus = if (android.os.Build.VERSION.SDK_INT >= 29) {
+                        pm.currentThermalStatus
+                    } else 0,
+                    desktopVisible = desktopRuntime.isUp(),
+                )
+                val d = Phase10Governor.next(governorStage, input)
+                if (d.action !is Phase10GovernorAction.None) {
+                    governorStage = d.next
+                    applyGovernor(d, input)
+                }
+            } catch (t: Throwable) {
+                say("GOVERNOR sample failed ${t.javaClass.simpleName}: ${t.message}")
+            }
+            try { Thread.sleep(2_000L) } catch (_: InterruptedException) { break }
+        }
+    }
+
+    private fun applyGovernor(
+        decision: Phase10GovernorDecision,
+        input: Phase10GovernorInput,
+    ) {
+        val s = currentPhase5 ?: Phase5Dispatch.session()
+        val measured = "low=${input.lowMemory} trim=${input.trimLevel} " +
+            "availKb=${input.memAvailableKb} thermal=${input.thermalStatus} visible=${input.desktopVisible}"
+        say("GOVERNOR action=${decision.action} trigger=${decision.trigger} $measured")
+        when (val action = decision.action) {
+            Phase10GovernorAction.StopHiddenWindows -> s?.shell()?.stopRenderingHiddenWindows()
+            is Phase10GovernorAction.SetFps -> s?.setTargetFps(action.fps)
+            Phase10GovernorAction.LowerResolution -> s?.governorLowerResolution()
+            Phase10GovernorAction.WarnPc -> s?.governorWarnPc(decision.trigger)
+            Phase10GovernorAction.None -> Unit
+        }
+    }
 
     private fun say(line: String) {
         Log.i(TAG, line)
@@ -203,9 +323,12 @@ class Phase4LinkService : Service() {
             say("already running")
             return
         }
+        stopping = false
+        governorStage = Phase10GovernorStage.NORMAL
         channels()
         serverThread = Thread({ serverLoop() }, "p4-tcp-server").also { it.start() }
         watchdogThread = Thread({ watchdogLoop() }, "p4-watchdog").also { it.start() }
+        startGovernor()
         registerNsd()
         val n = buildNotification(
             "Desktop link running",
@@ -218,16 +341,23 @@ class Phase4LinkService : Service() {
 
     private fun stopAll() {
         say("STOP begin")
+        stopping = true
         running.set(false)
         try { serverSocket?.close() } catch (_: Throwable) {}
         val live = liveSessions.toList()
         for (s in live) forceClose(s, "service stop")
         if (live.isNotEmpty()) say("STOP force-closed ${live.size} live session(s)")
         try { watchdogThread?.interrupt() } catch (_: Throwable) {}
+        try { governorThread?.interrupt() } catch (_: Throwable) {}
         unregisterNsd()
         pendingPairing.get()?.resolve(false)
         cancelPairingNotification()
         stopForeground(STOP_FOREGROUND_REMOVE)
+        currentPhase5 = null
+        currentLive = null
+        desktopRuntime.stop()
+        Phase5Dispatch.bind(null)
+        releaseSessionWakeLock("service stop")
         stopSelf()
     }
 
@@ -386,6 +516,11 @@ class Phase4LinkService : Service() {
         // Mutable: a user Yes in THIS session flips it, so the same session can then
         // pass data channels through the gate (manager review 2026-10-18).
         var paired = pinned.any { it.first == clientFpr }
+        if (desktopRuntime.isUp() && !paired) {
+            say("SESSION refused different PC while desktop is live fpr=${clientFpr.take(16)}")
+            try { sock.close() } catch (_: Throwable) {}
+            return
+        }
 
         // One pairing at a time: claim the slot atomically (compareAndSet); a second
         // unpaired connection is refused so the user's Yes is always bound to one PC.
@@ -406,15 +541,34 @@ class Phase4LinkService : Service() {
         // ---- pump
         // Register the socket for the watchdog/stopAll BEFORE the pump: a session that
         // stalls in write() must still be closable from the outside.
-        val live = LiveSession(sock, clientFpr.take(16))
+        val live = LiveSession(
+            sock,
+            clientFpr.take(16),
+            clientFpr,
+            sessionIds.incrementAndGet(),
+        )
         live.armed = paired
-        liveSessions.add(live)
+        synchronized(sessionGuard) {
+            val old = currentLive
+            if (old != null && old.fingerprintHex != clientFpr) {
+                say("SESSION refused second PC old=${old.peerHex} new=${clientFpr.take(16)}")
+                try { sock.close() } catch (_: Throwable) {}
+                return
+            }
+            // The guard is taken before replacing the old transport. The old session's finally
+            // block cannot clear the new binding because it compares the LiveSession identity.
+            if (old != null && old !== live) forceClose(old, "trusted reconnect replacement")
+            currentLive = live
+            liveSessions.add(live)
+            acquireSessionWakeLock(live.id)
+        }
         val input = sock.inputStream
         val output = sock.outputStream
         val dec = Phase4Protocol.Decoder()
         val buf = ByteArray(16384)
         // Phase 5: video + input ride the same session, over the same priority writer.
         val p5 = Phase5Session(this, output, { line -> say(line) })
+        currentPhase5 = p5
         // B-047: a paired session gets NO video until the PC asks with "video-on".
         p5.start(false)
         try {
@@ -508,8 +662,15 @@ class Phase4LinkService : Service() {
         } catch (t: Throwable) {
             say("SESSION io ${t.javaClass.simpleName}: ${t.message?.take(60)}")
         } finally {
-            p5.stop("session end")
+            p5.stop(if (stopping) "service stop" else "link lost")
             liveSessions.remove(live)
+            synchronized(sessionGuard) {
+                if (currentLive === live) {
+                    currentLive = null
+                    currentPhase5 = null
+                }
+            }
+            releaseSessionWakeLockIfIdle("session ${live.id} ended")
             say("SESSION_END peer=${clientFpr.take(16)}")
             val p = decisionPending
             if (p != null) {

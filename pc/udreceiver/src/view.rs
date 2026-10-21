@@ -19,6 +19,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::net::{Shutdown, TcpStream};
 use std::time::{Duration, Instant};
 
 use windows::core::{Interface, GUID, HSTRING, PCWSTR};
@@ -88,6 +89,7 @@ use crate::protocol::{Message, PriorityWriter, CH_CONTROL, CH_INPUT, CH_VIDEO};
 /// error instead of WouldBlock/TimedOut (997 = ERROR_IO_PENDING, 10060 = WSAETIMEDOUT). The
 /// view's read loop treats those as "no data this tick" (it checks again next iteration);
 /// every other error stays fatal.
+#[allow(dead_code)]
 fn is_transient_read(e: &std::io::Error) -> bool {
     matches!(
         e.kind(),
@@ -229,11 +231,6 @@ pub fn run(
     println!("[{TAG}] connecting to {addr}");
     let (mut session, description) = crate::session::connect_and_pair(addr, identity, store, "PC")?;
     println!("[{TAG}] {description}");
-    session
-        .tls
-        .get_mut()
-        .set_read_timeout(Some(Duration::from_millis(2)))
-        .map_err(|e| format!("set_read_timeout: {e}"))?;
     let _ = session.tls.get_mut().set_nodelay(true);
 
     let shared = Shared::new(opts.x, opts.y, opts.w, opts.h, opts.no_input);
@@ -285,10 +282,49 @@ pub fn run(
 
     let sh = shared.clone();
     let (soft, secs, freeze) = (opts.soft, opts.seconds, opts.freeze_video_after);
+    let reconnect_addr = addr.to_string();
+    let reconnect_identity = identity.clone();
     let pipeline = std::thread::Builder::new()
         .name("p5-pipeline".into())
         .spawn(move || {
-            let r = pipeline_loop(&mut session, &sh, soft, secs, freeze);
+            let mut current = session;
+            let r = loop {
+                let result = pipeline_loop(&mut current, &sh, soft, secs, freeze);
+                if !sh.running.load(Ordering::SeqCst) || secs > 0 {
+                    break result;
+                }
+                let deadline = Instant::now() + Duration::from_secs(10);
+                println!("[{TAG}] RECONNECT start_us={} target={reconnect_addr}", now_us64());
+                let next_session = loop {
+                    if !sh.running.load(Ordering::SeqCst) {
+                        break Err("view stopped during reconnect".into());
+                    }
+                    match crate::session::connect_and_pair(
+                        &reconnect_addr,
+                        &reconnect_identity,
+                        &crate::crypto::TrustedPhoneStore::open(),
+                        "PC",
+                    ) {
+                        Ok((next, description)) => {
+                            println!(
+                                "[{TAG}] RECONNECT ok_us={} {description}",
+                                now_us64()
+                            );
+                            break Ok(next);
+                        }
+                        Err(e) => {
+                            if Instant::now() >= deadline {
+                                break Err(format!("reconnect timed out: {e}"));
+                            }
+                            std::thread::sleep(Duration::from_millis(250));
+                        }
+                    }
+                };
+                match next_session {
+                    Ok(next) => current = next,
+                    Err(e) => break Err(e),
+                }
+            };
             sh.running.store(false, Ordering::SeqCst);
             // Wake the message loop. On a locked run this is just a wake-up: every exit path
             // ends in Lock::exit() on the owner thread below.
@@ -688,6 +724,52 @@ struct Pipeline {
     first_frame_logged: bool,
 }
 
+/// Keep rustls in blocking mode. A timed-out blocking receive can leave Winsock/rustls in an
+/// indeterminate state, so link-dead detection closes a cloned socket from a separate thread.
+struct ReadWatchdog {
+    stop: Arc<AtomicBool>,
+    last_read_ms: Arc<AtomicU64>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ReadWatchdog {
+    fn start(socket: TcpStream, shared: &Arc<Shared>) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = stop.clone();
+        let thread_shared = shared.clone();
+        let started = Instant::now();
+        let last_read_ms = Arc::new(AtomicU64::new(0));
+        let thread_last_read = last_read_ms.clone();
+        let join = std::thread::Builder::new()
+            .name("p5-read-watchdog".into())
+            .spawn(move || {
+                while !thread_stop.load(Ordering::SeqCst)
+                    && thread_shared.running.load(Ordering::SeqCst)
+                {
+                    let elapsed = started.elapsed().as_millis() as u64;
+                    let last = thread_last_read.load(Ordering::SeqCst);
+                    if elapsed.saturating_sub(last) >= crate::session::LINK_DEAD_TIMEOUT.as_millis() as u64 {
+                        println!("[{TAG}] READ watchdog force-close after {}s", crate::session::LINK_DEAD_TIMEOUT.as_secs());
+                        let _ = socket.shutdown(Shutdown::Both);
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            })
+            .expect("read watchdog thread");
+        Self { stop, last_read_ms, join: Some(join) }
+    }
+}
+
+impl Drop for ReadWatchdog {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
 fn pipeline_loop(
     session: &mut crate::session::Session,
     shared: &Arc<Shared>,
@@ -695,6 +777,13 @@ fn pipeline_loop(
     seconds: u64,
     freeze_video_after: u64,
 ) -> Result<(), String> {
+    let read_socket = session
+        .tls
+        .sock
+        .try_clone()
+        .map_err(|e| format!("clone read-watchdog socket: {e}"))?;
+    let read_watchdog = ReadWatchdog::start(read_socket, shared);
+    let read_watchdog_started = Instant::now();
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         MFStartup(MF_VERSION, MFSTARTUP_FULL).map_err(|e| format!("MFStartup: {e}"))?;
@@ -748,7 +837,7 @@ fn pipeline_loop(
     let mut video_on = phase5::VideoOnPacer::new();
     let started_at = Instant::now();
 
-    while shared.running.load(Ordering::SeqCst) {
+    'pipeline: while shared.running.load(Ordering::SeqCst) {
         if seconds > 0 && start.elapsed() > Duration::from_secs(seconds) {
             println!("[{TAG}] --seconds {seconds} reached");
             break;
@@ -794,7 +883,7 @@ fn pipeline_loop(
             }
         }
         if last_csq.elapsed() > Duration::from_secs(1) {
-            let t = now_us();
+            let t = now_us64();
             let mut w = PriorityWriter::new(&mut session.tls);
             let _ = w.push(Message::new(CH_CONTROL, format!("csq {t}").into_bytes())?);
             let _ = w.emit_all();
@@ -809,6 +898,10 @@ fn pipeline_loop(
         // ---- incoming
         let mut worked = false;
         loop {
+            if seconds > 0 && start.elapsed() > Duration::from_secs(seconds) {
+                println!("[{TAG}] --seconds {seconds} reached");
+                break 'pipeline;
+            }
             let Some(m) = pending.pop_front() else {
                 match std::io::Read::read(&mut session.tls, &mut read_buf) {
                     Ok(0) => {
@@ -817,9 +910,23 @@ fn pipeline_loop(
                     }
                     Ok(n) => {
                         last_rx = Instant::now();
+                        read_watchdog.last_read_ms.store(
+                            read_watchdog_started.elapsed().as_millis() as u64,
+                            Ordering::SeqCst,
+                        );
                         shared.bytes_in.fetch_add(n as u64, Ordering::Relaxed);
                         let msgs = decoder.feed(&read_buf[..n]).map_err(|e| format!("frame: {e}"))?;
                         pending.extend(msgs);
+                        // The blocking reader stays inside this inner loop while video frames
+                        // arrive. Keep clock-sync traffic alive here too, otherwise the phone's
+                        // 15 s inbound watchdog closes an otherwise healthy stream.
+                        if last_csq.elapsed() > Duration::from_secs(1) {
+                            let t = now_us64();
+                            let mut w = PriorityWriter::new(&mut session.tls);
+                            let _ = w.push(Message::new(CH_CONTROL, format!("csq {t}").into_bytes())?);
+                            let _ = w.emit_all();
+                            last_csq = Instant::now();
+                        }
                         continue;
                     }
                     Err(e) if is_transient_read(&e) => {
@@ -889,7 +996,7 @@ fn handle_control(whole: &[u8], clock: &mut phase5::ClockSync) {
         let mut it = rest.split_whitespace();
         if let (Some(a), Some(b)) = (it.next(), it.next()) {
             if let (Ok(t1_raw), Ok(t3)) = (a.parse::<i64>(), b.parse::<i64>()) {
-                let t4 = now_us() as i64;
+                let t4 = now_us64();
                 let t1 = nearest_epoch(t1_raw, t4);
                 // The phone stamps this at send time; its receive time is assumed equal, so
                 // rtt is measured PC-send -> PC-receive and the offset is RFC-5905 shaped.
@@ -1831,5 +1938,22 @@ mod tests {
         assert!(is_transient_read(&Error::from_raw_os_error(10060))); // WSAETIMEDOUT
         assert!(!is_transient_read(&Error::from_raw_os_error(10054))); // WSAECONNRESET: fatal
         assert!(!is_transient_read(&Error::from_raw_os_error(9))); // EBADF: fatal
+    }
+
+    #[test]
+    fn nearest_epoch_handles_forward_wrap() {
+        let span = 1_i64 << 32;
+        let before = span - 10;
+        let wrapped = before & 0xFFFF_FFFF;
+        let after = span + 25;
+        assert_eq!(nearest_epoch(wrapped, after), before);
+    }
+
+    #[test]
+    fn nearest_epoch_handles_backward_wrap() {
+        let span = 1_i64 << 32;
+        let now = span + 40;
+        let old_wire = 15_i64;
+        assert_eq!(nearest_epoch(old_wire, now), span + 15);
     }
 }

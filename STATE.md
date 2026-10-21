@@ -6,6 +6,23 @@ corrects it after review.
 
 ## Now
 
+- **Phase 10 (2026-10-21): IMPLEMENTED PARTIAL, NOT PASS.** Service-owned runtime,
+  partial wakelock, same-trusted-PC session ownership, activity-free Presentation rebind,
+  `onTaskRemoved`/trim cleanup, ColorOS onboarding intent/confirmation, and the staged
+  phone-first governor are in the working tree. The receiver uses a blocking rustls reader
+  without the old 2 ms timeout, a cloned-socket dead-link watchdog, receive-loop keep-alives,
+  full-width local clock stamps, pinned-address reconnect, and mDNS retry. `view --seconds N`
+  now exits from inside the receive loop and sends release-all.
+  **Verified:** Android `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` BUILD
+  SUCCESSFUL; test reports 152/0/3. PC `cargo test --release` 57/0, clippy clean, release
+  build successful; `git diff --check` has no whitespace errors. On the real OnePlus CPH2619
+  (`2c0f6edc`, Android 16), the development ADB-forwarded smoke logged wakelock acquire and
+  release, `context=service`, D3D11 video, and governor actions for thermal status 3. Evidence:
+  `docs/PHASE10_RESULT.md`, `evidence/phase10/`.
+  **Still open:** the 2-hour charger soak; WhatsApp + real-call gate; three physical
+  reconnects with same guest PIDs/window list; different-PC refusal; OEM setting persistence;
+  measured lower-resolution output; B-049 71.6-minute proof; B-072 continuous TLS proof; and
+  Phase 9 Exit after soak. These are in `SKIPS.md`; Phase 10 is not closed.
 - **Phase 9 (PC lock + Exit): PASS on Windows 11 2026-10-21 05:10 (review rework + manager gate).** The lock
   is a private `udreceiver-lock-<pid>` desktop on `WinSta0` (default desktop and taskbar
   never hidden or modified), `WH_KEYBOARD_LL` blocks 8/8 combinations on down and up
@@ -73,7 +90,9 @@ corrects it after review.
   1.0 fps, drag 30.6 fps; typing medians 0.14/8.4/26.8 ms; stuck keys 0. Emulator-only limits:
   **B-056** (mitigated in code), **B-057** (PC window black on the emulator stream; not
   reproduced on the phone).
-- **Last updated:** 2026-10-21 05:25, manager (Phase 9 review accepted; manager gates
+- **Last updated:** 2026-10-21 14:32, coding assistant (Phase 10 partial implementation and
+  smoke gates; manager review and long-run gates still required). Previous Phase 9 review
+  accepted; manager gates
   re-run). Final tree gated: Android `:app:testDebugUnitTest --rerun-tasks`
   **149 tests / 0 failures / 3 skipped** and `lintDebug` + `assembleDebug`
   **BUILD SUCCESSFUL**; PC `cargo test --release` **55/0**, clippy clean; `git diff --check`
@@ -86,9 +105,9 @@ corrects it after review.
   `p9t4`...`p9t11`, `p9t17` (manager), `p9b093` (and the Phase 8 sets); the agent's Phase 9
   review temp logs were removed. **Manager commit: Phase 8 + Phase 9, pushed to
   origin/main.**
-- **Next action:** Phase 9 is closed. Phase 10 is next (manager); do not start it without the
-  manager. Accepted skip: Windows 10 (no hardware; SKIPS.md row); still open: the AOA /
-  no-developer-mode checks (SKIPS).
+- **Next action:** Continue only the open Phase 10 gates listed above and in `SKIPS.md`; do not
+  start Phase 11. The development ADB forward was removed and the phone service was stopped at
+  the end of the smoke run. Do not claim Phase 10 PASS from the short smoke evidence.
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app

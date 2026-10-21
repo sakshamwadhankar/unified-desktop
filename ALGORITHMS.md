@@ -88,6 +88,13 @@ running). Android apps come from Google Play.
   setting (LESSONS.md).
 - A watchdog checks the engines' CPU time advancing, not just that they exist. If Android
   killed an engine: restart it and reopen its windows where possible, and tell the user.
+- Phase 10 keeps the desktop runtime in the service after the link ends. The next connection
+  must use the same trusted-PC identity; a different PC is refused while a live desktop exists.
+  The receiver retries the pinned address for 10 seconds and requests a keyframe after attach.
+- The receiver's main rustls reader remains blocking. A cloned socket is used only to close a
+  dead connection after 15 seconds without inbound data; the normal stream never receives the
+  old 2 ms read timeout. Clock-sync control messages are emitted from the receive loop as well
+  as the outer loop so a video stream cannot starve the phone's inbound watchdog.
 
 ## 12. Phone-first resource governor
 - The user's own phone use comes first (R5). The desktop runs at normal priority, below
@@ -95,6 +102,10 @@ running). Android apps come from Google Play.
 - Low memory: stop rendering hidden windows, then pause background desktop apps, then warn
   the user on the PC.
 - Heat: read the phone's thermal headroom; when it gets hot, lower fps, then resolution.
+- The Phase 10 policy is a pure ordered state machine tested on the JVM. Android applies one
+  action per pressure sample: stop hidden windows, 30 FPS, 15 FPS, lower-resolution request,
+  then a PC warning. The lower-resolution request is intentionally explicit but remains an
+  open implementation/gate item until it changes encoder output and is measured.
 
 ## 13. The PC lock (receiver)
 States: **Normal -> Locking -> Locked -> Exiting -> Normal.** Only those edges are legal;

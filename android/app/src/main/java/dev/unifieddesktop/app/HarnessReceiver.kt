@@ -28,6 +28,11 @@ class HarnessReceiver : BroadcastReceiver() {
             Phase4Dispatch.runX(ctx.applicationContext, p4)
             return
         }
+        val p10 = intent.getStringExtra("phase10x")
+        if (p10 != null) {
+            Phase10Dispatch.runX(ctx.applicationContext, p10)
+            return
+        }
         val p3 = intent.getStringExtra("phase3x")
         if (p3 != null) {
             android.util.Log.i("Phase3", "BROADCAST $p3")

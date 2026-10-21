@@ -109,6 +109,7 @@ class Phase5Encoder(private val width: Int, private val height: Int, private val
     private val framesPending = AtomicInteger(0)
     private val drawCount = AtomicInteger(0)
     @Volatile private var lastDrawNs = 0L
+    @Volatile private var targetFrameNs = MIN_FRAME_NS
     /** A paced (deferred) draw is already posted; GL thread only. */
     private var drawScheduled = false
 
@@ -212,6 +213,12 @@ class Phase5Encoder(private val width: Int, private val height: Int, private val
 
     /** Immediate redraw of the last frame (input reactions must never wait for a tick). */
     fun redrawNow() = glHandler?.post { drawFrame(System.nanoTime(), true) } ?: Unit
+
+    /** Governor pacing hook. MediaCodec stays configured for 60 fps; submission is reduced first. */
+    fun setTargetFps(fps: Int) {
+        targetFrameNs = 1_000_000_000L / fps.coerceIn(1, FPS)
+        Log.i(TAG, "target fps=$fps interval_ns=$targetFrameNs")
+    }
 
     fun stats(): String =
         "frames=${seq.get()} draws=${drawCount.get()} keyreq=${keyframeRequests.get()} dropped=$droppedFrames"
@@ -323,13 +330,13 @@ class Phase5Encoder(private val width: Int, private val height: Int, private val
         // stays full and every frame waits behind it (measured: ~200 ms from draw to output).
         // Too soon: draw once the interval is up, then with the newest content.
         val sinceLast = nowNs - lastDrawNs
-        if (!force && sinceLast < MIN_FRAME_NS) {
+        if (!force && sinceLast < targetFrameNs) {
             if (!drawScheduled) {
                 drawScheduled = true
                 glHandler?.postDelayed({
                     drawScheduled = false
                     drawFrame(System.nanoTime(), false)
-                }, (MIN_FRAME_NS - sinceLast) / 1_000_000L + 1)
+                }, (targetFrameNs - sinceLast) / 1_000_000L + 1)
             }
             return
         }

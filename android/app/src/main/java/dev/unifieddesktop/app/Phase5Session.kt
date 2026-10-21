@@ -1,6 +1,5 @@
 package dev.unifieddesktop.app
 
-import android.app.Activity
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -117,12 +116,6 @@ class Phase5Session(
             say("P5 video-on already on ($why)")
             return true
         }
-        val a: Activity? = Phase5Host.activity()
-        if (a == null) {
-            say("P5 video DISABLED: no resumed Activity to host the Presentation")
-            videoGate.set(false)
-            return false
-        }
         val enc = Phase5Encoder(Phase5Desktop.W, Phase5Desktop.H, object : Phase5Encoder.Listener {
             override fun onAccessUnit(flags: Byte, seq: Int, ptsUs: Long, encodeDoneNs: Long, annexB: ByteArray) =
                 onVideo(flags, seq, ptsUs, encodeDoneNs, annexB)
@@ -142,40 +135,55 @@ class Phase5Session(
             videoGate.set(false)
             return false
         }
-        val d = Phase5Desktop(a)
+        val d = service.desktopRuntime.current()
+        val resumed = Phase5Host.activity()
         val started = AtomicBoolean(false)
-        if (!d.createDisplay(android.view.Surface(st))) {
-            say("P5 virtual display FAILED to come up")
-            enc.stop(); encoder = null
-            videoGate.set(false)
-            return false
-        }
-        val latch = java.util.concurrent.CountDownLatch(1)
-        main.post {
-            try {
-                started.set(d.showPresentation())
-            } catch (t: Throwable) {
-                say("P5 desktop start threw ${t.javaClass.simpleName}: ${t.message}")
-            } finally {
-                latch.countDown()
+        val liveDesktop = if (d != null && d.running) {
+            if (!d.rebindSurface(android.view.Surface(st))) {
+                say("P5 existing desktop surface rebind FAILED")
+                enc.stop(); encoder = null
+                videoGate.set(false)
+                return false
             }
+            started.set(true)
+            d
+        } else {
+            val fresh = Phase5Desktop(service.applicationContext, resumed)
+            if (!fresh.createDisplay(android.view.Surface(st))) {
+                say("P5 virtual display FAILED to come up")
+                enc.stop(); encoder = null
+                videoGate.set(false)
+                return false
+            }
+            val latch = java.util.concurrent.CountDownLatch(1)
+            main.post {
+                try {
+                    started.set(fresh.showPresentation())
+                } catch (t: Throwable) {
+                    say("P5 desktop start threw ${t.javaClass.simpleName}: ${t.message}")
+                } finally {
+                    latch.countDown()
+                }
+            }
+            latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            fresh
         }
-        latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
         if (!started.get()) {
             say("P5 desktop FAILED to start")
             enc.stop(); encoder = null
             videoGate.set(false)
             return false
         }
-        desktop = d
+        desktop = liveDesktop
+        service.desktopRuntime.adopt(liveDesktop)
         // latency probe stage 4: the moment the flash is really drawn (not just dispatched)
         main.post {
-            d.setFlashListener { _, ns ->
+            liveDesktop.setFlashListener { _, ns ->
                 val p = probe.get()
                 if (p != null && p.tDrawUs == 0L) p.tDrawUs = ns / 1000
             }
         }
-        say("P5 desktop up ${Phase5Desktop.W}x${Phase5Desktop.H} encoder=${enc.codecName} ($why)")
+        say("P5 desktop up ${Phase5Desktop.W}x${Phase5Desktop.H} encoder=${enc.codecName} context=${if (resumed == null) "service" else "activity-or-service"} ($why)")
         Phase5Dispatch.bind(this)
         // a first keyframe so the PC can start decoding at once
         main.postDelayed({ enc.redrawNow(); enc.requestKeyframe() }, 300)
@@ -201,11 +209,41 @@ class Phase5Session(
         }
         val d = desktop
         desktop = null
-        main.post { d?.stop() }
+        val preserveDesktop = why.contains("link lost", ignoreCase = true) ||
+            why.contains("replaced", ignoreCase = true)
+        if (preserveDesktop) {
+            d?.detachSurface()
+            if (d != null) service.desktopRuntime.adopt(d)
+        } else {
+            main.post { d?.stop() }
+            service.desktopRuntime.clear(d)
+        }
         encoder?.stop()
         encoder = null
-        Phase5Dispatch.bind(null)
+        Phase5Dispatch.unbind(this)
         try { out.flush() } catch (_: Throwable) {}
+    }
+
+    /** Governor hook: pacing changes are safe without reconfiguring MediaCodec. */
+    fun setTargetFps(fps: Int) {
+        encoder?.setTargetFps(fps)
+        say("P5 governor fps=$fps")
+    }
+
+    fun governorLowerResolution() {
+        // A resolution rebuild would destroy the service-owned display. Keep the state intact and
+        // report the requested next step; the Phase-12 profile work owns the actual renegotiation.
+        say("P5 governor resolution request deferred (desktop state preserved)")
+    }
+
+    fun governorWarnPc(trigger: String) {
+        writer.push(
+            Phase4Protocol.Message.create(
+                Phase4Protocol.CH_CONTROL,
+                "governor warning: phone-first resource pressure ($trigger)".toByteArray(),
+            )
+        )
+        say("P5 governor warning sent trigger=$trigger")
     }
 
     // ---------------------------------------------------------------- video out

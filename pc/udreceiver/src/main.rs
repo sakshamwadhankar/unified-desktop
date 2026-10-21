@@ -205,20 +205,28 @@ fn resolve_addr(rest: &[String]) -> Result<String, String> {
     if !addr.is_empty() && addr != "auto" {
         return Ok(addr);
     }
-    println!("addr=auto: browsing mDNS for {}...", mdns::SERVICE);
-    let found = mdns::browse(std::time::Duration::from_secs(2));
-    let Some(f) = found.first() else {
-        return Err(
-            "no phone discovered via mDNS (link service running? same Wi-Fi? WARP \
-             capturing 224.0.0.251:5353?)"
-                .to_string(),
-        );
-    };
-    if found.len() > 1 {
-        println!("auto: {} phones answered, using the first", found.len());
+    println!("addr=auto: browsing mDNS for {} (retry window 10s)...", mdns::SERVICE);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut attempt = 0;
+    while std::time::Instant::now() < deadline {
+        attempt += 1;
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let found = mdns::browse(remaining.min(std::time::Duration::from_secs(2)));
+        if let Some(f) = found.first() {
+            if found.len() > 1 {
+                println!("auto: {} phones answered, using the first", found.len());
+            }
+            println!("auto: discovered {} at {}:{} attempt={attempt}", f.instance, f.ip, f.port);
+            return Ok(format!("{}:{}", f.ip, f.port));
+        }
+        println!("auto: mDNS attempt={attempt} no answer");
+        std::thread::sleep(std::time::Duration::from_millis(250));
     }
-    println!("auto: discovered {} at {}:{}", f.instance, f.ip, f.port);
-    Ok(format!("{}:{}", f.ip, f.port))
+    Err(
+        "no phone discovered via mDNS after 10s (link service running? same Wi-Fi? WARP \
+         capturing 224.0.0.251:5353?)"
+            .to_string(),
+    )
 }
 
 fn cmd_pair(rest: &[String]) -> ExitCode {

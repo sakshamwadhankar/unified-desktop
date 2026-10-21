@@ -12,6 +12,10 @@ object Phase5Dispatch {
 
     fun bind(s: Phase5Session?) { session = s }
 
+    fun unbind(s: Phase5Session) {
+        if (session === s) session = null
+    }
+
     fun session(): Phase5Session? = session
 
     fun lastText(): String {

@@ -54,10 +54,20 @@ class HarnessActivity : Activity() {
         (application as Application).registerActivityLifecycleCallbacks(HarnessCallbacks())
         buildUi()
         maybeAskNotifications()
+        if (intent?.getBooleanExtra("show_phase10_onboarding", false) == true) {
+            main.post { Phase10Onboarding.show(this, force = true) }
+        }
         maybeRunGuestFromIntent(intent)
     }
 
-    override fun onNewIntent(i: Intent?) { super.onNewIntent(i); maybeRunGuestFromIntent(i) }
+    override fun onNewIntent(i: Intent?) {
+        super.onNewIntent(i)
+        setIntent(i)
+        maybeRunGuestFromIntent(i)
+        if (i?.getBooleanExtra("show_phase10_onboarding", false) == true) {
+            main.post { Phase10Onboarding.show(this, force = true) }
+        }
+    }
 
     // Phase 5: the video surface is a Presentation, which needs a real UI Context.
     override fun onResume() { super.onResume(); Phase5Host.attach(this) }
@@ -78,6 +88,11 @@ class HarnessActivity : Activity() {
         val row3 = LinearLayout(this)
         button(row3,"Start link") { startLink() }; button(row3,"Stop link") { stopLink() }
         box.addView(row3)
+        val row4 = LinearLayout(this)
+        button(row4, "Background activity setup") {
+            Phase10Onboarding.show(this, force = true)
+        }
+        box.addView(row4)
         linkStatus = TextView(this); linkStatus.text = "link: not running"; box.addView(linkStatus)
         main.postDelayed(object : Runnable {
             override fun run() { refreshLink(); main.postDelayed(this, 2000) }
