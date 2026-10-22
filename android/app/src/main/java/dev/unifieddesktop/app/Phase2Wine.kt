@@ -981,18 +981,11 @@ object Phase2Wine {
      * execution from app storage: the installer is argv[1] to libbox64 + wine.
      */
     fun runInstaller(ctx: Context, exe: File, silent: String): Int {
-        // B-021/B-081: a wineserver started on saved hives rewrites the
-        // HKLM\System\CurrentControlSet link as plain data, after which every registry
-        // create/open recurses until the stack overflows (the exact log line the winget
-        // installers show). A fresh boot from empty hives is the accepted workaround, so
-        // every installer run starts there and waits for wineboot before touching the file.
-        boot(ctx, null)
-        val bootProc = wineProc
-        val bootFinished = try {
-            bootProc?.waitFor(150, java.util.concurrent.TimeUnit.SECONDS) == true
-        } catch (_: Throwable) { false }
-        if (!bootFinished || !bootMarker(ctx).isFile) {
-            say("WINE_INSTALL abort: prefix boot did not complete (finished=$bootFinished)")
+        // B-021/B-081: every installer run starts from a fresh boot (empty hives) and waits
+        // for wineboot before touching the file; bootAndWait serializes it with the warm-up
+        // and app opens so no two boots reap each other.
+        if (!bootAndWait(ctx)) {
+            say("WINE_INSTALL abort: prefix boot did not complete")
             writeLog(ctx)
             return -1
         }
@@ -1057,7 +1050,27 @@ object Phase2Wine {
      * the registry hives every time (B-021), which also erases the MSI registration that a
      * just-installed app needs for `msiexec /x`. A cold prefix still boots normally.
      */
-    private fun ensureLivePrefix(ctx: Context, why: String): Boolean {
+    /**
+     * One fresh boot, waited out under the same monitor as [ensureLivePrefix], so a warm-up,
+     * an app open and an installer can never reap each other's wineboot.
+     */
+    @Synchronized
+    private fun bootAndWait(ctx: Context): Boolean {
+        boot(ctx, null)
+        val p = wineProc
+        val finished = try {
+            p?.waitFor(150, java.util.concurrent.TimeUnit.SECONDS) == true
+        } catch (_: Throwable) { false }
+        return finished && bootMarker(ctx).isFile
+    }
+
+    /**
+     * The one serialized live-prefix guarantee for user paths: a warm-up (below) and an app
+     * open can arrive together, and two boots at once would reap each other's wineboot. The
+     * first caller boots and waits; the second then reuses the live prefix.
+     */
+    @Synchronized
+    internal fun ensureLivePrefix(ctx: Context, why: String): Boolean {
         if (wineserverAlive(ctx) && Phase2X11.xvfbRunning()) {
             say("WINE_LIVE reuse prefix ($why); no boot, MSI registration kept")
             Phase2X11.ensureXvfb(ctx)
@@ -1068,13 +1081,8 @@ object Phase2Wine {
             startSafetyGuard(ctx)
             return true
         }
-        boot(ctx, null)
-        val p = wineProc
-        val finished = try {
-            p?.waitFor(150, java.util.concurrent.TimeUnit.SECONDS) == true
-        } catch (_: Throwable) { false }
-        if (!finished || !bootMarker(ctx).isFile) {
-            say("WINE_LIVE abort: prefix boot did not complete (finished=$finished)")
+        if (!bootAndWait(ctx)) {
+            say("WINE_LIVE abort: prefix boot did not complete")
             writeLog(ctx)
             return false
         }
@@ -1085,7 +1093,7 @@ object Phase2Wine {
      * Phase 12 B3: warm Xvfb + the Wine prefix on a background thread when the desktop opens,
      * so the first Notepad++ click does not pay for the whole boot. Reuses a live prefix; a
      * cold prefix goes through the normal [ensureLivePrefix] boot (the same boot the first app
-     * open would trigger). Behind `p12warm`, off by default.
+     * open would trigger). On by default since Phase 12 round 2 (DECISIONS D21).
      */
     fun prewarm(ctx: Context): Boolean {
         val t0 = System.currentTimeMillis()

@@ -218,6 +218,26 @@ phase's gate passes.
 - **Revisit:** if code-server ever offers a per-process Unix-socket-only listener, that is
   stronger (no TCP port at all); or if Android adds per-uid loopback isolation.
 
+### D21: Wine prewarm on by default at desktop start; boots are serialized
+- **Decided:** 2026-10-23 03:02, by the agent on the manager's Phase 12 round 2 direction
+  ("Notepad++ start, 40 min: make the winners default").
+- **Decision:** `Phase12Preload` starts in WINE mode: when the desktop Presentation is shown,
+  a background thread runs `Phase2Wine.prewarm` (ensure Xvfb + a live Wine prefix). A live
+  prefix is reused without booting, so a reconnect never touches an open app. code-server
+  warm-up stays off. Every path that boots Wine (`ensureLivePrefix` for app opens and
+  installers, `bootAndWait` for MSI installs) now runs under one monitor, so a user click
+  during the warm-up waits for that boot and reuses its result instead of starting a second
+  boot that reaps the first.
+- **Why:** measured on `2c0f6edc`: first Notepad++ open **28.23 s cold with no warm-up** and
+  **11.95 s with a warm prefix**; the boot is ~5.5 s and starts after the desktop is shown,
+  so it does not extend connect (0.944 s visible) and is hidden while the user looks at the
+  desktop. The 10 s target is still missed by ~2 s (Notepad++'s own paint); this decision
+  removes the boot from the click, it does not claim the target.
+- **Cost:** one background boot per cold session (Xvfb + wineserver + prefix stay resident);
+  measured PSS after the flip in PHASE12_RESULT section 8. No new dependency or framework.
+- **Revisit:** if the owner wants instant first-open, pre-launch the app process itself
+  (Notepad++), which costs more RAM and is a separate decision.
+
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never
   invent a name; `unified-desktop` is a codename.

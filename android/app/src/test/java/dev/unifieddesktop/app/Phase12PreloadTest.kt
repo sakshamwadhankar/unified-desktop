@@ -1,6 +1,8 @@
 package dev.unifieddesktop.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class Phase12PreloadTest {
@@ -16,5 +18,13 @@ class Phase12PreloadTest {
         assertEquals(0, Phase12Preload.parseMode("off"))
         assertEquals(0, Phase12Preload.parseMode(""))
         assertEquals(0, Phase12Preload.parseMode("yes"))
+    }
+
+    @Test
+    fun shipped_default_warms_wine_only() {
+        // DECISIONS D21: the Wine warm-up is on for every user; code-server stays off.
+        assertTrue(Phase12Preload.wineEnabled())
+        assertFalse(Phase12Preload.codeEnabled())
+        assertTrue(Phase12Preload.describe(), Phase12Preload.describe().contains("wine=true"))
     }
 }

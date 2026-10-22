@@ -1,13 +1,20 @@
 package dev.unifieddesktop.app
 
 /**
- * Phase 12 B3: optional warm-up of the two slow starts, behind a harness switch.
+ * Phase 12 B3: warm-up of the two slow starts, one on by default.
  *
  * Notepad++ pays for Xvfb + a Wine prefix boot + the app process on the first open of a
  * session. VS Code pays for code-server start-up on the first VS Code window. Both can be
- * started while the user is looking at the desktop instead, but a Wine boot drops the saved
- * registry hives (B-021) and is expensive, so this is **off by default** and only switched on
- * by the harness (`phase4x p12warm:1|wine|code|0`).
+ * started while the user is looking at the desktop instead.
+ *
+ * **Wine is on by default** (order of the manager, Phase 12 round 2). It reuses a live
+ * prefix without booting (`WINE_LIVE reuse prefix; no boot, MSI registration kept`), so a
+ * reconnect never disturbs an open app; a cold prefix goes through the same boot the first
+ * app open would trigger. Measured on the phone: first Notepad++ 28.23 s cold with no
+ * prewarm, 11.95 s with a warm prefix; the boot itself is ~5.5 s and starts after the
+ * desktop is shown, on a background thread. VS Code preload stays off: code-server costs
+ * ~150 MB RAM and its cold start already passes at 13.48 s. The harness can still force
+ * either with `phase4x p12warm:1|wine|code|0`.
  */
 object Phase12Preload {
     private const val OFF = 0
@@ -16,7 +23,7 @@ object Phase12Preload {
     private const val BOTH = 3
 
     @Volatile
-    private var mode = OFF
+    private var mode = WINE
 
     /** Parse and apply a switch value. Returns the new mode as text for the log. */
     fun configure(spec: String): String {

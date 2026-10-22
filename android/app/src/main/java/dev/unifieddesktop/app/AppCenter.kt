@@ -380,10 +380,11 @@ class AppCenterView(context: Context) : LinearLayout(context) {
         say("exe frame title \"$title\"")
         Thread {
             try {
-                // boot() reaps every process of ours, Xvfb included, so a running desktop would
-                // be torn down and left reconnecting (B-084). Only boot when Wine is down.
-                if (!Phase2X11.xvfbRunning() || !Phase2Wine.wineserverAlive(context)) {
-                    Phase2Wine.boot(context, null)
+                // B-084: never boot over a live desktop. ensureLivePrefix reuses a live
+                // prefix and is serialized with the Phase 12 warm-up (D21), so a click while
+                // the warm-up is still booting waits for it instead of starting a second boot.
+                if (!Phase2Wine.ensureLivePrefix(context, "open exe")) {
+                    say("open exe: Wine prefix not ready")
                 }
                 val ok = Phase2Wine.openExe(context, p)
                 post { status.text = if (ok) "started $p" else "failed to start $p (see p7.log)" }

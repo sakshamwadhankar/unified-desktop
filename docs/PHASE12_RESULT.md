@@ -1,9 +1,11 @@
-# PHASE 12 RESULT: speed and lightness
+﻿# PHASE 12 RESULT: speed and lightness
 
 Status: **PART A FINISHED (B-104 software decode fixed at 19:05); PART B PHONE ROUND RUN
-20:00-21:40 on `2c0f6edc`; PHASE 12 GATE FAILS on two honest misses: typing p50 90.8 ms
-(target <= 80 ms) and Notepad++ 15.88 s cold / 11.95 s warm (target <= 10 s). B-106 is
-FIXED: VS Code opens the workbench in 13.48 s cold (target <= 15 s).** Every number says
+20:00-21:40 on `2c0f6edc`; ROUND 2 (23 Oct, final build) brought typing to Browser 65.7 /
+Notepad++ 66.6 / VS Code 75.5 ms (all <= 80) and Notepad++ start to 12.15 s with the Wine
+warm-up shipped on by default; PHASE 12 GATE still FAILS on the Test-shell typing (87.0 ms)
+and the Notepad++ start (12.15 s; target 10 s). B-106 is FIXED: VS Code opens the workbench
+in 13.48 s cold (target <= 15 s).** Every number says
 where it came from and is labelled `phone`, `emulator`, `PC-only`, `proxy` or `code-only`;
 nothing emulator-measured is called phone-verified. The phone's Wi-Fi was OFF by owner
 request, so there is no Wi-Fi latency number (SKIPS.md row).
@@ -314,9 +316,20 @@ the same process (PID 44684) served the whole run and was still streaming after 
 (`p13/soak-view.log`). That is the B-067/B-072 failure mode exercised for 30 minutes with the
 socket never given a read timeout.
 
-**Notepad++ start, round 2:** previous 15.88 s cold / 11.95 s warm-with-prewarm. With the
-prewarm on, the process now appears 449 ms after `openid`; click-to-visible is re-measured
-below. The large residual is `wineboot` on a cold prefix, which is why the prewarm exists.
+**Notepad++ start, round 2 (final build, Wine prewarm on by default - D21):** the desktop
+Presentation starts the warm-up on a background thread (`P12PREWARM wine ok=true ms=6687`,
+second run 5249 ms), and every app open reuses the live prefix. Click-to-visible with the
+warm-up finished before the click: **12.15 s** (`nppstart-prewarm-default.png`; an earlier
+run measured 11.2 s, so 11.2-12.2 s). The same first open without the warm-up is **28.23 s**
+(cold prefix, Phase 12). The target <= 10 s is still missed by ~2 s: the residual is
+Notepad++'s own start and paint under Box64/Wine, not the boot - the warm-up moves the boot
+off the click. A click that arrives during the warm-up waits for it under one monitor and
+reuses the result: clicked 2 s into a 5.2 s boot -> **13.83 s**, one boot only, Notepad++
+running (`nppstart-cold-fastclick.png`, `ps` notepad++.exe). Cost measured once: app PSS
+**111.9 MB** on the empty warmed desktop, Xvfb **62.4 MB**, wineserver **18.1 MB** (so the
+warm desktop is ~192 MB total); with Notepad++ open: app 142.6, Xvfb 62.4, wineserver 18.1,
+Notepad++ 195.6 MB. Proposal only (not done): pre-launch Notepad++ itself to approach the
+10 s target; that costs more RAM and is a separate decision.
 
 ## PHASE 12 GATE
 
@@ -325,10 +338,12 @@ CONNECT: PASS 0.944 s visible (target <= 5 s) | phone
 TYPING USB: **FAIL on the Test-shell case only** - p50 Browser 65.7 / Notepad++ 66.6 / VS Code 75.5 (all <= 80, n=25 each; VS Code from the urgent build) and Test shell **87.0 / p90 97.0** (n=25, 7.0 ms over). Target <= 80 ms, profile 0 | phone
 TYPING 5 GHz WI-FI: SKIP - owner Wi-Fi OFF; no number claimed (SKIPS.md) | phone/dev path only
 MOVING-WINDOW FPS: PASS 42.0 fps avg / 55.9 max / dropped 0 at the governor's 960x540 (target >= 30); not a 1080p like-for-like | phone
-NOTEPAD++ START: **FAIL 15.88 s cold settled / 11.95 s warm with prewarm** (target <= 10 s; 1.95 s over warm) | phone
+NOTEPAD++ START: **FAIL 12.15 s with the shipped Wine prewarm** (second run; 11.2 s in the first) / **28.23 s cold without it** (target <= 10 s; 2.1 s over). The warm-up removes the boot from the click, not Notepad++'s own start | phone
 VS CODE SMALL PROJECT: PASS **13.48 s** cold to `.monaco-workbench` (target <= 15 s); B-106 FIXED | phone
 OLD-PC 1080p FULL SCREEN: PASS on the 2-core proxy (35.65 fps hardware / 36.68 fps software, dropped 0, CPU 33-35 %, WS 96-131 MB) | proxy
 GOVERNOR: PASS real 1920x1080 -> 960x540 at thermal=3 in 0.2 s; desktop/windows kept; PC dropped 0 | phone
 BUGS: B-106 FIXED | B-103 OPEN (Wine paste: marker set, Ctrl+V reaches NPP, no SelectionRequest) | B-105 OPEN (stale Settings text)
-GATES: Android :app:testDebugUnitTest / :app:lintDebug / :app:assembleDebug BUILD SUCCESSFUL (184 tests, 0 failures, 3 skipped; lint 0 errors, 98 warnings; APK 55,906,460 B); PC cargo test 78/0 + lock_crash 1/0, clippy -D warnings exit 0 (first run under parallel Gradle load flaked one lock test, clean repeat passed; B-107); git diff --check 0
+GATES: Android :app:testDebugUnitTest / :app:lintDebug / :app:assembleDebug BUILD SUCCESSFUL (194 tests, 0 failures, 3 skipped; lint 0 errors, 98 warnings); APK 55917404 B; PC cargo test 78/0 + lock_crash 1/0, clippy -D warnings exit 0 (first run under parallel Gradle load flaked one lock test, clean repeat passed; B-107); git diff --check 0
 NO COMMIT: all changes uncommitted for the manager.
+
+
