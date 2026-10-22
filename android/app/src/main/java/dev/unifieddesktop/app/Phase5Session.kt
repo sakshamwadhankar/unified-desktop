@@ -1,4 +1,4 @@
-package dev.unifieddesktop.app
+﻿package dev.unifieddesktop.app
 
 import android.os.Handler
 import android.os.Looper
@@ -86,7 +86,7 @@ class Phase5Session(
     private val encoderRestarts = AtomicInteger(0)
     private val displayScale = AtomicInteger(100)
 
-    /** Latency probe for the current key-down (all µs on the PHONE clock). */
+    /** Latency probe for the current key-down (all Âµs on the PHONE clock). */
     private class Probe(val tPcUs: Long, val tRecvUs: Long) {
         @Volatile var tDispatchUs = 0L
         @Volatile var tDrawUs = 0L
@@ -415,14 +415,19 @@ class Phase5Session(
                 }
                 is Phase5Protocol.InputEvent.Button -> {
                     inputApplied.incrementAndGet()
+                    // Typing/click urgency: the next composed frame skips the governor's fps
+                    // slot, so a click reacts at once even at 15-30 fps sustained pacing.
+                    encoder?.inputUrgent()
                     main.post { desktop?.pointerButton(e.button, e.down, e.x, e.y) ?: Unit }
                 }
                 is Phase5Protocol.InputEvent.Wheel -> {
                     inputApplied.incrementAndGet()
+                    encoder?.inputUrgent()
                     main.post { desktop?.wheel(e.delta, e.x, e.y) ?: Unit }
                 }
                 is Phase5Protocol.InputEvent.Key -> {
                     inputApplied.incrementAndGet()
+                    encoder?.inputUrgent()
                     if (e.down) {
                         val pr = Probe(e.tPcUs, tRecvUs)
                         probe.set(pr)

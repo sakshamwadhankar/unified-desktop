@@ -611,7 +611,30 @@ object Phase2X11 {
             say("GetInputFocus type=${rep[0]} seq=${rep[2].toInt() or (rep[3].toInt() shl 8)} bytes=$hex")
         }
 
+        private var lastImage: ByteArray? = null
+
         fun getImage(): Bitmap {
+            val data = readImage()
+            lastImage = data
+            return imageToBitmap(data)
+        }
+
+        /**
+         * Same request as [getImage], but null when the root picture is byte-identical to the
+         * previous call. The 24-bit to ARGB conversion touches 3.7 million pixels (1280x720):
+         * skipping it for an unchanged picture is what makes it affordable for the X11 frame
+         * loop to poll every few ms after a key (typing echo) while still never pushing an
+         * identical frame into the video encoder (which delayed the urgent input frame by
+         * ~35 ms: measured 2026-10-23, Notepad++ typing 105-109 ms).
+         */
+        fun getImageIfChanged(): Bitmap? {
+            val data = readImage()
+            if (x11ImageUnchanged(lastImage, data)) return null
+            lastImage = data
+            return imageToBitmap(data)
+        }
+
+        private fun readImage(): ByteArray {
             probeFocus()
             put(OP_GET_IMAGE); put(2); putShort(5)
             putInt(root); putShort(0); putShort(0); putShort(width); putShort(height)
@@ -625,7 +648,10 @@ object Phase2X11 {
             val depth = rep[1].toInt() and 0xff
             val len = ByteBuffer.wrap(rep, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int * 4
             require(depth == 24 && len == width * height * 4) { "unexpected image depth=$depth len=$len" }
-            val data = readFully(len)
+            return readFully(len)
+        }
+
+        private fun imageToBitmap(data: ByteArray): Bitmap {
             val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val px = IntArray(width * height)
             for (i in px.indices) {

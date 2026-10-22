@@ -259,6 +259,23 @@ pub fn run(
     let (mut session, description) = crate::session::connect_and_pair(addr, identity, store, "PC")?;
     println!("[{TAG}] {description}");
     let _ = session.tls.get_mut().set_nodelay(true);
+    // Typing latency, Phase 13 (in scope): input must not wait for the next video frame.
+    // While the desktop is static the
+    // phone only encodes its 1 fps keep-alive frame, and the blocking read in the pipeline
+    // (which is also where queued input is flushed) then parks for up to a second: typing in
+    // the Browser/VS Code/Notepad++ measured pc>phone 145-676 ms and only 9 of 25 keys got a
+    // report, against 8 ms / 25 of 25 when something animated.
+    //
+    // The wake tick is on the transport channel, NOT a socket read timeout: a timed-out
+    // blocking recv on a Windows socket is documented to leave the connection in an
+    // indeterminate state, and this project already had stream failures from timed reads
+    // (B-067, B-072). A reader thread does blocking socket reads and the TLS state machine
+    // reads its bytes from the channel; this tick only bounds how long the loop waits for
+    // the next chunk before flushing input. A real frame still arrives as Ok(n).
+    session
+        .tls
+        .get_mut()
+        .set_tick(Some(std::time::Duration::from_millis(5)));
 
     let shared = Shared::new(opts.x, opts.y, opts.w, opts.h);
     SHARED.set(shared.clone()).map_err(|_| "view already running")?;
@@ -2433,6 +2450,23 @@ fn describe_adapter(device: &ID3D11Device) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Typing latency: the pipeline wakes on a 5 ms read tick while the desktop is static;
+    /// a timeout/would-block must reach the `break` path (flush input, try again), never the
+    /// fatal `return Err`. A real socket error must stay fatal.
+    #[test]
+    fn read_timeouts_are_transient_but_real_errors_are_not() {
+        for kind in [std::io::ErrorKind::WouldBlock, std::io::ErrorKind::TimedOut] {
+            assert!(is_transient_read(&std::io::Error::from(kind)), "{kind:?}");
+        }
+        for kind in [
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::BrokenPipe,
+        ] {
+            assert!(!is_transient_read(&std::io::Error::from(kind)), "{kind:?}");
+        }
+    }
 
     /// B-057: a decoder stream change must be renegotiated in place; it is never treated as a
     /// failure that drops frames until the next keyframe.

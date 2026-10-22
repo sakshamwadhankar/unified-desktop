@@ -240,11 +240,89 @@ The phone stayed at thermal status 3 through the late runs; the governor was at 
   `dumpsys SurfaceFlinger` / a Vulkan probe for the driver name and `apiVersion`, then decide
   whether the stock driver can run DXVK 1.10 before attempting Turnip packaging.
 
+## 8. Round 2 (night run 2026-10-23): the typing number was a receiver bug
+
+The Phase-12 gate failed typing at p50 90.8 ms. This round found that the 90.8 ms was not
+the cost of the path: **the receiver only flushed queued input when a video frame arrived**.
+On a still desktop the phone sends one keep-alive frame per second, so a key could wait
+almost a second for the next frame, and the flash-based probe sometimes saw no frame at all
+(8 of 25 keys reported). Everything below is `phone` on `2c0f6edc`, USB adb path, thermal 3,
+960x544 stream, unless a row says otherwise.
+
+The fix has four parts, one in the receiver and three in the phone:
+
+1. **Transport readiness without socket timeouts.** A reader thread does fully blocking
+   socket reads into a small channel; the TLS state machine (`rustls`) takes its bytes from
+   the channel, and the pipeline waits on the channel with a 5 ms tick. The socket itself
+   never gets `SO_RCVTIMEO`: a timed-out blocking recv leaves a Windows connection in an
+   indeterminate state, and this project already lost streams that way (B-067 997 errors,
+   B-072 decrypt failure after 61 min). Pairing and bench keep blocking reads.
+2. **Urgent frames** (`Phase5Encoder.UrgentFrames`, `inputUrgent()`): a frame composed
+   within 150 ms of a key/button/wheel event skips the governor's fps pacing (the governor
+   holds 15 fps on this thermal-3 phone).
+3. **Drop-before-input** (`dropPreInput`): a frame whose SurfaceTexture timestamp predates
+   the input is dropped instead of being presented as if it showed the key.
+4. **X11 frame loop: no identical pictures** (`Phase2X11.getImageIfChanged`,
+   `Phase7X11Frames`). The X11 window used to push the Xvfb root into the shell every 120 ms
+   even when nothing had changed; every push became a video frame, so a key flash from a
+   Wine app queued behind one of them. Measured on the same build: Notepad++ typing
+   `encoded>pc_rx` 35 ms and p50 105-109 ms, while a window with no X11 frame behind it
+   reached the PC in 5 ms. The loop now compares the raw GetImage bytes (3.7 MP, exact
+   `contentEquals`, no ARGB conversion when equal) and posts only changed pictures; after a
+   key it also polls every 8 ms for 300 ms so the typed echo does not wait for the 120 ms
+   idle tick. Pure decisions are unit-tested (`Phase7X11FramesTest`).
+
+| Case | BEFORE (Phase-12 build) | AFTER (final build, app+receiver freshly started) | Evidence |
+|---|---|---|---|
+| Browser, still desktop (the gate case) | **p50 220.1 / p90 442.2 ms, n=8/25** | **p50 65.7 / p90 74.5 ms, n=25** | `p13/b2-browser.csv`, `b2-browser-urgent.csv`, `b2-browser-static-fix.csv` |
+| Browser, X11 window behind it | p50 65.3 / p90 89.2, n=25 | **p50 67.5 / p90 84.4 ms, n=25** (pre-fix on the same transport: 108.1 / 118.9) | `b2-browser-anim.csv`, `b2-browser-anim-final.csv`, `b2-browser-anim-fix.csv` |
+| VS Code editor | p50 81.6 / p90 110.8, n=25 | **p50 75.5 / p90 103.5, n=25** (urgent build; not re-measured on the final build - editor focus could not be re-established, B-110) | `b2-vscode.csv`, `b2-vscode-urgent.csv` |
+| Test shell (permanent 60 fps harness) | p50 85.6 / p90 129.7, n=25 | **p50 87.0 / p90 97.0, n=25** (still over target; same path as the earlier 83.8 run, run-to-run noise) | `b2-test-shell.csv`, `b2-test-shell-drop.csv`, `b2-test-fix.csv` |
+| Notepad++ editor | (the 00:57-01:08 runs are invalid: NPP was not running, the X11 frame was stale and only the probe chip flashed) | **p50 66.2 / p90 73.7, n=25** (final build before the helper refactor) and **66.6 / 72.8, n=25** (final APK, text confirmed in the editor); pre-fix on the same transport: 104.8 / 115.0 n=12 and 108.8 / 120.3 n=17 | `b2-npp-real*.csv`, `b2-npp-fix.csv`, `b2-npp-final.csv` |
+
+Stage medians on the final build (all n=25, final APK) - `pc>phone` / `recv>dispatch` /
+`dispatch>drawn` / `drawn>encoded` / `encoded>pc_rx` / `pc_rx>presented`:
+
+| Case | pc>phone | recv>disp | disp>drawn | drawn>enc | enc>pc_rx | rx>pres |
+|---|---|---|---|---|---|---|
+| Notepad++ | 12.2 | 1.5 | 6.7 | 38.0 | **5.0** | 2.1 |
+| Browser, still | 12.7 | 2.5 | 6.5 | 36.0 | **4.9** | 2.0 |
+| Browser, X11 behind | 12.2 | 1.2 | 7.2 | 36.7 | **5.6** | 1.9 |
+| Test shell | 6.2 | 0.9 | 6.5 | 39.1 | **29.3** | 1.9 |
+
+The X11 fix removed the 31-35 ms `encoded>pc_rx` queue for every case that has an X11
+window (now 5 ms): a picture that did not change no longer becomes a video frame, so the
+key frame reaches the codec and the network alone. The static Browser's earlier
+76.5 / 109.7 (bimodal `encoded>pc_rx` 4 vs 42 ms) did not reproduce with a freshly started
+app and receiver - all 25 rows at 4.9 ms, and `drawn>encoded` fell from 44.4 to 36.0 ms;
+that half was app-process/encoder state, not the X11 change. The remaining typing miss is
+the Test shell: a permanent 60 fps harness animation keeps frames in flight, and the key
+frame waits 29.3 ms in `encoded>pc_rx` behind them. The next lever there would be dropping
+stale animation frames ahead of an input frame on the receiver, which is deliberately not
+attempted here (it would risk smoothness, and the manager's one-attempt box was used).
+The phone's canvas-to-encoder stage (~37 ms, all cases) is the other honest lever.
+
+The first channel version queued 16 x 32 KB and was measured at 100.2 ms for the same
+Browser while a Wine window animated behind it: the reader thread ran hundreds of KB ahead
+of the presenter, so the frame a key caused sat behind older frames. The queue is now
+4 x 16 KB (64 KB, the size the kernel socket buffer bounded the old direct-read loop by).
+
+**Transport soak (30 minutes, final build):** one real key through the receiver every 5 s
+(**350 keys, 0 failures**; `p13/soak-keys.log` 01:40:52-02:10:54). The receiver log has
+**0 read/decrypt/stall errors** and **`presented=2263 decoded=2263 dropped=0`** at the end;
+the same process (PID 44684) served the whole run and was still streaming after the soak
+(`p13/soak-view.log`). That is the B-067/B-072 failure mode exercised for 30 minutes with the
+socket never given a read timeout.
+
+**Notepad++ start, round 2:** previous 15.88 s cold / 11.95 s warm-with-prewarm. With the
+prewarm on, the process now appears 449 ms after `openid`; click-to-visible is re-measured
+below. The large residual is `wineboot` on a cold prefix, which is why the prewarm exists.
+
 ## PHASE 12 GATE
 
 PHASE 12 GATE: **FAILED** - 5 targets pass, 2 miss, 1 is skipped (Wi-Fi off by owner).
 CONNECT: PASS 0.944 s visible (target <= 5 s) | phone
-TYPING USB: **FAIL p50 90.8 ms / p90 115.3 ms** (target <= 80 ms; 10.8 ms over), n=25, profile 0 | phone
+TYPING USB: **FAIL on the Test-shell case only** - p50 Browser 65.7 / Notepad++ 66.6 / VS Code 75.5 (all <= 80, n=25 each; VS Code from the urgent build) and Test shell **87.0 / p90 97.0** (n=25, 7.0 ms over). Target <= 80 ms, profile 0 | phone
 TYPING 5 GHz WI-FI: SKIP - owner Wi-Fi OFF; no number claimed (SKIPS.md) | phone/dev path only
 MOVING-WINDOW FPS: PASS 42.0 fps avg / 55.9 max / dropped 0 at the governor's 960x540 (target >= 30); not a 1080p like-for-like | phone
 NOTEPAD++ START: **FAIL 15.88 s cold settled / 11.95 s warm with prewarm** (target <= 10 s; 1.95 s over warm) | phone

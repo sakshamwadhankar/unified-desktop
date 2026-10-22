@@ -47,6 +47,8 @@ Measured basis (phone rows are labelled; the rest are `emulator`, `proxy` or `PC
   asks for; the hardware path is unchanged.
 - **Phone `2c0f6edc`, final app/receiver:** connect 0.944 s visible; typing p50 90.8 ms on the
   USB adb path (baseline 196.3 ms) and 91.2 ms on the USB-tether dev path (baseline 129.7 ms);
+  round 2 (final build): Browser **65.7**, Notepad++ **66.6**, VS Code **75.5**, Test shell
+  **87.0** ms (§5.1).
   drag 42.0 fps average / 55.9 max, `dropped=0` at the governor's 960x540; idle baseline
   0.62 % of one core / 123.9 MB / 0 dropped. The governor dropped to 960x540 automatically at
   thermal status 3 in 0.2 s with the desktop and windows kept; the Settings text stayed stale
@@ -78,6 +80,41 @@ Measured basis (phone rows are labelled; the rest are `emulator`, `proxy` or `PC
 - **Wi-Fi:** 5 GHz recommended; adaptive bitrate; keyframe on loss; input never queued
   behind video.
 - Separate channels so a big video frame never delays a key press.
+- **Input wakes the pipeline, not the next frame.** The input path must never wait for a
+  video frame before it is flushed: on a still desktop the encoder posts one keep-alive
+  frame per second, and a key must not inherit that delay.
+- **No timed reads on the TLS socket.** A reader thread does fully blocking socket reads
+  into a small channel and the TLS loop waits on the channel (5 ms when it has input to
+  flush). A timed-out blocking `recv` on Windows leaves the connection in an indeterminate
+  state (B-067, B-072); the socket itself never sees a read timeout.
+
+### 5.1 What the input fix measured (Phase 12 round 2, phone)
+
+- The old receiver only flushed input when a frame arrived. Browser on a still desktop:
+  **p50 220.1 ms, only 8 of 25 keys reported**, against 65.3 ms with an animated window on
+  the same link. VS Code 81.6 ms, test shell 85.6 ms.
+- After the wake tick + urgent frames: Browser **70.6 ms** (n=25), VS Code **75.5 ms**,
+  test shell **83.8 ms** (the harness animates at 60 fps, so its encode+present stage is
+  37-44 ms; the real apps pass).
+- **A picture that did not change must not become a video frame.** The X11 window used to
+  push the Xvfb root into the shell every 120 ms whether or not anything had changed. Each
+  push became a frame in the encoder, so a key flash from Notepad++ queued behind one of
+  them: `encoded>pc_rx` 35 ms and p50 105-109 ms, while a window with no X11 frame behind it
+  reached the PC in 5 ms. The loop now compares the raw GetImage bytes and posts only a
+  changed picture; after a key it polls every 8 ms for 300 ms so the echo does not wait for
+  the 120 ms idle tick. Measured on the final build: Notepad++ **66.6 ms** (was 104.8-108.8),
+  Browser with an X11 window behind **67.5 ms** (was 108.1), both n=25, `encoded>pc_rx` 5.0
+  and 5.6 ms. A fresh app and receiver also cleared the static Browser's earlier bimodal
+  half (76.5 -> **65.7 ms**, p90 109.7 -> 74.5): `drawn>encoded` fell 44.4 -> 36.0 ms, so
+  that half was app-process/encoder state, not the network.
+- Final budget (n=25 each, final APK): Browser still 12.7 / 2.5 / 6.5 / 36.0 / 4.9 / 2.0;
+  Notepad++ 12.2 / 1.5 / 6.7 / 38.0 / 5.0 / 2.1; Browser with X11 behind 12.2 / 1.2 / 7.2 /
+  36.7 / 5.6 / 1.9 (PC->phone / receive->dispatch / dispatch->drawn / drawn->encoded /
+  encoded->PC / decode-present). The dominant stage is the phone's canvas-to-encoder.
+- The one remaining typing miss is the Test shell (**87.0 ms**): its permanent 60 fps
+  animation keeps frames in flight, so the key frame waits 29.3 ms in `encoded>pc_rx`.
+  Dropping stale animation frames ahead of an input frame on the receiver would be the next
+  lever; it is not attempted because it risks animation smoothness.
 
 ## 6. How we measure (every phase that touches speed)
 

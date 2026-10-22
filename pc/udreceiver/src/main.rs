@@ -380,10 +380,11 @@ fn cmd_bench(rest: &[String]) -> ExitCode {
         Ok((mut s, description)) => {
             println!("link: {description}");
             // A stalled peer (or a dead adb-forward pipe) must fail cleanly, not hang.
-            let _ = s
-                .tls
-                .sock
-                .set_read_timeout(Some(std::time::Duration::from_secs(60)));
+            // A channel tick, not a socket read timeout: the socket itself only ever sees
+            // fully blocking reads (see session::ChunkReader).
+            s.tls
+                .get_mut()
+                .set_tick(Some(std::time::Duration::from_secs(60)));
             match session::bench(&mut s, seconds, window_kib * 1024) {
                 Ok(r) => {
                     print!("{}", r.render(&format!("PC -> {addr}, pinned TLS session")));

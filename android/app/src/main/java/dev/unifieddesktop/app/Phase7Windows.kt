@@ -65,6 +65,8 @@ class X11WindowContent(context: Context) :
     @Volatile private var reconnectRequested = false
     private var frames = 0L
     private var lastGrabMs = 0L
+    /** Uptime of the last key we sent to X, for the fast-poll window after it. */
+    @Volatile private var lastKeyMs = 0L
 
     // B-062: X11 socket I/O must not run on the main thread (NetworkOnMainThreadException).
     // One worker keeps pointer and key events in the order the PC produced them.
@@ -126,10 +128,15 @@ class X11WindowContent(context: Context) :
             while (running) {
                 val t0 = SystemClock.elapsedRealtime()
                 try {
-                    val bmp = synchronized(xio) { x.getImage() }
+                    // null = the root picture did not change: post nothing, so no identical
+                    // frame reaches the video encoder. Posting the identical Xvfb root at
+                    // ~8 fps kept the codec busy, and a key flash queued behind one of those
+                    // frames: Notepad++ typing measured 105-109 ms with encoded>pc_rx 35 ms
+                    // (the static Browser, no X11 frame, was 5 ms on the same build).
+                    val bmp = synchronized(xio) { x.getImageIfChanged() }
                     frames++
                     framesThisConnection++
-                    main.post { image.setImageBitmap(bmp) }
+                    if (bmp != null) main.post { image.setImageBitmap(bmp) }
                 } catch (t: Throwable) {
                     P7Log.say(context, "P7X11 frame failed after $framesThisConnection frames: $t")
                     break
@@ -140,7 +147,10 @@ class X11WindowContent(context: Context) :
                     P7Log.say(context, "P7X11 reconnect requested by harness")
                     break
                 }
-                val rest = 120 - lastGrabMs
+                // A key may repaint the X client. For 300 ms after one, poll as fast as the
+                // grab allows (no sleep) so the echo is not waiting for the 120 ms idle
+                // period; unchanged grabs are cheap (no ARGB conversion) and post nothing.
+                val rest = x11PollDelayMs(SystemClock.elapsedRealtime() - lastKeyMs) - lastGrabMs
                 if (rest > 0) try { Thread.sleep(rest) } catch (_: InterruptedException) { break }
             }
             // B-077: release every key we still hold before the old client goes away.
@@ -256,6 +266,7 @@ class X11WindowContent(context: Context) :
      * Notepad++/xeyes would receive from a phone keyboard, so it maps directly to an X keysym.
      */
     override fun key(down: Boolean, keyCode: Int, scan: Int, meta: Int): Boolean {
+        lastKeyMs = SystemClock.elapsedRealtime()
         val client = x11 ?: run {
             if (down) P7Log.say(context, "P7X11 key code=$keyCode dropped: no X11 connection")
             return false

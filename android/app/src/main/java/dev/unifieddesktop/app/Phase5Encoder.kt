@@ -43,6 +43,31 @@ class Phase5Encoder(
     initialSeq: Int = 0,
 ) {
 
+    /**
+     * Typing urgency window (Phase 13 latency). A frame composed while this window is open
+     * is encoded at once instead of waiting for the governor's fps slot. The governor caps
+     * sustained frames (15-30 fps at thermal 3) to save power, but a key or a click is a
+     * single event where that extra wait is pure latency: at 15 fps the scheduled slot put
+     * 45 ms between the drawn flash and the encoded frame (measured), against ~15-20 ms
+     * when the frame leaves immediately. Pacing resumes when the user stops.
+     */
+    class UrgentFrames(private val windowNs: Long = 150_000_000L) {
+        @Volatile private var untilNs = 0L
+        @Volatile private var armedAtNs = 0L
+
+        /** Arm or extend the window from [nowNs] (System.nanoTime). */
+        fun arm(nowNs: Long) {
+            untilNs = nowNs + windowNs
+            armedAtNs = nowNs
+        }
+
+        /** True while a frame composed at [nowNs] should skip the fps pacing. */
+        fun due(nowNs: Long): Boolean = nowNs < untilNs
+
+        /** The moment of the newest input; a frame composed before it lacks its effect. */
+        fun armedAt(): Long = armedAtNs
+    }
+
     interface Listener {
         /** One encoded access unit, ready for CH_VIDEO (header packing happens in the session). */
         fun onAccessUnit(flags: Byte, seq: Int, ptsUs: Long, encodeDoneNs: Long, annexB: ByteArray)
@@ -117,6 +142,8 @@ class Phase5Encoder(
     private val drawCount = AtomicInteger(0)
     @Volatile private var lastDrawNs = 0L
     @Volatile private var targetFrameNs = MIN_FRAME_NS
+    /** Typing/click urgency: composed frames skip the fps pacing while it is open. */
+    private val urgent = UrgentFrames()
     /** A paced (deferred) draw is already posted; GL thread only. */
     private var drawScheduled = false
 
@@ -236,6 +263,12 @@ class Phase5Encoder(
     /** Immediate redraw of the last frame (input reactions must never wait for a tick). */
     fun redrawNow() = glHandler?.post { drawFrame(System.nanoTime(), true) } ?: Unit
 
+    /**
+     * A key/button/wheel just arrived on the input thread. The next frame the display
+     * composes skips [targetFrameNs] pacing (see [UrgentFrames]).
+     */
+    fun inputUrgent() = urgent.arm(System.nanoTime())
+
     /** Governor pacing hook. MediaCodec stays configured for 60 fps; submission is reduced first. */
     fun setTargetFps(fps: Int) {
         targetFrameNs = 1_000_000_000L / fps.coerceIn(1, this.fps)
@@ -311,7 +344,17 @@ class Phase5Encoder(
 
             val st = SurfaceTexture(texId)
             st.setDefaultBufferSize(width, height)
-            st.setOnFrameAvailableListener({ framesPending.incrementAndGet(); glHandler?.post { drawFrame(System.nanoTime(), false) } }, glHandler)
+            st.setOnFrameAvailableListener({
+                framesPending.incrementAndGet()
+                glHandler?.post {
+                    val t = System.nanoTime()
+                    // Animated content (the Test window, video, a running app) queues a frame
+                    // composed before the key arrived. Encoding that one first put another
+                    // frame in front of the real one (measured +10-20 ms), so the urgent path
+                    // drops it: a frame older than the input cannot show the input.
+                    drawFrame(t, urgent.due(t), dropPreInput = true)
+                }
+            }, glHandler)
             surfaceTexture = st
             Log.i(TAG, "gl ready tex=$texId program=$program")
         } catch (t: Throwable) {
@@ -346,7 +389,7 @@ class Phase5Encoder(
     }
 
     /** GL thread: draw the current frame into the encoder input surface. */
-    private fun drawFrame(nowNs: Long, force: Boolean) {
+    private fun drawFrame(nowNs: Long, force: Boolean, dropPreInput: Boolean = false) {
         val st = surfaceTexture ?: return
         // Pace the encoder input. Fed faster than it can encode, the encoder's input queue
         // stays full and every frame waits behind it (measured: ~200 ms from draw to output).
@@ -371,6 +414,10 @@ class Phase5Encoder(
             if (hadFrame) {
                 repeat(pending) { st.updateTexImage() }
                 st.getTransformMatrix(stMatrix)
+                if (dropPreInput && urgent.due(nowNs)) {
+                    val ts = st.timestamp
+                    if (ts > 0 && ts < urgent.armedAt()) return
+                }
             } else if (!force) {
                 // nothing new and no keep-alive due: skip the GPU work entirely
                 return

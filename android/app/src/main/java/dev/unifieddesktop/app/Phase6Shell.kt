@@ -49,6 +49,52 @@ class ShellRoot(context: Context) : FrameLayout(context) {
     private val startMenu = StartMenuView(context)
     private val frames = HashMap<Int, ShellWindowView>()
 
+    /**
+     * Harness-only typing probe (Phase 12 round 2). The Phase-5 latency probe reports the
+     * moment the key "flash" is really drawn; in shell mode only the Test window's own flash
+     * area did that, so typing in the Browser, VS Code or Notepad++ produced no LAT line at
+     * all. This 28x28 px square at the bottom-right of the desktop flashes white on every
+     * key-down while it is armed (`p6:probe on`), which gives the probe the same draw
+     * timestamp for a key typed into ANY focused window. It is GONE unless armed, so the
+     * normal UI is unchanged.
+     */
+    private val probeChip = object : View(context) {
+        var armed = false
+        private var untilMs = 0L
+        private var count = 0
+        private var reported = 0
+        var onDrawn: ((Int, Long) -> Unit)? = null
+
+        fun arm(on: Boolean) {
+            armed = on
+            visibility = if (on) VISIBLE else GONE
+            invalidate()
+        }
+
+        fun flash() {
+            if (!armed) return
+            count++
+            untilMs = SystemClock.uptimeMillis() + 120
+            invalidate()
+        }
+
+        override fun onDraw(c: Canvas) {
+            val flashing = SystemClock.uptimeMillis() < untilMs
+            c.drawColor(if (flashing) Color.WHITE else Color.rgb(45, 45, 60))
+            if (flashing && reported != count) {
+                reported = count
+                onDrawn?.invoke(count, System.nanoTime())
+            }
+        }
+    }.apply {
+        visibility = GONE
+        layoutParams = FrameLayout.LayoutParams(28, 28).apply {
+            gravity = Gravity.BOTTOM or Gravity.END
+            rightMargin = 18
+            bottomMargin = TASKBAR_H + 18
+        }
+    }
+
     private var cursorX = DESKTOP_W / 2
     private var cursorY = DESKTOP_H / 2
 
@@ -67,6 +113,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         }
         addView(taskbar)
         addView(startMenu)
+        addView(probeChip)
         addView(cursorView)
         startMenu.visibility = GONE
         taskbar.onStart = { toggleStartMenu() }
@@ -213,6 +260,13 @@ class ShellRoot(context: Context) : FrameLayout(context) {
     fun setFlashListener(l: ((Int, Long) -> Unit)?) {
         flashListener = l
         testContent?.setFlashListener(l)
+        probeChip.onDrawn = l
+    }
+
+    /** Harness: arm/disarm the typing-probe square (see [probeChip]). */
+    fun probeArm(on: Boolean): String {
+        probeChip.arm(on)
+        return "probe=${if (on) "on" else "off"} chip=bottom-right-28px"
     }
 
     fun closeWindow(id: Int) {
@@ -444,7 +498,10 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         }
         val frame = model.focusedId?.let { frames[it] } ?: return false
         keyAtFocused++
-        if (down) keyFlashes++
+        if (down) {
+            keyFlashes++
+            probeChip.flash()
+        }
         val handled = frame.keyToContent(down, keyCode, scan, meta)
         if (down) P7Log.say(context, "P6SHELL key code=$keyCode meta=$meta focused=${frame.win.title} handled=$handled")
         return handled

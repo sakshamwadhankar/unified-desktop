@@ -3,7 +3,8 @@
 
 use std::fmt::Write as _;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use rustls::StreamOwned;
@@ -29,8 +30,199 @@ pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 #[allow(dead_code)]
 pub const LINK_DEAD_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// One raw chunk of the TLS byte stream, handed from the reader thread to the TLS state
+/// machine.
+enum WireChunk {
+    Data(Vec<u8>),
+    Eof,
+    Failed(std::io::Error),
+}
+
+/// Raw socket bytes arrive through this channel. The TLS state machine still drives
+/// `read_tls`/`process_new_packets` (inside rustls' `StreamOwned`); it just takes its
+/// transport bytes from here instead of a socket read.
+///
+/// The tick is what lets the pipeline wake with no inbound data (so it can flush input):
+/// it waits on the *channel*, never on the socket with a timeout. A timed-out blocking
+/// `recv` on a Windows socket is documented to leave the connection in an indeterminate
+/// state, and this project already lost streams to timed reads (B-067, B-072); the socket
+/// itself only ever sees fully blocking reads, in the reader thread.
+pub struct ChunkReader {
+    rx: Receiver<WireChunk>,
+    cur: Vec<u8>,
+    pos: usize,
+    tick: Option<Duration>,
+    eof: bool,
+}
+
+impl ChunkReader {
+    fn new(rx: Receiver<WireChunk>) -> Self {
+        Self {
+            rx,
+            cur: Vec::new(),
+            pos: 0,
+            tick: None,
+            eof: false,
+        }
+    }
+
+    /// `None` blocks until bytes arrive (pairing/bench, as before). `Some(d)` waits at
+    /// most `d` and then returns `WouldBlock`, so the caller can do its own work.
+    pub fn set_tick(&mut self, tick: Option<Duration>) {
+        self.tick = tick;
+    }
+
+    /// Wait for the next wire chunk; `WouldBlock` when the tick expires first.
+    fn fill(&mut self) -> std::io::Result<()> {
+        loop {
+            let chunk = match self.tick {
+                Some(d) => match self.rx.recv_timeout(d) {
+                    Ok(c) => c,
+                    Err(RecvTimeoutError::Timeout) => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::WouldBlock,
+                            "no socket bytes yet",
+                        ))
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        self.eof = true;
+                        return Ok(());
+                    }
+                },
+                None => match self.rx.recv() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        self.eof = true;
+                        return Ok(());
+                    }
+                },
+            };
+            match chunk {
+                WireChunk::Data(v) if v.is_empty() => continue,
+                WireChunk::Data(v) => {
+                    self.cur = v;
+                    self.pos = 0;
+                    return Ok(());
+                }
+                WireChunk::Eof => {
+                    self.eof = true;
+                    return Ok(());
+                }
+                WireChunk::Failed(e) => return Err(e),
+            }
+        }
+    }
+
+    fn read_into(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            if self.pos < self.cur.len() {
+                let n = (self.cur.len() - self.pos).min(buf.len());
+                buf[..n].copy_from_slice(&self.cur[self.pos..self.pos + n]);
+                self.pos += n;
+                return Ok(n);
+            }
+            if self.eof {
+                return Ok(0);
+            }
+            self.fill()?;
+        }
+    }
+}
+
+/// The TLS transport: the socket for writes, plus a reader thread that turns blocking
+/// socket reads into channel chunks for the TLS state machine.
+pub struct ChanStream {
+    raw: TcpStream,
+    reader: ChunkReader,
+}
+
+impl ChanStream {
+    fn new(raw: TcpStream) -> std::io::Result<Self> {
+        let reader = ChunkReader::new(spawn_reader(&raw)?);
+        Ok(Self { raw, reader })
+    }
+
+    pub fn set_tick(&mut self, tick: Option<Duration>) {
+        self.reader.set_tick(tick);
+    }
+
+    pub fn set_nodelay(&self, on: bool) -> std::io::Result<()> {
+        self.raw.set_nodelay(on)
+    }
+
+    /// A clone of the underlying socket for the read watchdog / exit wake path. It is only
+    /// used to shut the socket down (never to read bytes: the reader thread owns reads).
+    pub fn try_clone(&self) -> std::io::Result<TcpStream> {
+        self.raw.try_clone()
+    }
+}
+
+impl Read for ChanStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read_into(buf)
+    }
+}
+
+impl Write for ChanStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.raw.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.raw.flush()
+    }
+}
+
+impl Drop for ChanStream {
+    fn drop(&mut self) {
+        // The reader thread owns a clone and is parked in a blocking read. Shut the socket
+        // down so it wakes, sends EOF and exits instead of leaking until process exit.
+        let _ = self.raw.shutdown(Shutdown::Both);
+    }
+}
+
+fn spawn_reader(raw: &TcpStream) -> std::io::Result<Receiver<WireChunk>> {
+    let mut sock = raw.try_clone()?;
+    // Small queue: enough to keep the pipe busy, small enough that a burst of video frames
+    // cannot pile up hundreds of KB ahead of the frame a key just caused (measured: a 512 KB
+    // queue added ~27 ms to typing while an X11 window animated; 64 KB matches the kernel
+    // socket buffer the old direct-read loop was bounded by).
+    let (tx, rx) = sync_channel(4);
+    std::thread::Builder::new()
+        .name("udrx-socket-read".into())
+        .spawn(move || {
+            let mut buf = vec![0u8; 16 * 1024];
+            loop {
+                match sock.read(&mut buf) {
+                    Ok(0) => {
+                        let _ = tx.send(WireChunk::Eof);
+                        break;
+                    }
+                    Ok(n) => {
+                        if tx.send(WireChunk::Data(buf[..n].to_vec())).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e) => {
+                        let _ = tx.send(WireChunk::Failed(e));
+                        break;
+                    }
+                }
+            }
+        })?;
+    Ok(rx)
+}
+
+/// The TLS stream every phase uses. The socket type is the channel-backed transport, so
+/// nothing above this aliases the raw socket into a timed read by mistake.
+pub type TlsStream = StreamOwned<rustls::ClientConnection, ChanStream>;
+
 pub struct Session {
-    pub tls: StreamOwned<rustls::ClientConnection, TcpStream>,
+    pub tls: TlsStream,
     pub phone_fp: [u8; 32],
     pub pinned: bool,
 }
@@ -49,7 +241,7 @@ impl Session {
 fn tls_connect(
     addr: &str,
     identity: &ReceiverIdentity,
-) -> Result<StreamOwned<rustls::ClientConnection, TcpStream>, String> {
+) -> Result<TlsStream, String> {
     let stream = TcpStream::connect_timeout(
         &addr
             .parse()
@@ -66,14 +258,16 @@ fn tls_connect(
         .map_err(|e| format!("server name: {e}"))?;
     let conn = rustls::ClientConnection::new(cfg, name)
         .map_err(|e| format!("tls client: {e}"))?;
-    // StreamOwned::new is infallible; the handshake completes lazily.
-    Ok(StreamOwned::new(conn, stream))
+    // StreamOwned::new is infallible; the handshake completes lazily. The transport is a
+    // reader thread + channel: the socket read itself never has a timeout.
+    let transport = ChanStream::new(stream).map_err(|e| format!("start socket reader: {e}"))?;
+    Ok(StreamOwned::new(conn, transport))
 }
 
 /// Read the next protocol frame from the TLS stream (blocking). Frames batched in one
 /// network read are held in `pending` so none is lost.
 fn next_frame(
-    tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
+    tls: &mut TlsStream,
     dec: &mut FrameDecoder,
     pending: &mut std::collections::VecDeque<Message>,
 ) -> Result<Option<Message>, String> {
@@ -84,7 +278,7 @@ fn next_frame(
         let mut buf = [0u8; 16384];
         let n = tls.read(&mut buf).map_err(|e| match e.kind() {
             std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                "stalled: no inbound data within the socket read timeout".to_string()
+                "stalled: no inbound data within the read tick".to_string()
             }
             _ => format!("tls read: {e}"),
         })?;
@@ -169,15 +363,14 @@ pub fn connect_and_pair(
 /// Pump control/keep-alive frames until a pair-ok or pair-no arrives on the control
 /// channel; echo keep-alive requests while waiting. The phone sends its own control
 /// keep-alives, so a frame (and the deadline check) returns at least every few seconds.
-fn wait_pair_confirm(
-    tls: &mut StreamOwned<rustls::ClientConnection, TcpStream>,
-) -> Result<bool, String> {
-    // Tick the socket read so the deadline below is enforced even when the phone sends
+fn wait_pair_confirm(tls: &mut TlsStream) -> Result<bool, String> {
+    // Tick the channel wait so the deadline below is enforced even when the phone sends
     // nothing while it waits for the user (the phone's pump suspends on the decision).
-    // Restored to blocking afterwards: the bench path manages its own reads.
-    let _ = tls.sock.set_read_timeout(Some(Duration::from_millis(500)));
+    // Restored to blocking afterwards: the bench path manages its own reads. The socket
+    // itself is never given a read timeout (see ChunkReader).
+    tls.get_mut().set_tick(Some(Duration::from_millis(500)));
     let r = wait_pair_confirm_inner(tls);
-    let _ = tls.sock.set_read_timeout(None);
+    tls.get_mut().set_tick(None);
     r
 }
 
@@ -185,9 +378,7 @@ fn is_read_tick(e: &str) -> bool {
     e.starts_with("stalled:")
 }
 
-fn wait_pair_confirm_inner(
-    tls: &mut StreamOwned<rustls::ClientConnection, TcpStream>,
-) -> Result<bool, String> {
+fn wait_pair_confirm_inner(tls: &mut TlsStream) -> Result<bool, String> {
     let deadline = Instant::now() + PAIR_CONFIRM_TIMEOUT;
     let mut dec = FrameDecoder::new();
     let mut pending = std::collections::VecDeque::new();
@@ -216,7 +407,7 @@ fn wait_pair_confirm_inner(
     }
 }
 
-fn echo_keepalive(tls: &mut StreamOwned<rustls::ClientConnection, TcpStream>) {
+fn echo_keepalive(tls: &mut TlsStream) {
     let _ = write_frame(tls, CH_CONTROL, FLAG_KEEPALIVE_ECHO, &[]);
 }
 
@@ -375,7 +566,7 @@ fn message_for(seq: u64) -> Vec<u8> {
 }
 
 fn write_frame(
-    tls: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
+    tls: &mut TlsStream,
     channel: u8,
     flags: u8,
     payload: &[u8],
@@ -424,14 +615,87 @@ mod tests {
     }
 
     #[test]
-    fn read_timeout_is_a_tick_not_a_pair_failure() {
-        // wait_pair_confirm sets a 500 ms socket read timeout so its 300 s deadline is
-        // enforced even while the phone shows the prompt and sends nothing: a read tick
-        // must continue the loop, any other error must end it.
-        assert!(is_read_tick(
-            "stalled: no inbound data within the socket read timeout"
-        ));
+    fn read_tick_is_not_a_pair_failure() {
+        // wait_pair_confirm sets a 500 ms channel tick so its 300 s deadline is enforced
+        // even while the phone shows the prompt and sends nothing: a read tick must
+        // continue the loop, any other error must end it.
+        assert!(is_read_tick("stalled: no inbound data within the read tick"));
         assert!(!is_read_tick("tls read: connection reset"));
         assert!(!is_read_tick("protocol: bad frame"));
+    }
+
+    fn chunk_reader(
+        tick: Option<Duration>,
+    ) -> (std::sync::mpsc::SyncSender<WireChunk>, ChunkReader) {
+        let (tx, rx) = sync_channel(4);
+        let mut r = ChunkReader::new(rx);
+        r.set_tick(tick);
+        (tx, r)
+    }
+
+    /// The Phase 13 correction: with no bytes the pipeline wakes on the channel tick and
+    /// gets WouldBlock. It never waits on the socket with a timeout (B-067/B-072).
+    #[test]
+    fn no_bytes_yet_returns_would_block_within_the_tick() {
+        let (_tx, mut r) = chunk_reader(Some(Duration::from_millis(5)));
+        let started = Instant::now();
+        let mut one = [0u8; 1];
+        let e = r.read_into(&mut one).expect_err("empty reader must not block");
+        assert_eq!(e.kind(), std::io::ErrorKind::WouldBlock);
+        assert!(
+            started.elapsed() >= Duration::from_millis(4),
+            "returned before the tick: {:?}",
+            started.elapsed()
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "tick did not bound the wait: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn chunks_are_returned_in_order_and_the_tick_only_applies_when_empty() {
+        let (tx, mut r) = chunk_reader(Some(Duration::from_millis(50)));
+        tx.send(WireChunk::Data(b"hello ".to_vec())).unwrap();
+        tx.send(WireChunk::Data(b"world".to_vec())).unwrap();
+        let mut buf = [0u8; 32];
+        assert_eq!(r.read_into(&mut buf).unwrap(), 6);
+        assert_eq!(&buf[..6], b"hello ");
+        assert_eq!(r.read_into(&mut buf).unwrap(), 5);
+        assert_eq!(&buf[..5], b"world");
+        let e = r.read_into(&mut buf).expect_err("then empty");
+        assert_eq!(e.kind(), std::io::ErrorKind::WouldBlock);
+    }
+
+    /// Pairing and bench run with no tick: a read must wait for the reader thread rather
+    /// than report a spurious timeout.
+    #[test]
+    fn blocking_mode_waits_for_the_reader_thread() {
+        let (tx, mut r) = chunk_reader(None);
+        let sender = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            tx.send(WireChunk::Data(b"late".to_vec())).unwrap();
+        });
+        let mut buf = [0u8; 8];
+        assert_eq!(r.read_into(&mut buf).unwrap(), 4);
+        assert_eq!(&buf[..4], b"late");
+        sender.join().unwrap();
+    }
+
+    #[test]
+    fn eof_reads_zero_and_a_reader_error_is_passed_through() {
+        let (tx, mut r) = chunk_reader(Some(Duration::from_millis(50)));
+        tx.send(WireChunk::Eof).unwrap();
+        let mut one = [0u8; 1];
+        assert_eq!(r.read_into(&mut one).unwrap(), 0);
+
+        let (tx2, mut r2) = chunk_reader(Some(Duration::from_millis(50)));
+        tx2.send(WireChunk::Failed(std::io::Error::from(
+            std::io::ErrorKind::ConnectionReset,
+        )))
+        .unwrap();
+        let e = r2.read_into(&mut one).expect_err("error must surface");
+        assert_eq!(e.kind(), std::io::ErrorKind::ConnectionReset);
     }
 }

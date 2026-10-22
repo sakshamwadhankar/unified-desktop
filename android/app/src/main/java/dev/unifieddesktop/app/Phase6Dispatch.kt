@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * Commands:
  *   p6:shell                  one state line (windows, focus, start menu, input counters)
+ *   p6:probe [on|off]         arm the typing-probe square (latency probe for every window)
  *   p6:open:<files|browser|settings|test>
  *   p6:menu                    toggle the start menu
  *   p6:close                   close the focused window
@@ -60,6 +61,9 @@ object Phase6Dispatch {
         val arg = if (parts.size > 1) parts[1] else ""
         return when (what) {
             "shell" -> s.stats()
+            // Phase 12 round 2: arm the typing-probe square so the latency probe works for
+            // keys typed into any window (Browser, VS Code, Notepad++), not only Test.
+            "probe" -> s.probeArm(arg.trim().lowercase() != "off")
             // Phase 8 App Center driver: search/select/install/open/uninstall/exe. The sub-command
             // and its argument are split at the first ':' after "appcenter".
             "appcenter" -> {
