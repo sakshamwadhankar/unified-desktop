@@ -167,4 +167,58 @@ class Phase4ProtocolTest {
     fun watchdogExpiresPastWindow() {
         assertTrue(P.watchdogExpired(1_000, 1_000 + P.DEAD_TIMEOUT_MS + 1))
     }
+
+    // ---- Phase 11 (D-a): audio / clip / file / cam channels and their priority ----
+
+    @Test
+    fun phase11ChannelsRoundTripAndRejectUnknown() {
+        for (ch in byteArrayOf(P.CH_AUDIO, P.CH_CLIP, P.CH_FILE, P.CH_CAM)) {
+            assertTrue("channel $ch must be valid", P.isValidChannel(ch))
+            val f = P.encodeFrame(ch, 0, "p11".toByteArray())
+            val msgs = Phase4Protocol.Decoder().feed(f)
+            assertEquals(1, msgs.size)
+            assertEquals(ch, msgs[0].channel)
+            assertArrayEquals("p11".toByteArray(), msgs[0].payload)
+            assertTrue("channel $ch must have a name", P.channelName(ch) != "unknown")
+        }
+        assertFalse(P.isValidChannel(9))
+        try {
+            Phase4Protocol.Message.create(9, byteArrayOf(1))
+            fail("channel 9 must be refused")
+        } catch (_: IllegalArgumentException) { /* expected */ }
+    }
+
+    /** audio + clip preempt video, cam + file follow it, all before bench. */
+    @Test
+    fun phase11StrictPriorityOrder() {
+        val out = java.io.ByteArrayOutputStream()
+        val w = Phase4Protocol.PriorityWriter(out)
+        for (ch in byteArrayOf(P.CH_BENCH, P.CH_FILE, P.CH_CAM, P.CH_VIDEO, P.CH_CLIP, P.CH_AUDIO, P.CH_CONTROL, P.CH_INPUT)) {
+            w.push(Phase4Protocol.Message.create(ch, byteArrayOf(ch)))
+        }
+        w.emitAll()
+        val frames = Phase4Protocol.Decoder().feed(out.toByteArray())
+        assertEquals(
+            listOf(P.CH_INPUT, P.CH_CONTROL, P.CH_AUDIO, P.CH_CLIP, P.CH_VIDEO, P.CH_CAM, P.CH_FILE, P.CH_BENCH),
+            frames.map { it.channel }
+        )
+    }
+
+    /** A 1 MiB CH_FILE message splits into 16 wire chunks and rejoins byte-identical. */
+    @Test
+    fun phase11FileMessageChunksAndRejoins() {
+        val data = ByteArray(Phase4Protocol.MAX_MESSAGE_LEN) { (it % 251).toByte() }
+        val out = java.io.ByteArrayOutputStream()
+        val w = Phase4Protocol.PriorityWriter(out)
+        w.push(Phase4Protocol.Message.create(P.CH_FILE, data))
+        w.emitAll()
+        val frames = Phase4Protocol.Decoder().feed(out.toByteArray())
+        assertEquals(16, frames.size)
+        val joined = java.io.ByteArrayOutputStream()
+        for (f in frames) {
+            assertEquals(P.CH_FILE, f.channel)
+            joined.write(f.payload)
+        }
+        assertArrayEquals(data, joined.toByteArray())
+    }
 }

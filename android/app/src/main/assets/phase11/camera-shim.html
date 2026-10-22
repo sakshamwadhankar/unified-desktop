@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PC camera and microphone (shim test page)</title>
+<style>
+  body { background: #111; color: #ddd; font: 16px sans-serif; margin: 20px; }
+  video { width: 640px; height: 360px; background: #000; }
+  #s { margin-top: 10px; white-space: pre-line; }
+</style>
+</head>
+<body>
+<h3>PC webcam and microphone into the desktop</h3>
+<video id="v" autoplay muted playsinline></video>
+<div id="s">waiting for the shim...</div>
+<script src="camera-shim.js"></script>
+<script>
+  var v = document.getElementById('v');
+  var s = document.getElementById('s');
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(function (st) {
+    v.srcObject = st;
+    setInterval(function () {
+      var k = window.udCam.stats();
+      s.textContent = 'getUserMedia OK: ' + st.getVideoTracks().length + ' video / ' +
+        st.getAudioTracks().length + ' audio\nframes received: ' + k.frames +
+        ', samples received: ' + k.samples + ', seconds: ' + k.seconds.toFixed(1);
+    }, 500);
+  }).catch(function (e) { s.textContent = 'getUserMedia failed: ' + e; });
+</script>
+</body>
+</html>

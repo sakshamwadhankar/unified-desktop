@@ -1,4 +1,4 @@
-﻿//! Phase-5 `udreceiver view`: shows the phone's desktop surface on the PC.
+//! Phase-5 `udreceiver view`: shows the phone's desktop surface on the PC.
 //!
 //! HARDWARE decode, the Windows way: the system H.264 decoder MFT
 //! (`CLSID_CMSH264DecoderMFT`) is handed an `IMFDXGIDeviceManager` on a D3D11 device, so
@@ -83,7 +83,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::phase5::{self, InputEvent, VideoFrame};
-use crate::protocol::{Message, PriorityWriter, CH_CONTROL, CH_INPUT, CH_VIDEO};
+use crate::protocol::{Message, PriorityWriter, CH_CLIP, CH_CONTROL, CH_FILE, CH_INPUT, CH_VIDEO};
+use windows::Win32::System::DataExchange::{AddClipboardFormatListener, RemoveClipboardFormatListener};
+use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 
 /// B-067: a Windows socket read can surface a timed-out or still-pending operation as a raw OS
 /// error instead of WouldBlock/TimedOut (997 = ERROR_IO_PENDING, 10060 = WSAETIMEDOUT). The
@@ -98,6 +100,10 @@ fn is_transient_read(e: &std::io::Error) -> bool {
 }
 
 const TAG: &str = "p5pc";
+/// WM_CLIPBOARDUPDATE (add/remove format listener, Phase 11 D-c).
+const WM_CLIPBOARDUPDATE: u32 = 0x031D;
+/// WM_DROPFILES (files dropped on the view window, Phase 11 D-d).
+const WM_DROPFILES: u32 = 0x0233;
 /// Frames remembered for the latency report (about 7 s at 84 fps).
 const FRAME_RING: usize = 600;
 
@@ -128,11 +134,20 @@ struct Shared {
     decode_us_total: AtomicU64,
     last_seq: AtomicU32,
     d3d11: AtomicU32,
+    /// A clone of the live TLS socket, so an exit can wake a blocking read
+    /// (B-098: shutdown(Both) makes read() return instead of waiting for video).
+    wake_socket: Mutex<Option<TcpStream>>,
+    /// Phase 11 D-c: text waiting to go to the phone (UTF-8), and the hash of the last
+    /// clipboard text this process saw on either end (loop guard).
+    clip_out: Mutex<Option<Vec<u8>>>,
+    clip_hash: AtomicU64,
+    /// Phase 11 D-d: files the user dropped on the window or picked in the Import dialog.
+    files_out: Mutex<Vec<std::path::PathBuf>>,
 }
 
 impl Shared {
     fn new(x: i32, y: i32, w: i32, h: i32) -> Arc<Self> {
-        Arc::new(Shared {
+        let me = Arc::new(Shared {
             hwnd: AtomicU64::new(0),
             events: Mutex::new(Vec::new()),
             pointer: Mutex::new((960, 540)),
@@ -153,7 +168,22 @@ impl Shared {
             decode_us_total: AtomicU64::new(0),
             last_seq: AtomicU32::new(0),
             d3d11: AtomicU32::new(0),
-        })
+            wake_socket: Mutex::new(None),
+            clip_out: Mutex::new(None),
+            clip_hash: AtomicU64::new(0),
+            files_out: Mutex::new(Vec::new()),
+        });
+        // Harness/test hook: UD_VIEW_IMPORT=<path> queues one "Import from this PC" file at
+        // startup, so the PC->phone file path can be proven without driving the Open dialog.
+        if let Some(p) = std::env::var_os("UD_VIEW_IMPORT") {
+            let p = std::path::PathBuf::from(p);
+            if p.is_file() {
+                if let Ok(mut q) = me.files_out.lock() {
+                    q.push(p);
+                }
+            }
+        }
+        me
     }
 
     fn push(&self, e: InputEvent) {
@@ -273,6 +303,11 @@ pub fn run(
         }
         println!("[{TAG}] LOCK engaged (private Phase 9 desktop)");
     }
+    // Phase 11 D-c: PC clipboard changes arrive as WM_CLIPBOARDUPDATE on this window.
+    unsafe {
+        let _ = AddClipboardFormatListener(hwnd);
+        DragAcceptFiles(hwnd, true);
+    }
 
     let sh = shared.clone();
     let (soft, secs, freeze) = (opts.soft, opts.seconds, opts.freeze_video_after);
@@ -362,6 +397,9 @@ pub fn run(
         std::thread::sleep(Duration::from_millis(10));
     }
     shared.running.store(false, Ordering::SeqCst);
+    unsafe {
+        let _ = RemoveClipboardFormatListener(hwnd);
+    }
     // Order matters (ALGORITHMS.md section 13): restore the PC before the pipeline is joined,
     // so the phone can never be left with a key held while the desktop is still locked.
     if let Some(l) = lock.as_mut() {
@@ -370,8 +408,21 @@ pub fn run(
             Err(e) => eprintln!("[{TAG}] LOCK exit error: {e}"),
         }
     }
-    let r = pipeline.join().map_err(|_| "pipeline panicked")?;
-    let _ = stats.join();
+    // B-098: wait up to 2 s for the pipeline to leave on its own; if it is blocked in
+    // read() (no video arriving), shut the cloned socket down so it returns immediately.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !pipeline.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if !pipeline.is_finished() {
+        println!("[{TAG}] exit: no pipeline exit in 2 s, shutting the socket down");
+        if let Ok(mut w) = shared.wake_socket.lock() {
+            if let Some(s) = w.take() {
+                let _ = s.shutdown(Shutdown::Both);
+            }
+        }
+    }
+    let r = pipeline.join().map_err(|_| "pipeline panicked")?;    let _ = stats.join();
     println!("[{TAG}] window closed");
     r
 }
@@ -571,6 +622,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             shared.release_all.store(1, Ordering::SeqCst);
             LRESULT(0)
         }
+        WM_CLIPBOARDUPDATE => {
+            queue_local_clip(&shared);
+            LRESULT(0)
+        }
+        WM_DROPFILES => {
+            collect_dropped_files(WPARAM(wparam.0), &shared);
+            LRESULT(0)
+        }
         WM_SETCURSOR => {
             // B-095: the video is a normal PC client area, so the real mouse must always see
             // the standard arrow here. Without this the class cursor was null and Windows kept
@@ -638,8 +697,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 }
                 return LRESULT(0);
             }
-            if vk == 0x7A && down {
-                // F11 is meaningless on the private lock desktop (one window, no frame).
+            // Phase 11 D-d: "Import from this PC" - the lock desktop has no drag target,
+            // so Ctrl+O opens the standard file dialog on whichever desktop we are on.
+            if vk == 0x4F && down {
+                let ctrl = (GetKeyState(0x11) as u16) & 0x8000 != 0;
+                if ctrl {
+                    pick_import_file(hwnd, &shared);
+                    return LRESULT(0);
+                }
+            }
+            if vk == 0x7A && down {                // F11 is meaningless on the private lock desktop (one window, no frame).
                 if !crate::lock::is_locked() {
                     toggle_fullscreen(hwnd, &shared);
                 }
@@ -729,9 +796,17 @@ impl ReadWatchdog {
         let join = std::thread::Builder::new()
             .name("p5-read-watchdog".into())
             .spawn(move || {
-                while !thread_stop.load(Ordering::SeqCst)
-                    && thread_shared.running.load(Ordering::SeqCst)
-                {
+                loop {
+                    if thread_stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    // B-098: lock-exit/Exit sets running=false while the pipeline may be
+                    // blocked in read(). Shut the cloned socket down so that read returns
+                    // instead of leaving the view process (and the phone session) alive.
+                    if !thread_shared.running.load(Ordering::SeqCst) {
+                        let _ = socket.shutdown(Shutdown::Both);
+                        break;
+                    }
                     let elapsed = started.elapsed().as_millis() as u64;
                     let last = thread_last_read.load(Ordering::SeqCst);
                     if elapsed.saturating_sub(last) >= crate::session::LINK_DEAD_TIMEOUT.as_millis() as u64 {
@@ -768,6 +843,10 @@ fn pipeline_loop(
         .sock
         .try_clone()
         .map_err(|e| format!("clone read-watchdog socket: {e}"))?;
+    // B-098: keep a second clone reachable from the exit path (see the join below).
+    if let Ok(mut w) = shared.wake_socket.lock() {
+        *w = session.tls.sock.try_clone().ok();
+    }
     let read_watchdog = ReadWatchdog::start(read_socket, shared);
     let read_watchdog_started = Instant::now();
     unsafe {
@@ -815,6 +894,11 @@ fn pipeline_loop(
     let mut pending: std::collections::VecDeque<Message> = std::collections::VecDeque::new();
     let mut asm_video = phase5::ChunkAssembler::new();
     let mut asm_other = phase5::ChunkAssembler::new();
+    let mut asm_clip = phase5::ChunkAssembler::new();
+    let mut file_sink = crate::files::FileSink::new(downloads_dir())
+        .map_err(|e| format!("file sink: {e}"))?;
+    let mut file_out: Option<std::collections::VecDeque<Vec<u8>>> = None;
+    let mut next_file_id: u32 = 1;
     let mut last_rx = Instant::now();
     let mut last_csq = Instant::now() - Duration::from_secs(2);
     let mut clock = phase5::ClockSync::new();
@@ -830,6 +914,8 @@ fn pipeline_loop(
         }
         // ---- outgoing: input, control, clock, keep-alive (all through the priority writer)
         flush_input(&mut session.tls, shared)?;
+        flush_clip(&mut session.tls, shared)?;
+        service_files(&mut session.tls, shared, &mut file_out, &mut next_file_id)?;
         if shared.release_all.swap(0, Ordering::SeqCst) == 1 {
             let mut w = PriorityWriter::new(&mut session.tls);
             let _ = w.push(Message::new(CH_CONTROL, phase5::CTRL_RELEASE_ALL.as_bytes().to_vec())?);
@@ -878,6 +964,12 @@ fn pipeline_loop(
         // ---- incoming
         let mut worked = false;
         loop {
+            // B-098: the receive loop may stay in this inner loop for a whole session while
+            // frames/control messages keep arriving. An Exit must stop it too, not only the
+            // outer loop. The watchdog shuts the socket in parallel to wake a blocked read.
+            if !shared.running.load(Ordering::SeqCst) {
+                break 'pipeline;
+            }
             if seconds > 0 && start.elapsed() > Duration::from_secs(seconds) {
                 println!("[{TAG}] --seconds {seconds} reached");
                 break 'pipeline;
@@ -885,7 +977,14 @@ fn pipeline_loop(
             // The inner loop can stay here for the whole session while video is flowing.
             // Input must not wait for a read timeout, or the phone sees clicks seconds late
             // (or only after the next transient read error).
+            // B-098: the Exit path clears `running`; leave now instead of serving video
+            // forever (the old code only checked it in the outer loop).
+            if !shared.running.load(Ordering::SeqCst) {
+                break 'pipeline;
+            }
             flush_input(&mut session.tls, shared)?;
+            flush_clip(&mut session.tls, shared)?;
+            service_files(&mut session.tls, shared, &mut file_out, &mut next_file_id)?;
             let Some(m) = pending.pop_front() else {
                 match std::io::Read::read(&mut session.tls, &mut read_buf) {
                     Ok(0) => {
@@ -949,6 +1048,35 @@ fn pipeline_loop(
                         }
                     }
                 }
+                CH_FILE => match file_sink.on_message(&m.payload) {
+                    Ok(Some(done)) => println!(
+                        "[{TAG}] <- phone file {} {} bytes sha_ok={}",
+                        done.path.display(),
+                        done.bytes,
+                        done.sha_ok
+                    ),
+                    Ok(None) => {}
+                    Err(e) => eprintln!("[{TAG}] file from phone failed: {e}"),
+                },
+                CH_CLIP => {                    if let Some(whole) = asm_clip.feed(m.flags, &m.payload)? {
+                        let n = whole.len();
+                        let h = crate::clip::clip_hash(&whole);
+                        if crate::clip::is_echo(h, shared.clip_hash.load(Ordering::SeqCst)) {
+                            // Our own text, echoed by the phone: never write it again.
+                        } else {
+                            match crate::clip::decode_text(&whole) {
+                                Ok(text) => match crate::clip::write_text(text.as_bytes()) {
+                                    Ok(()) => {
+                                        shared.clip_hash.store(h, Ordering::SeqCst);
+                                        println!("[{TAG}] <- phone clip {n} bytes");
+                                    }
+                                    Err(e) => eprintln!("[{TAG}] clip -> PC failed: {e}"),
+                                },
+                                Err(e) => eprintln!("[{TAG}] clip from phone refused: {e}"),
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -967,6 +1095,13 @@ fn pipeline_loop(
         let _ = w.emit_all();
     }
     println!("[{TAG}] pipeline stopping (release-all sent)");
+    // B-098: the phone must not keep streaming to a process that is leaving; closing the
+    // write side also ends the session on its side. Any blocked read is woken here.
+    if let Ok(mut w) = shared.wake_socket.lock() {
+        if let Some(s) = w.take() {
+            let _ = s.shutdown(Shutdown::Both);
+        }
+    }
     unsafe {
         let _ = MFShutdown();
     }
@@ -975,7 +1110,142 @@ fn pipeline_loop(
 
 /// Send every locally queued input event now. Called at both levels of the pipeline loop:
 /// the inner loop is the one that runs while video is continuous, so draining only in the
-/// outer loop leaves a real mouse click sitting in the queue indefinitely.
+/// outer loop leaves a real mouse click sitting in the queue indefinitely./// Phase 11 D-c: a PC clipboard change. Hash-guarded: a text this process itself put on
+/// the clipboard (a phone->PC clip) must not travel back to the phone.
+fn queue_local_clip(shared: &Shared) {
+    let Some(bytes) = crate::clip::read_text() else { return };
+    let h = crate::clip::clip_hash(&bytes);
+    if crate::clip::is_echo(h, shared.clip_hash.load(Ordering::SeqCst)) {
+        return;
+    }
+    if bytes.len() > crate::clip::MAX_CLIP_BYTES {
+        eprintln!("[{TAG}] PC clipboard {} bytes > cap, not sent", bytes.len());
+        return;
+    }
+    shared.clip_hash.store(h, Ordering::SeqCst);
+    if let Ok(mut q) = shared.clip_out.lock() {
+        *q = Some(bytes);
+    }
+}
+
+/// Send a queued PC clipboard text on CH_CLIP (the priority writer does the chunking).
+/// Logs the length only: clipboard contents never reach a log.
+fn flush_clip<W: std::io::Write>(tls: &mut W, shared: &Shared) -> Result<(), String> {
+    let text = match shared.clip_out.lock() {
+        Ok(mut q) => q.take(),
+        Err(_) => None,
+    };
+    let Some(text) = text else { return Ok(()) };
+    let n = text.len();
+    let mut w = PriorityWriter::new(tls);
+    w.push(Message::new(CH_CLIP, text).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    w.emit_all().map_err(|e| e.to_string())?;
+    println!("[{TAG}] -> phone clip {n} bytes");
+    Ok(())
+}
+
+/// Phase 11 D-d: files dropped on the view window (WM_DROPFILES).
+unsafe fn collect_dropped_files(wparam: WPARAM, shared: &Shared) {
+    let hdrop = HDROP(wparam.0 as *mut std::ffi::c_void);
+    let count = DragQueryFileW(hdrop, 0xFFFF_FFFF, None);
+    for i in 0..count {
+        let len = DragQueryFileW(hdrop, i, None) as usize;
+        let mut buf = vec![0u16; len + 1];
+        DragQueryFileW(hdrop, i, Some(&mut buf));
+        let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        let path = std::path::PathBuf::from(String::from_utf16_lossy(&buf[..end]));
+        if let Ok(mut q) = shared.files_out.lock() {
+            q.push(path);
+        }
+        println!("[{TAG}] import queued (drop)");
+    }
+    DragFinish(hdrop);
+}
+
+/// "Import from this PC": the standard Open dialog, usable on the lock desktop too.
+fn pick_import_file(hwnd: HWND, shared: &Shared) {
+    use windows::Win32::UI::Controls::Dialogs::{
+        GetOpenFileNameW, OPENFILENAMEW, OFN_FILEMUSTEXIST, OFN_NOCHANGEDIR, OFN_PATHMUSTEXIST,
+    };
+    let mut buf = vec![0u16; 4096];
+    let mut ofn = OPENFILENAMEW {
+        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+        hwndOwner: hwnd,
+        lpstrFile: windows::core::PWSTR(buf.as_mut_ptr()),
+        nMaxFile: buf.len() as u32,
+        lpstrTitle: windows::core::w!("Import from this PC"),
+        Flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+        ..Default::default()
+    };
+    let ok = unsafe { GetOpenFileNameW(&mut ofn).as_bool() };
+    if !ok {
+        return;
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let path = std::path::PathBuf::from(String::from_utf16_lossy(&buf[..end]));
+    if let Ok(mut q) = shared.files_out.lock() {
+        q.push(path);
+    }
+    println!("[{TAG}] import queued (dialog)");
+}
+
+/// Where files from the phone land: %USERPROFILE%\Downloads\unified-desktop.
+fn downloads_dir() -> std::path::PathBuf {
+    let home = std::env::var_os("USERPROFILE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    home.join("Downloads").join("unified-desktop")
+}
+
+/// Stream one queued import file in 64 KiB CH_FILE messages, at most 8 per loop turn so a
+/// 20 MB file never blocks input, audio, clip or video (D-a priority).
+fn service_files<W: std::io::Write>(
+    tls: &mut W,
+    shared: &Shared,
+    q: &mut Option<std::collections::VecDeque<Vec<u8>>>,
+    next_id: &mut u32,
+) -> Result<(), String> {
+    if q.is_none() {
+        let path = shared
+            .files_out
+            .lock()
+            .ok()
+            .and_then(|mut v| if v.is_empty() { None } else { Some(v.remove(0)) });
+        if let Some(p) = path {
+            let mut buf = std::collections::VecDeque::new();
+            match crate::files::send_file(*next_id, &p, &mut |m| {
+                buf.push_back(m);
+                Ok(())
+            }) {
+                Ok((n, sha)) => {
+                    println!(
+                        "[{TAG}] -> phone file {} {n} bytes sha={}",
+                        p.display(),
+                        &crate::crypto::fingerprint_hex(&sha)[..16]
+                    );
+                    *next_id = next_id.wrapping_add(1);
+                    *q = Some(buf);
+                }
+                Err(e) => eprintln!("[{TAG}] import failed {}: {e}", p.display()),
+            }
+        }
+    }
+    if let Some(dq) = q.as_mut() {
+        let mut w = PriorityWriter::new(tls);
+        for _ in 0..8 {
+            let Some(m) = dq.pop_front() else { break };
+            w.push(Message::new(CH_FILE, m).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+        }
+        w.emit_all().map_err(|e| e.to_string())?;
+        if dq.is_empty() {
+            *q = None;
+        }
+    }
+    Ok(())
+}
+
 fn flush_input<W: std::io::Write>(tls: &mut W, shared: &Shared) -> Result<(), String> {
     let events = shared.drain_events();
     if events.is_empty() {
@@ -1962,6 +2232,27 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].channel, CH_INPUT);
         assert_eq!(phase5::parse_input_events(&msgs[0].payload).unwrap(), events);
+    }
+
+    /// B-098: stopping a view must close the blocking phone socket; otherwise the
+    /// process and the phone session survive Exit.
+    #[test]
+    fn read_watchdog_shuts_socket_when_stopped() {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut peer = std::net::TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        let shared = Arc::new(Shared::new(0, 0, 1920, 1080));
+        shared.running.store(false, Ordering::SeqCst);
+        let _watchdog = ReadWatchdog::start(server, &shared);
+
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let t = Instant::now();
+        let mut one = [0u8; 1];
+        let n = peer.read(&mut one).expect("read after watchdog shutdown");
+        assert_eq!(n, 0);
+        assert!(t.elapsed() < Duration::from_secs(2), "read did not wake: {:?}", t.elapsed());
     }
 
     #[test]

@@ -1,33 +1,26 @@
-# One mouse + Phase 10 finish: to-do
+# Phase 11: to-do
+PHONE UNLOCKED 07:59 - phone round ran 08:00-08:09
+Done 9 of 10 | Open: phone audio + shim loading | Updated 08:12 | Now: docs done, phone cleaned
 
-**Final status 2026-10-22 02:06:** 8/8 items attempted; **Phase 10 is NOT PASS**. 4a, 4c
-(manager's connected-first gate), 4d, 4e, the 2-hour soak, B-049, B-072, B-094 and ONE MOUSE
-passed; 4b is SKIPPED (no qualifying call); **Phase 9 Exit FAILED** (lock restored in 78 ms,
-view process alive > 60 s; B-098 open); resource governor remains **PARTIAL** (lower-resolution
-output and before/after resource numbers unproven). No commit or push.
+1. Start [done 03:40]: phone 2c0f6edc, Wi-Fi 192.168.1.16:47600; link up; owner unlocked 07:59.
+1b. B-098 [done 04:03, phone]: EXIT_MS=1807; recheck 07:55: 473 ms script / 657 ms click path.
+2. Channels [done 05:20]: both sides + tests.
+3. Clipboard [done 08:04, phone]: PC->phone held len=22 sha=c5f04e0e; phone->PC changed the PC
+   clipboard. Fixed appCtx never assigned (both directions had been dead).
+4. Files [done 08:09, phone]: 20 MB phone->PC SHA 4515...53cc both ends; 1 MB PC->phone
+   SHA bdb1ca24... both ends. B-100 (short TLS write) found and fixed.
+5. Audio [PC-only]: loopback flat even unmuted (mute=false level=0.66): environment/driver
+   fact, no BUGS row; phone AudioPlaybackCapture engine built, consent/start wiring next.
+6. Webcam/mic [PC-only proven]: camtest 1280x720/15 f/11.6 fps/brightness changed/released;
+   mic RMS 0.0127. Shim asset + JS bridge + framing tested; loading into the shell next.
+7. Phone round [done 08:09]: clipboard + files both ways on the phone; locked Exit not repeated
+   (B-098 covers it); audio/webcam page still open.
+8. Gates [done 08:11]: PC 73/0 + clippy clean; Android 169/0/3 + lint + assemble;
+   git diff --check final run with docs.
+9. Docs, cleanup, report: PHASE11_RESULT done; phone cleaned (files removed, force-stop,
+   stay_on=0, brightness=699); no PC processes.
 
-1. **Start [done]:** phone `2c0f6edc`, Wi-Fi `192.168.1.16:47600`; no ADB forward for the
-   final 4c/soak video transport. All inputs guarded by `mCallState=0|0`.
-2. **ONE MOUSE [done, phone PASS]:** PC shows the only arrow (`view.rs:471`, `574-580`);
-   phone hides its pointer (`Phase5Desktop.kt:126`); `hCursor=0x10003`, real click
-   `(70,1108)` opened Start. Evidence `p10/phone-b095-*`, BUGS B-095.
-3. **B-094 [done, phone PASS]:** after real cold stops (`run-as ... killall`; `pidof` empty)
-   App Center uninstalled Notepad++ 8.9.8.1 exit 0 and 7-Zip 26.04 exit 0; MSI state restored
-   3/3 and cleared; menu rows lost both entries. Evidence `p10/b094-result.txt`,
-   `p10/b094-p7.log`, `p10/b094-wine.log`.
-4. **Phase 10 short gates [done]:** 4a PASS; 4b SKIPPED; 4c PASS 3/3, connected -> picture
-   `3668/2798/2774 ms` (legacy enable -> picture `5954/5329/5322 ms`, TLS
-   `40.5/48.5/42.2 ms`); 4d different PC refused; 4e OEM persistence PASS. X11/App Center
-   rects and guest PIDs unchanged; B-097 not reproduced under script-only input.
-5. **Two-hour soak [done, phone PASS]:** 25 samples / 121.0 min, app pid 28212 unchanged, CPU
-   advancing 24/24, LMK 0, TLS 0, battery 47 -> 57 %, max temp 38.2 C, thermal 3; receiver
-   43824 continuous 105.4 min with dropped=0.
-6. **Phase 9 after soak [done, FAIL]:** lock-exit restored Default in 78 ms but the view did
-   not exit; `phase9_exit.ps1` timed out at 60,107 ms and killed it; PC recovered clean
-   (`lock-state=Normal`, journal clean). B-098; do not fix in this task.
-7. **Gates [done]:** Android `155 tests / 0 failures / 3 skipped`, lint+assemble BUILD
-   SUCCESSFUL; PC `cargo test --release` 58/0, clippy clean; `git diff --check` exit 0.
-8. **Docs, cleanup, report [done]:** `docs/PHASE10_RESULT.md` updated; `docs/PHASE9_RESULT.md`
-   carries the post-soak failure; BUGS/SKIPS updated; no `udreceiver.exe`, no ADB forwards;
-   phone `stay_on=0`, brightness `699`, Wi-Fi ON; `STATE.md` updated last. Evidence stays in
-   `C:\Users\Asus\AppData\Local\Temp\opencode\p10`.
+Phase 10 close-out [done 2026-10-22 08:00]: PHASE9_RESULT and PHASE10_RESULT corrected;
+Phase 9 Exit PASS (actual click 657 ms; named-event 473 ms after B-098 fix); Phase 10
+verdict remains FAIL only for the resource governor PARTIAL; multi-monitor SKIP; phone
+force-stopped, brightness 699, Wi-Fi on, no forwards.

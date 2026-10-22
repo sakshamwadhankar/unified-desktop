@@ -21,6 +21,10 @@ object Phase4Protocol {
     const val CH_INPUT: Byte = 2
     const val CH_VIDEO: Byte = 3
     const val CH_BENCH: Byte = 4
+    const val CH_AUDIO: Byte = 5
+    const val CH_CLIP: Byte = 6
+    const val CH_FILE: Byte = 7
+    const val CH_CAM: Byte = 8
 
     const val FLAG_KEEPALIVE_ECHO: Byte = 0b1
     const val FLAG_MORE_FOLLOWS: Byte = 0b10
@@ -29,13 +33,19 @@ object Phase4Protocol {
     const val DEAD_TIMEOUT_MS = 15_000L
 
     /** Strict priority: input > control > video > bench (OPTIMIZATION 5). */
-    val CHANNEL_PRIORITY = byteArrayOf(CH_INPUT, CH_CONTROL, CH_VIDEO, CH_BENCH)
+    val CHANNEL_PRIORITY = byteArrayOf(
+        CH_INPUT, CH_CONTROL, CH_AUDIO, CH_CLIP, CH_VIDEO, CH_CAM, CH_FILE, CH_BENCH
+    )
 
     fun channelName(ch: Byte) = when (ch) {
         CH_CONTROL -> "control"
         CH_INPUT -> "input"
         CH_VIDEO -> "video"
         CH_BENCH -> "bench"
+        CH_AUDIO -> "audio"
+        CH_CLIP -> "clip"
+        CH_FILE -> "file"
+        CH_CAM -> "cam"
         else -> "unknown"
     }
 
@@ -58,7 +68,9 @@ object Phase4Protocol {
 
     class ProtocolException(message: String) : Exception(message)
 
-    fun isValidChannel(ch: Byte) = ch == CH_CONTROL || ch == CH_INPUT || ch == CH_VIDEO || ch == CH_BENCH
+    fun isValidChannel(ch: Byte) =
+        ch == CH_CONTROL || ch == CH_INPUT || ch == CH_VIDEO || ch == CH_BENCH ||
+            ch == CH_AUDIO || ch == CH_CLIP || ch == CH_FILE || ch == CH_CAM
 
     /**
      * Pairing gate state of one session (manager review 2026-10-18): a PC that is not

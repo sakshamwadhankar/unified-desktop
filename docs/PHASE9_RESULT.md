@@ -4,21 +4,31 @@
 05:10). Receiver: `pc/udreceiver`; phone 2c0f6edc (USB, `adb forward tcp:47600`); Windows 11
 26H2 build 26300, UBR 9711, **not elevated**.
 
-**Post-soak recheck 2026-10-22 01:57-01:59: FAIL (B-098).** A real `view --lock
---lock-max-seconds 180` against the phone Wi-Fi address restored the PC to `Default`
-(`[lock] exited: switch_ms=45 total_ms=78`), but the view process stayed alive for the
-whole 60 s wait (`phase9_exit.ps1` stopped at `elapsed_ms=60107`) and had to be killed.
-`lock-recover` then reported `input-desktop=Default`, `lock-state=Normal` and a clean
-journal (`p10/phase9-post.txt`). The historical 2026-10-21 PASS below remains the record
-of the earlier build, but Phase 9 Exit is **not PASS after the Phase 10 soak**.
+**Post-soak recheck 2026-10-22: PASS (B-098 fixed).** The first named-event run restored
+the PC to `Default` (`[lock] exited: switch_ms=45 total_ms=78`) but the view process stayed
+alive for the 60 s wait (`phase9_exit.ps1` stopped at `elapsed_ms=60107`); B-098 was logged
+and fixed by making the receive loop and the cloned-socket watchdog end the session on
+`running=false`. After the fix, the same `phase9_exit.ps1` path reports
+`EXIT_MS=473`, `[p5pc] phone closed the link` and `[p5pc] window closed`, with
+`input-desktop=Default` and a clean journal (`p10/phase9-exit.txt`).
+
+The actual Exit-button gate was then re-run with `lock-inject --click-exit` on a real
+locked view: the click at the Exit centre (1464,32) reached `Default` in **657 ms**;
+`[lock] exited: switch_ms=22 total_ms=162`; no receiver was left and `lock-recover`
+reported a clean journal (`p10/phase9-click2.log`, `p10/phase9-result.txt`). Phase 9 Exit
+after the Phase 10 soak is therefore **PASS**; the named-event cleanup path is **473 ms**
+and the click path is **657 ms**. Post-soak gates on the final Phase 10 tree: Android
+**155 tests / 0 failures / 3 skipped** plus lint and assemble; PC **73/0 release**, clippy
+clean.
 
 ```
-PHASE 9 GATE (Windows 11 26H2 build 26300.9711): PASS (historical 2026-10-21; post-soak FAIL above) - private lock desktop, 8/8 key
+PHASE 9 GATE (Windows 11 26H2 build 26300.9711): PASS (historical 2026-10-21; post-soak PASS 2026-10-22) - private lock desktop, 8/8 key
 combinations blocked, Exit restores, watchdog/phone-gone/frozen-video restore, crash guard
 returns input to Default; Windows 10 and policies are declared SKIPs (no hardware / not admin);
 multi-monitor is code-only
 BLOCKED KEYS: Win yes | Alt+Tab yes | Alt+Esc yes | Ctrl+Esc yes | Taskbar yes
 EXIT: button yes | lock-exit->exit 291 ms (switch 21, lock path 206) | frozen video yes | phone gone yes
+POST-SOAK EXIT: actual click 657 ms | named-event after B-098 fix 473 ms | Default + clean journal
 CRASH RECOVERY: guard 12 ms (426 ms wall) | journal clean yes | second view refused 42 ms | next view after guard+lock kill recovers yes
 FAIL-CLOSED: failed restore view exit 52 ms, journal unchanged, no lock | selftest refused
 CLEAN RECOVERY: clean journal on lock desktop 75 ms | unreadable journal 59 ms, bytes unchanged
@@ -192,6 +202,13 @@ kept under `p9t17/` for audit (not committed).
 
 ## Bugs
 
+- **B-098 FIXED (phone/PC, 2026-10-22):** the post-soak named-event run timed out at
+  60,107 ms after the PC had returned to `Default`; the view stayed alive in the inner
+  receive loop. The receive loop now checks `running`, and the cloned-socket watchdog
+  shuts the socket down; `phase9_exit.ps1` now exits in **473 ms** with
+  `phone closed the link` / `window closed`, and the actual Exit-button click in **657 ms**
+  also returns `Default` cleanly. Evidence: `p10/phase9-exit.txt`, `p10/phase9-click2.log`;
+  `BUGS.md` B-098.
 - **B-093 FIXED (phone):** `AppCenter.runExe` now calls
   `shell()?.openApp(ShellRoot.App.X11, title = X11Title.exeTitle(f.name))` on the UI thread
   before Wine starts, so the reused frame is renamed from the `.exe` base name. Evidence:

@@ -17,14 +17,36 @@ pub const CH_CONTROL: u8 = 1;
 pub const CH_INPUT: u8 = 2;
 pub const CH_VIDEO: u8 = 3;
 pub const CH_BENCH: u8 = 4;
+pub const CH_AUDIO: u8 = 5;
+pub const CH_CLIP: u8 = 6;
+pub const CH_FILE: u8 = 7;
+pub const CH_CAM: u8 = 8;
+
+/// Every channel the protocol accepts (both sides reject anything else).
+pub fn is_valid_channel(ch: u8) -> bool {
+    matches!(
+        ch,
+        CH_CONTROL | CH_INPUT | CH_VIDEO | CH_BENCH | CH_AUDIO | CH_CLIP | CH_FILE | CH_CAM
+    )
+}
 
 pub const FLAG_KEEPALIVE_ECHO: u8 = 0b0000_0001; // empty keep-alive echo request
 // Part of the Phase-4 wire format from day one; first exercised by the pure-Rust
 // bench/priority tests, only becomes bin-live with Phase-5 video/pc stream joining.
 pub const FLAG_MORE_FOLLOWS: u8 = 0b0000_0010; // logical message continues
 
-/// Strict priority: input > control > video > bench (OPTIMIZATION 5).
-pub const CHANNEL_PRIORITY: [u8; 4] = [CH_INPUT, CH_CONTROL, CH_VIDEO, CH_BENCH];
+/// Strict priority: input > control > audio > clip > video > cam > file > bench
+/// (OPTIMIZATION 5, Phase 11 D-a: a big file never stalls audio, clip or video).
+pub const CHANNEL_PRIORITY: [u8; 8] = [
+    CH_INPUT,
+    CH_CONTROL,
+    CH_AUDIO,
+    CH_CLIP,
+    CH_VIDEO,
+    CH_CAM,
+    CH_FILE,
+    CH_BENCH,
+];
 
 #[allow(dead_code)] // diagnostics/log lines (bin CLI); session logging wires this later
 pub fn channel_name(ch: u8) -> &'static str {
@@ -34,6 +56,10 @@ pub fn channel_name(ch: u8) -> &'static str {
         CH_INPUT => "input",
         CH_VIDEO => "video",
         CH_BENCH => "bench",
+        CH_AUDIO => "audio",
+        CH_CLIP => "clip",
+        CH_FILE => "file",
+        CH_CAM => "cam",
         _ => "unknown",
     }
 }
@@ -57,7 +83,7 @@ impl Message {
     }
 
     pub fn with_flags(channel: u8, payload: Vec<u8>, flags: u8) -> Result<Self, &'static str> {
-        if !matches!(channel, CH_CONTROL | CH_INPUT | CH_VIDEO | CH_BENCH) {
+        if !is_valid_channel(channel) {
             return Err("unknown channel");
         }
         if payload.len() > MAX_MESSAGE_LEN {
@@ -74,7 +100,7 @@ impl Message {
 
 /// Encode one frame into `out`.
 pub fn encode_frame(channel: u8, flags: u8, payload: &[u8]) -> Result<Vec<u8>, String> {
-    if !matches!(channel, CH_CONTROL | CH_INPUT | CH_VIDEO | CH_BENCH) {
+    if !is_valid_channel(channel) {
         return Err(format!("unknown channel {channel}"));
     }
     if payload.len() > MAX_FRAME_PAYLOAD {
@@ -145,7 +171,7 @@ pub struct PriorityWriter<W: Write> {
     /// In-progress messages stay at their queue FRONT; the priority decision is
     /// re-taken before every chunk, so a newly arrived higher-priority frame preempts
     /// between any two chunks and same-channel FIFO is preserved.
-    queues: [VecDeque<Message>; 5], // index = channel id
+    queues: [VecDeque<Message>; 9], // index = channel id
 }
 
 impl<W: Write> PriorityWriter<W> {
@@ -153,19 +179,14 @@ impl<W: Write> PriorityWriter<W> {
     pub fn new(inner: W) -> Self {
         PriorityWriter {
             inner,
-            queues: [
-                VecDeque::new(),
-                VecDeque::new(),
-                VecDeque::new(),
-                VecDeque::new(),
-                VecDeque::new(),
-            ],
+            // one deque per channel id; ids 0 (unused) and 1..=8
+            queues: std::array::from_fn(|_| VecDeque::new()),
         }
     }
 
     #[allow(dead_code)] // tests + the upcoming video path queue frames through this
     pub fn push(&mut self, msg: Message) -> Result<(), &'static str> {
-        if !matches!(msg.channel, CH_CONTROL | CH_INPUT | CH_VIDEO | CH_BENCH) {
+        if !is_valid_channel(msg.channel) {
             return Err("unknown channel");
         }
         if msg.payload.len() > MAX_MESSAGE_LEN {
@@ -196,13 +217,8 @@ impl<W: Write> PriorityWriter<W> {
                     };
                 encode_frame(ch, flags, &m.payload[start..end]).map_err(io::Error::other)?
             };
-            let n = self.inner.write(&frame)?;
-            if n != frame.len() {
-                return Err(io::Error::new(
-                    io::ErrorKind::WriteZero,
-                    "short frame write",
-                ));
-            }
+            // TLS/TCP may accept only part of a 64 KiB frame; write_all loops until done.
+            self.inner.write_all(&frame)?;
             let chunk_len = frame.len() - HEADER_LEN;
             let m = queue.front_mut().expect("front still exists");
             m.offset += chunk_len;
@@ -342,6 +358,50 @@ mod tests {
         let frames = std::mem::take(pw.get_mut()).frames;
         let payloads: Vec<Vec<u8>> = frames.iter().map(|f| f[8..].to_vec()).collect();
         assert_eq!(payloads, vec![vec![1], vec![2], vec![3], vec![4]]);
+    }
+
+    #[test]
+    fn phase11_channels_roundtrip_and_strict_priority() {
+        for ch in [CH_AUDIO, CH_CLIP, CH_FILE, CH_CAM] {
+            assert!(is_valid_channel(ch));
+            let f = encode_frame(ch, 0, b"p11").unwrap();
+            let msgs = decode_messages(&f);
+            assert_eq!(msgs.len(), 1);
+            assert_eq!(msgs[0].channel, ch);
+            assert_eq!(msgs[0].payload, b"p11");
+            assert!(Message::new(ch, vec![0u8; 4]).is_ok());
+            assert!(!channel_name(ch).is_empty());
+        }
+        assert!(!is_valid_channel(9));
+        assert!(Message::new(9, vec![1]).is_err());
+        let mut pw: PriorityWriter<WriteCollector> = PriorityWriter::new(WriteCollector::default());
+        for ch in [CH_BENCH, CH_FILE, CH_CAM, CH_VIDEO, CH_CLIP, CH_AUDIO, CH_CONTROL, CH_INPUT] {
+            pw.push(Message::new(ch, vec![ch]).unwrap()).unwrap();
+        }
+        while pw.emit_one().unwrap().is_some() {}
+        let frames = std::mem::take(pw.get_mut()).frames;
+        let order: Vec<u8> = frames.iter().map(|f| f[1]).collect();
+        assert_eq!(
+            order,
+            vec![CH_INPUT, CH_CONTROL, CH_AUDIO, CH_CLIP, CH_VIDEO, CH_CAM, CH_FILE, CH_BENCH]
+        );
+    }
+
+    #[test]
+    fn file_message_is_chunked_and_rejoins() {
+        let data: Vec<u8> = (0..MAX_MESSAGE_LEN).map(|i| (i % 251) as u8).collect();
+        let mut pw: PriorityWriter<Vec<u8>> = PriorityWriter::new(Vec::new());
+        pw.push(Message::new(CH_FILE, data.clone()).unwrap()).unwrap();
+        while pw.emit_one().unwrap().is_some() {}
+        let wire = std::mem::take(pw.get_mut());
+        let msgs = decode_messages(&wire);
+        assert_eq!(msgs.len(), MAX_MESSAGE_LEN.div_ceil(MAX_FRAME_PAYLOAD));
+        let mut rejoined = Vec::new();
+        for m in &msgs {
+            assert_eq!(m.channel, CH_FILE);
+            rejoined.extend_from_slice(&m.payload);
+        }
+        assert_eq!(rejoined, data);
     }
 
     /// Write collector that records one frame per write() call (the writer performs

@@ -84,6 +84,12 @@ class FilesView(context: Context) : LinearLayout(context) {
         bar.addView(ShellUi.button(context, "New folder") { newFolder() })
         bar.addView(ShellUi.button(context, "Rename") { renameSelectedPrompt() })
         bar.addView(ShellUi.button(context, "Delete") { deleteSelected() })
+        bar.addView(ShellUi.button(context, "Send to PC") {
+            val f = selected
+            if (f == null) say("select a file first")
+            else if (f.isDirectory) say("select a file, not a folder")
+            else say(Phase11Files.sendToPc(f))
+        })
         // Scrollable, not squeezed: a narrowed window scrolls the toolbar instead of wrapping
         // "Delete" onto two lines (seen at 240 dpi, fixed 2026-10-19).
         val barScroll = HorizontalScrollView(context).apply {

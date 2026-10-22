@@ -16,6 +16,19 @@ import android.content.Intent
  */
 class HarnessReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
+        val p11 = intent.getStringExtra("phase11x")
+        if (p11 != null) {
+            when {
+                p11.startsWith("clip-set:") -> Phase11Clip.setLocal(ctx, p11.removePrefix("clip-set:"))
+                p11 == "clip-show" -> Phase11Clip.showLocal(ctx)
+                p11.startsWith("files-send:") -> {
+                    val f = java.io.File(p11.removePrefix("files-send:"))
+                    android.util.Log.i("Phase11", "P11FILE send ${f.name} -> ${Phase11Files.sendToPc(f)}")
+                }
+                else -> android.util.Log.i("Phase11", "unknown $p11")
+            }
+            return
+        }
         val p7 = intent.getStringExtra("phase7x")
         if (p7 != null) {
             P7Log.say(ctx.applicationContext, "BROADCAST phase7x $p7")

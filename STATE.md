@@ -6,8 +6,25 @@ corrects it after review.
 
 ## Now
 
-- **Phase 10 (2026-10-22 02:06): gates MET on the phone except the owner's 1-minute call
-  test (manager verdict 2026-10-22 02:20).** Round 2 on the real Wi-Fi link (no adb forward),
+- **Phase 11 (2026-10-22 08:12): phone round done for clipboard and files; audio and the shim
+  are the open work.** B-098 fixed and phone-proven (`EXIT_MS=1807`; recheck 473 ms script /
+  657 ms click path). Clipboard both ways on the phone: PC -> phone held len=22 sha=c5f04e0e,
+  phone -> PC changed the PC clipboard (fixed `appCtx` never assigned; only length + SHA-256
+  prefix logged). Files both ways on the phone: 20 MB phone -> PC SHA `4515...53cc` both ends;
+  1 MB PC -> phone SHA `bdb1ca24...` both ends after fixing B-100 (a 64 KiB frame used one
+  `write` and a partial TLS write aborted the session; now `write_all`). PC webcam `camtest`
+  1280x720 RGB32, 15 frames, 11.6 fps, brightness 0.000 -> 0.165, released; mic mean RMS 0.0127
+  (numbers only, nothing saved). Audio: loopback flat even with `mute=false level=0.66`
+  (environment/driver fact, no BUGS row); phone AudioPlaybackCapture engine built but consent/
+  start not wired. WebView getUserMedia shim: asset page + JS bridge + tested CAM/PCM framing
+  (5 Kotlin tests), not yet loaded in the shell WebView. Gates: Android 169/0/3 + lint +
+  assemble, PC 73/0 + clippy clean, `git diff --check` 0. **Open:** phone -> PC audio,
+  AudioPlaybackCapture wiring, shim loading, X11 clipboard bridge. Record:
+  `docs/PHASE11_RESULT.md`; evidence `...\Temp\opencode\p11`; no commit. Final check 08:14:
+  `git diff --check` exit 0, no `udreceiver` process, phone `PID_NONE`, stay_on=0, brightness=699.
+- **Phase 10: COMPLETE on the phone (manager verdict 2026-10-22 08:25).** The last gate, the
+  owner's real call, passed at 08:20 (1 min 37 s; same app PID, CPU advancing, frames kept
+  flowing, dropped=0; `p10/call-test-manager.txt`). Round 2 on the real Wi-Fi link (no adb forward),
   phone `2c0f6edc`, evidence in `C:\Users\Asus\AppData\Local\Temp\opencode\p10`:
   2-hour charger soak PASS (25 samples / 121 min, the same app PID throughout, CPU advancing
   24/24, LMK 0, battery 47 -> 57 %, max 38.2 C); WhatsApp 60 s in front PASS; three real Wi-Fi
@@ -17,13 +34,16 @@ corrects it after review.
   Also fixed and phone-verified this round: ONE MOUSE (the `--no-input` mode and the phone
   virtual pointer removed, owner request), B-095 (one normal PC arrow, the phone pointer hidden
   while a PC is connected), B-094 (Windows-app uninstall after a cold Wine restart: Notepad++
-  and 7-Zip exit 0). **Open:** the owner's 1-minute call test (SKIPS); B-098 (after Exit the
-  PC is back in 78 ms but the receiver process does not exit - FIX NOW next round); the
-  governor's lower-resolution step is only requested, not applied (FIX LATER, Phase 12);
-  B-097 (window rect after reconnect) not reproduced in the re-run. Gates (manager re-run
-  02:15): Android 155 tests / 0 failures / 3 skipped, lint + assemble OK; PC 58/0, clippy
-  clean; `git diff --check` 0. Manager cleanup: our app force-stopped (0 processes, 0
-  services); phone stay_on 0, brightness 699, Wi-Fi on.
+  and 7-Zip exit 0). **Phase 9 Exit after soak PASS:** the actual Exit click returned to
+  `Default` in **657 ms** and the named-event path in **473 ms** after the B-098 fix; B-098
+  is fixed (Phase 11). **Open:** the governor's
+  lower-resolution step is only requested, not applied (FIX LATER, Phase 12); B-097
+  (window rect after reconnect) not reproduced in the re-run. **Manager verdict: the governor's resolution drop is a Phase 12 item, not a Phase 10 gate**; multi-monitor is SKIP (one display, 1536x960). Gates
+  (manager re-run 02:15): Android 155 tests / 0 failures / 3 skipped, lint + assemble OK;
+  PC 73/0 after the B-098 fix, clippy clean; `git diff --check` 0. Manager cleanup: our app
+  force-stopped (0 processes, 0 services); phone stay_on 0, brightness 699, Wi-Fi on. A
+  concurrent Phase 11 `view --no-lock` test started at 08:00:17; the phone app was live
+  again at 08:02 and was left untouched.
 - **Phase 9 (PC lock + Exit): PASS on Windows 11 2026-10-21 05:10 (review rework + manager gate).** The lock
   is a private `udreceiver-lock-<pid>` desktop on `WinSta0` (default desktop and taskbar
   never hidden or modified), `WH_KEYBOARD_LL` blocks 8/8 combinations on down and up
@@ -91,10 +111,11 @@ corrects it after review.
   1.0 fps, drag 30.6 fps; typing medians 0.14/8.4/26.8 ms; stuck keys 0. Emulator-only limits:
   **B-056** (mitigated in code), **B-057** (PC window black on the emulator stream; not
   reproduced on the phone).
-- **Last updated:** 2026-10-22 02:20, manager (Phase 10 round-2 review, gates re-run, STATE
-  corrected: the agent's run ended on the free-model quota (429) before it wrote STATE).
-- **Next action:** Phase 11 (audio, clipboard, files, PC webcam/mic), starting with B-098. The
-  owner's 1-minute call test for Phase 10 is still owed (5 minutes with the owner).
+- **Last updated:** 2026-10-22 08:00, agent (Phase 10 close-out: PHASE9_RESULT and
+  PHASE10_RESULT corrected - Phase 9 Exit PASS 657 ms click / 473 ms named event, B-098
+  fixed; Phase 10 FAIL only for the resource governor PARTIAL; multi-monitor SKIP; phone
+  cleaned, brightness 699, Wi-Fi on).
+- **Next action:** Phase 11 (audio, clipboard, files, PC webcam/mic), starting with B-098.
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app

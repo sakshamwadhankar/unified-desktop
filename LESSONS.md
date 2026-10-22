@@ -177,6 +177,13 @@ these facts.** Re-verify anything critical: Android changes.
   agent checked instead of trusting it, and that saved a full session. Always verify.
 - A strict rule (any screen wake voids a test) made an agent loop all night. Rules must say
   what is being tested and when to stop.
+- 2026-10-22 08:04: an agent sent Ctrl+O, a file path and Enter with SendKeys while its
+  receiver window had failed to start, so the keys went to whatever owner window had focus.
+  Rule: before any synthetic PC keyboard or mouse input, check that the foreground window is
+  our receiver (GetForegroundWindow + its title/class); if not, send nothing and stop.
+- 2026-10-22 08:00: a quota-stopped agent session woke up again after the owner changed IP and
+  ran next to the new phase's session (same tree, same phone). The manager must interrupt a
+  finished or abandoned session (`session.interrupt`) before starting the next one.
 
 ## 7. Phase 2 round 5 (2026-10-18)
 

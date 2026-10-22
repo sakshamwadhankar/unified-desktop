@@ -326,6 +326,10 @@ class Phase4LinkService : Service() {
         stopping = false
         governorStage = Phase10GovernorStage.NORMAL
         channels()
+        // Phase 11 D-c: the Android clipboard is the desktop clipboard; CH_CLIP carries it.
+        Phase11Clip.start(this) { bytes ->
+            currentPhase5?.writer?.push(Phase4Protocol.Message.create(Phase4Protocol.CH_CLIP, bytes))
+        }
         serverThread = Thread({ serverLoop() }, "p4-tcp-server").also { it.start() }
         watchdogThread = Thread({ watchdogLoop() }, "p4-watchdog").also { it.start() }
         startGovernor()
@@ -355,6 +359,7 @@ class Phase4LinkService : Service() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         currentPhase5 = null
         currentLive = null
+        Phase11Clip.stop(this)
         desktopRuntime.stop()
         Phase5Dispatch.bind(null)
         releaseSessionWakeLock("service stop")
@@ -569,6 +574,12 @@ class Phase4LinkService : Service() {
         // Phase 5: video + input ride the same session, over the same priority writer.
         val p5 = Phase5Session(this, output, { line -> say(line) })
         currentPhase5 = p5
+        // Phase 11 D-d: this session can send files to the PC, and incoming files land in
+        // files/desktop (verified before the .part file is renamed).
+        val fileSink = Phase11Files.Sink(Phase11Files.desktopDir(this))
+        Phase11Files.bindSender { bytes ->
+            p5.writer.push(Phase4Protocol.Message.create(Phase4Protocol.CH_FILE, bytes))
+        }
         // B-047: a paired session gets NO video until the PC asks with "video-on".
         p5.start(false)
         try {
@@ -655,6 +666,22 @@ class Phase4LinkService : Service() {
                             // Phase 5: need-keyframe / clock sync / release-all
                             p5.onControlMessage(String(m.payload, Charsets.UTF_8))
                         }
+                        m.channel == Phase4Protocol.CH_CLIP && m.payload.isNotEmpty() -> {
+                            // Phase 11 D-c: text from the PC clipboard
+                            Phase11Clip.onRemote(m.payload)
+                        }
+                        m.channel == Phase4Protocol.CH_FILE && m.payload.isNotEmpty() -> {
+                            // Phase 11 D-d: a file from the PC; the sink verifies its SHA-256
+                            try {
+                                val saved = fileSink.onMessage(m.payload)
+                                if (saved != null) {
+                                    say("P11FILE saved ${saved.name} ${saved.length()} B sha256=" +
+                                        Phase11Files.sha256(saved).joinToString("") { "%02x".format(it) }.take(16))
+                                }
+                            } catch (t: Throwable) {
+                                say("P11FILE failed ${t.javaClass.simpleName}: ${t.message}")
+                            }
+                        }
                         else -> say("SKIP ${Phase4Protocol.channelName(m.channel)} len=${m.payload.size}")
                     }
                 }
@@ -668,6 +695,7 @@ class Phase4LinkService : Service() {
                 if (currentLive === live) {
                     currentLive = null
                     currentPhase5 = null
+                    Phase11Files.bindSender(null)
                 }
             }
             releaseSessionWakeLockIfIdle("session ${live.id} ended")

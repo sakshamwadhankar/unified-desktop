@@ -7,7 +7,11 @@
 //! The phone side runs the same protocol (Phase4LinkService in the Android app).
 
 #[cfg(windows)]
+mod audio;
+mod cam;
+mod files;
 mod aoa;
+mod clip;
 mod crypto;
 mod lock;
 mod mdns;
@@ -29,6 +33,44 @@ fn main() -> ExitCode {
     match args[1].as_str() {
         "discover" => cmd_discover(&args[2..]),
         #[cfg(windows)]
+        "audiotest" => {
+            let secs: f32 = flag(&args[2..], "--seconds", "3").parse().unwrap_or(3.0);
+            match audio::self_test(secs) {
+                Ok(text) => {
+                    println!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("audiotest: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        #[cfg(windows)]
+        "camtest" => match cam::self_test() {
+            Ok(text) => {
+                println!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("camtest: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        #[cfg(windows)]
+        "miclevel" => {
+            let secs: f32 = flag(&args[2..], "--seconds", "3").parse().unwrap_or(3.0);
+            match audio::mic_level(secs) {
+                Ok(text) => {
+                    println!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("miclevel: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }        #[cfg(windows)]
         "aoa" => cmd_aoa(&args[2..]),
         "pair" => cmd_pair(&args[2..]),
         "bench" => cmd_bench(&args[2..]),
