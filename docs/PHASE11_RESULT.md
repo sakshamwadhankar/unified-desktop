@@ -166,3 +166,23 @@ WEBCAM COVER: no cover detected in the 14:11:30-14:12:35 window (baseline 0.62-0
 ZOOM PAGE: not tested - phone dropped off USB at ~14:15 (adb no devices); SKIP row added
 NOTEPAD++ PASTE: not done this round (manager 14:01) - B-103 OPEN with round-2 findings
 ```
+
+## Round 4 (2026-10-22 15:39-16:20)
+
+| Item | What I did | Files / evidence | Test | Verified on | Numbers / result |
+|---|---|---|---|---|---|
+| Start + webcam cover | Confirmed the installed APK SHA matched the current APK before the code edit; set `stay_on_while_plugged_in=2`, started the link and `udreceiver view --addr 127.0.0.1:47600 --no-lock`, opened `ud:camtest`, and ran the owner window sampler. | `C:\Users\Asus\AppData\Local\Temp\opencode\p11d\cam-cover.log`, `cam-cover-loop.log`, `receiver.out` | `P11CAMSTATS` plus receiver VSTAT | phone (dev path) | Receiver title `unified-desktop view`, CPU advanced 2.1 -> 326.3 s; camtest 640x360. Cover proof failed: brightness about 0.436-0.509, no near-zero interval. |
+| Zoom page | Sent `p6:url:https://zoom.us/test` without signing in. | `p11d/receiver.out`; phone `files/p4/p4.log` | `p6:url` | phone (dev path) | Harness recorded exactly `url=https://zoom.us/test loading https://zoom.us/test`; no join/sign-in/camera/mic result captured. SKIP row added. |
+| B-103 | Changed X11 clipboard claim to use a real PropertyNotify timestamp and expanded TARGETS to UTF8_STRING, STRING, TEXT and TARGETS. | `Phase11X11Clip.kt`, `Phase2X11.kt`; B-103 update in `BUGS.md` | Android unit/lint/assemble | code-only | Android `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` **BUILD SUCCESSFUL** in 8m11s. No rebuilt-APK install or Notepad++ Xvfb marker before close-out; B-103 remains open. |
+| PC gate | Ran receiver tests and clippy. | `pc/` | `cargo test --release`; `cargo clippy --all-targets -- -D warnings` | code-only | Clippy clean. Cargo test: **75 passed, 1 failed** (`lock::tests::recovery_refuses_while_a_live_session_owns_the_mutex`) because the live receiver still held the single-session mutex when the test ran; cleanup then stopped the receiver. |
+| Cleanup | Stopped receiver, link and app; removed forward; restored phone settings. | `p11d/receiver.out`; phone queries | `pidof`, `dumpsys activity services`, settings and `forward --list` | phone + code-only | `stay_on_while_plugged_in=0`, `screen_brightness=699`, no forward, no app PID, no `ServiceRecord`, no receiver process. |
+
+### Round 4 close-out
+
+- The webcam stream was live and the sampler ran, but no owner hand cover was visible in the
+  requested window. This is a SKIP, not a pass.
+- The Zoom command reached the Browser harness, but the page's user-visible result was not
+  captured before the hard stop; this is a SKIP.
+- B-103 remains open. The requested protocol changes are code-only and unproven on the phone.
+- The Android gate passed. The PC test gate did not fully pass because one lock test raced with
+  the still-running receiver; the receiver was then stopped and cleanup was verified.

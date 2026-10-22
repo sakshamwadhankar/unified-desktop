@@ -878,9 +878,35 @@ object Phase2X11 {
 
         fun clipAvailable(): Int = try { ins.available() } catch (_: Throwable) { 0 }
 
-        fun clipSetOwner(selection: Int, owner: Int) {
+        fun clipSelectPropertyEvents(window: Int) {
+            // ChangeWindowAttributes: CWEventMask (value-mask bit 11),
+            // PropertyChangeMask (1 << 22).  This lets the bridge read a real
+            // server timestamp from PropertyNotify instead of using CurrentTime.
+            put(2); put(0); putShort(4)
+            putInt(window); putInt(1 shl 11); putInt(1 shl 22)
+            out.flush()
+        }
+
+        /** Change a property and return the X server timestamp from its PropertyNotify. */
+        fun clipPropertyTimestamp(window: Int, property: Int, timeoutMs: Int = 2000): Int {
+            clipChangeProperty(window, property, stringAtomForTimestamp(), 8, byteArrayOf(1))
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (System.currentTimeMillis() < deadline) {
+                val ev = clipRead32(250) ?: continue
+                if ((ev[0].toInt() and 0x7f) != 28) continue // PropertyNotify
+                val bb = ByteBuffer.wrap(ev).order(ByteOrder.LITTLE_ENDIAN)
+                if (bb.getInt(4) == window && bb.getInt(8) == property) return bb.getInt(12)
+            }
+            throw IllegalStateException("PropertyNotify timestamp timeout")
+        }
+
+        // Any valid atom is acceptable as the property type.  The atom is interned
+        // lazily so the timestamp helper remains independent of Phase11X11Clip state.
+        private fun stringAtomForTimestamp(): Int = internAtom("STRING")
+
+        fun clipSetOwner(selection: Int, owner: Int, timestamp: Int) {
             put(22); put(0); putShort(4) // SetSelectionOwner
-            putInt(owner); putInt(selection); putInt(0) // CurrentTime
+            putInt(owner); putInt(selection); putInt(timestamp)
             out.flush()
         }
 

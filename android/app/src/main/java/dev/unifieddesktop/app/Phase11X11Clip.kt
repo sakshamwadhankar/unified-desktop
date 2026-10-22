@@ -78,9 +78,13 @@ object Phase11X11Clip {
                 val p = pending.getAndSet(null)
                 if (p != null) {
                     serving = p
-                    c.clipSetOwner(clipboard, win)
+                    // X11 rejects a selection claim whose timestamp is older than the
+                    // current owner.  CurrentTime is not sufficient for Wine's clipboard
+                    // watcher, so obtain the server timestamp from a real PropertyNotify.
+                    val stamp = c.clipPropertyTimestamp(win, propAtom)
+                    c.clipSetOwner(clipboard, win, stamp)
                     lastHash = Phase11Clip.hash(p)
-                    phase(ctx, "android->x11 len=${p.size} sha=${shaPrefix(p)}")
+                    phase(ctx, "android->x11 len=${p.size} sha=${shaPrefix(p)} timestamp=$stamp")
                 }
                 // While we own the selection we already know its text; only poll otherwise.
                 val owner = c.clipOwner(clipboard)
@@ -180,6 +184,7 @@ object Phase11X11Clip {
         integerAtom = x.internAtom("INTEGER")
         propAtom = x.internAtom("_UD_CLIP")
         win = x.clipCreateWindow()
+        x.clipSelectPropertyEvents(win)
         return x
     }
 
@@ -215,9 +220,9 @@ object Phase11X11Clip {
                 } else if (target == targets) {
                     typeOut = 4 // ATOM
                     fmt = 32
-                    payload = ByteArray(12)
+                    payload = ByteArray(16)
                     val pb = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-                    pb.putInt(utf8); pb.putInt(textAtom); pb.putInt(stringAtom)
+                    pb.putInt(utf8); pb.putInt(stringAtom); pb.putInt(textAtom); pb.putInt(targets)
                 } else if (target == utf8 || target == textAtom) {
                     payload = text!!
                 } else if (target == stringAtom) {

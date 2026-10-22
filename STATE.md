@@ -6,26 +6,31 @@ corrects it after review.
 
 ## Now
 
-- **Phase 11 round 3 (2026-10-22 14:22, dev path): B-101 FIXED and phone-verified; cover proof
-  not obtained; Zoom blocked by the phone dropping off USB.** B-101 root cause: the 1 s WASAPI
-  device buffer swallowed the whole 6-packet jitter queue, so `underruns` measured queue
-  emptiness. Fix: 100 ms render buffer, the pump tops the device up to 60 ms, jitter target 6;
-  audio packet timestamps use `System.nanoTime/1_000_000` like the clock-sync frame (deep sleep
-  had made `age_ms` n/a); onset line `AUDIO onset ... play_age_ms`. Phone 10 s 1 kHz tone:
-  **packets 1000/1000, late 0, dropped 0, underruns 2 (both at start), depth 8-10, age_ms 13-15,
-  devbuf_ms 60**; three 20 ms clicks capture->PC play **109.4 / 128.2 / 131.3 ms, median 128.2**,
-  0 underruns during; page `play()`->PC 410/476/481 ms (WebView Audio startup ~300 ms). B-101 moved
-  to *Fixed* in BUGS.md (manager to confirm). **Webcam cover**: OWNER 14:12, sampler
-  14:11:30-14:12:35, stream live (640x360, 11 fps, frames 3619->4100), baseline 0.62-0.66, largest
-  5 s drop 0.628->0.600 (-0.028), no sample near 0 -> no deliberate cover, SKIP row. **Zoom**:
-  phone dropped off USB at ~14:15 (adb no devices, receiver `window closed`, VSTAT fps 0), no page
-  opened, SKIP row. **Notepad++ paste**: no new work (manager 14:01); B-103 OPEN with the round-2
-  findings. Gates: Android **169/0/3** + lint + assemble `BUILD SUCCESSFUL` (1m12s); PC **76/0**;
-  clippy clean; `git diff --check` 0. **Cleanup incomplete**: the view died with the USB drop;
-  adb forward dead; the app was not force-stopped and `stay_on_while_plugged_in=2` remains
-  (brightness 699 unchanged) - OWNER reconnect USB to restore. Incident 14:03: two blind taps
-  landed in the notification shade before our activity was confirmed front; afterwards every tap
-  followed a `uiautomator` check of our own dialog. No commit made.
+- **Phase 11: PASS with known limits (manager verdict 2026-10-22 16:40).** Every PLAN gate part has
+  phone proof (adb dev path; the day's Wi-Fi blocked phone<->laptop): phone sound plays on the PC
+  (1000/1000 packets, 128 ms delay, B-101 fixed); copy/paste both ways (WebView/VS Code;
+  Notepad++ -> phone); files both ways with SHA-256 plus the lock-desktop import; a desktop web
+  app uses the PC webcam + mic (webcamtests.com 640x360 @ 11 fps, mic RMS, released after).
+  **Known limits, FIX LATER (Phase 12 polish):** B-103 paste INTO Notepad++/Wine apps; the
+  zoom.us web client not verified (the page stayed on loading); the deliberate webcam cover
+  check was never caught (live feed already shown by the external page). Gates (manager re-run
+  16:40): Android 169/0/3 + lint + assemble; PC 76/0, clippy clean; `git diff --check` 0.
+- **Phase 11 round 4 (2026-10-22 16:20, dev path): partial; cleanup verified.** Current APK
+  initially matched the installed SHA. The link and `udreceiver view --no-lock` ran on the adb
+  forward; camtest was live and the owner sampler ran 16:01:30-16:02:30. Brightness stayed about
+  0.436-0.509 with no near-zero cover interval, so the webcam-cover proof is skipped. The Zoom
+  command reached the Browser harness and recorded `url=https://zoom.us/test loading
+  https://zoom.us/test`, but no page result was captured. B-103 code was changed to use a real
+  PropertyNotify server timestamp for CLIPBOARD ownership and to answer TARGETS with
+  UTF8_STRING, STRING, TEXT and TARGETS; the rebuilt APK was not installed, so paste remains
+  unproven and B-103 remains open. Android gate passed: `:app:testDebugUnitTest :app:lintDebug
+  :app:assembleDebug` BUILD SUCCESSFUL in 8m11s. Clippy passed. PC cargo test was **75 passed,
+  1 failed** because `lock::tests::recovery_refuses_while_a_live_session_owns_the_mutex` ran
+  while the live receiver held the single-session mutex. Receiver, link, app and adb forward
+  were then stopped; phone `stay_on_while_plugged_in=0`, brightness `699`, no app PID and no
+  service record were verified. Evidence is in `C:\Users\Asus\AppData\Local\Temp\opencode\p11d`.
+- **Last updated:** 2026-10-22 16:20, agent (Phase 11 round 4 close-out).
+- **Next action:** manager review of Round 4 evidence and the open B-103/Zoom/webcam skips.
 - **Phase 10: COMPLETE on the phone (manager verdict 2026-10-22 08:25).** The last gate, the
   owner's real call, passed at 08:20 (1 min 37 s; same app PID, CPU advancing, frames kept
   flowing, dropped=0; `p10/call-test-manager.txt`). Round 2 on the real Wi-Fi link (no adb forward),
