@@ -214,7 +214,7 @@ class ShellRoot(
             val cy = ((workH - defH) / 2 + n * 20).coerceIn(0, (workH - defH).coerceAtLeast(0))
             model.open(initialTitle, defW, defH, cx, cy)
         }
-        val frame = ShellWindowView(context, win, app, guest)
+        val frame = ShellWindowView(context, win, app, guest, desktopW, desktopH)
         frame.onDragBy = { id, dx, dy, edges -> frameDrag(id, dx, dy, edges) }
         frame.onDragEnd = { id, x, y -> frameDragEnd(id, x, y) }
         frame.onClose = { closeWindow(it) }

@@ -98,6 +98,30 @@ class FilesView(context: Context) : LinearLayout(context) {
         Theme.px(this, Theme.CAPTION)
         setPadding(10, 4, 10, 4)
     }
+    private var pickMode = false
+    private var onPick: ((File) -> Unit)? = null
+    private val pickHint = TextView(context).apply {
+        setTextColor(Theme.TEXT)
+        Theme.px(this, Theme.CAPTION)
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+    }
+    private val pickBanner = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        setBackgroundColor(Theme.alpha(Theme.ACCENT, 42))
+        setPadding(10, 0, 6, 0)
+        addView(pickHint, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
+        addView(TextView(context).apply {
+            text = "Cancel"
+            setTextColor(Theme.ACCENT)
+            Theme.px(this, Theme.CAPTION)
+            setPadding(8, 0, 8, 0)
+            isClickable = true
+            setOnClickListener { cancelPick() }
+        }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
+        visibility = GONE
+    }
 
     init {
         orientation = VERTICAL
@@ -133,6 +157,7 @@ class FilesView(context: Context) : LinearLayout(context) {
         }
         addView(pathRow, LayoutParams(LayoutParams.MATCH_PARENT, 30))
         addView(shellDivider(context), LayoutParams(LayoutParams.MATCH_PARENT, 1))
+        addView(pickBanner, LayoutParams(LayoutParams.MATCH_PARENT, 28))
         val scroll = ScrollView(context).apply {
             isFillViewport = true
             addView(listBox)
@@ -145,6 +170,31 @@ class FilesView(context: Context) : LinearLayout(context) {
     }
 
     fun currentDir(): File = dir
+
+    /**
+     * Phase 13 step 8: the App Center's "Open a Windows program" opens this window in pick
+     * mode. Folders still navigate; a click on a .exe hands the file back and leaves pick mode.
+     */
+    fun pickFile(hint: String, onPicked: (File) -> Unit) {
+        pickMode = true
+        onPick = onPicked
+        pickHint.text = hint
+        pickBanner.visibility = android.view.View.VISIBLE
+        refresh()
+        status.text = "Folders open; choose a .exe file"
+    }
+
+    fun cancelPick() {
+        if (!pickMode) return
+        clearPick()
+        say("pick cancelled")
+    }
+
+    private fun clearPick() {
+        pickMode = false
+        onPick = null
+        pickBanner.visibility = android.view.View.GONE
+    }
 
     fun refresh() {
         listBox.removeAllViews()
@@ -191,6 +241,14 @@ class FilesView(context: Context) : LinearLayout(context) {
                         dir = f
                         selected = null
                         refresh()
+                    } else if (pickMode) {
+                        if (!f.name.lowercase().endsWith(".exe")) {
+                            say("Choose a .exe file")
+                            return@setOnClickListener
+                        }
+                        val cb = onPick
+                        clearPick()
+                        cb?.invoke(f)
                     } else {
                         selected = f
                         refresh()
@@ -284,7 +342,7 @@ object FilesDispatch {
 class BrowserView(context: Context, private val codeServer: Boolean = false) :
     LinearLayout(context), ShellTextContent {
 
-    val address: EditText = shellField(context, "address (https://...)").apply {
+    val address: EditText = shellField(context, "Enter a web address").apply {
         setText("")
         // B-060: a desktop address bar selects its text when it gets the focus, so typing a
         // new URL replaces the old one instead of appending to it.
@@ -319,7 +377,7 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         android.util.Log.i("Phase6", "BROWSER density ctx=" +
             context.resources.displayMetrics.density + " dpi=" +
             context.resources.displayMetrics.densityDpi)
-        setBackgroundColor(Color.WHITE)
+        setBackgroundColor(if (codeServer) Color.WHITE else Theme.SURFACE)
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         // The Phase-3 settings that rendered code-server (B-065); the shell Browser was
@@ -352,7 +410,10 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
             }
 
             override fun onPageFinished(v: WebView?, url: String?) {
-                status.text = "loaded ${url ?: ""}"
+                status.text = when {
+                    url.isNullOrBlank() || url == "about:blank" || url.startsWith("data:") -> ""
+                    else -> "loaded $url"
+                }
                 v?.evaluateJavascript(
                     "(function(){if(window.__udProbe)return 'probe-on';" +
                         "window.__udProbe=1;window.__udKeys=[];" +
@@ -524,6 +585,25 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         addView(web, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         // Phase 11 D-e: document-start shim pages reach us through this on every page.
         web.addJavascriptInterface(udBridge, "UdBridge")
+        if (!codeServer) {
+            // A dark local start page: a fresh Browser used to be a full white window.
+            web.setBackgroundColor(Theme.SURFACE)
+            web.loadDataWithBaseURL(
+                null,
+                "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>" +
+                    "<style>html,body{margin:0;height:100%;background:#0b0f17;color:#e8eef7;" +
+                    "font-family:system-ui,sans-serif}body{display:flex;align-items:center;" +
+                    "justify-content:center;text-align:center}.box{max-width:520px;padding:24px}" +
+                    "h1{font-size:34px;font-weight:600;margin:0 0 10px}" +
+                    "p{color:#93a4bb;font-size:17px;line-height:1.45;margin:0}</style></head>" +
+                    "<body><div class='box'><h1>Browser</h1>" +
+                    "<p>Type a web address above and press <b>Go</b> or Enter.</p></div></body></html>",
+                "text/html",
+                "utf-8",
+                null,
+            )
+            status.text = ""
+        }
         if (!codeServer) addView(status)
         // Enter from the PC keyboard must navigate, not insert a newline into the address.
         address.setOnKeyListener { _, code, e ->
@@ -811,7 +891,11 @@ class KeyWebView(context: Context) : WebView(context) {
  * and the connection block is fed from the live Phase-5 session once a second - no more
  * "waiting for the receiver's status line" and no hard-coded video line (B-105).
  */
-class SettingsView(context: Context) : ScrollView(context) {
+class SettingsView(
+    context: Context,
+    private val deskW: Int = Phase5Desktop.W,
+    private val deskH: Int = Phase5Desktop.H,
+) : ScrollView(context) {
 
     private val col = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -844,7 +928,7 @@ class SettingsView(context: Context) : ScrollView(context) {
         }
 
         col.addView(section("Display"))
-        col.addView(infoRow("Desktop", "${Phase5Desktop.W} x ${Phase5Desktop.H}"))
+        col.addView(infoRow("Desktop", "$deskW x $deskH"))
         col.addView(infoRow("Quality", "Automatic (light / standard / smooth)"))
         col.addView(infoRow("Text size", "Desktop scale, 100 %"))
 

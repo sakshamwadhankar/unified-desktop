@@ -80,6 +80,8 @@ object Phase6Dispatch {
                     "run" -> ac.openSelected()
                     "uninstall" -> ac.uninstallSelected()
                     "exe" -> ac.runExe(x)
+                    "installed" -> ac.showInstalledTab()
+                    "pick" -> ac.pickWindowsProgram()
                     else -> "unknown appcenter [$sub]"
                 }
             }

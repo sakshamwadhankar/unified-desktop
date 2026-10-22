@@ -42,6 +42,8 @@ class ShellWindowView(
     val win: ShellModel.Win,
     val app: ShellRoot.App,
     val guest: String? = null,
+    private val deskW: Int = Phase5Desktop.W,
+    private val deskH: Int = Phase5Desktop.H,
 ) : FrameLayout(context) {
 
     companion object {
@@ -75,7 +77,7 @@ class ShellWindowView(
     }
     private val ellipsisPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
 
-    val content: View = buildContent(context, app, guest)
+    val content: View = buildContent(context, app, guest, deskW, deskH)
 
     private var captureEdges = -1      // -1 = not capturing; 0 = move; else resize edges
     private var lastX = 0
@@ -97,11 +99,17 @@ class ShellWindowView(
         })
     }
 
-    private fun buildContent(context: Context, app: ShellRoot.App, guest: String?): View = when (app) {
+    private fun buildContent(
+        context: Context,
+        app: ShellRoot.App,
+        guest: String?,
+        deskW: Int,
+        deskH: Int,
+    ): View = when (app) {
         ShellRoot.App.APPCENTER -> AppCenterView(context)
         ShellRoot.App.FILES -> FilesView(context)
         ShellRoot.App.BROWSER -> BrowserView(context)
-        ShellRoot.App.SETTINGS -> SettingsView(context)
+        ShellRoot.App.SETTINGS -> SettingsView(context, deskW, deskH)
         ShellRoot.App.TEST -> TestWindowContent(context)
         ShellRoot.App.X11 -> X11WindowContent(context)
         ShellRoot.App.VSCODE -> BrowserView(context, codeServer = true)

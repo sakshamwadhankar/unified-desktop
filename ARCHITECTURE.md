@@ -150,13 +150,15 @@ Phase 10 session lifetime is owned by `Phase4LinkService`, not by a resumed Acti
 rebind its surface, and a reconnect attaches a new link to the existing runtime. A partial
 wakelock is held only while a live session exists. The governor polls Android memory/trim/
 thermal signals only while a desktop runtime is live and applies the ordered phone-first policy
-(hidden windows, 30 FPS, 15 FPS, lower resolution, then a PC warning). **Phase 12 made the
-lower-resolution action real:** the governor prepares a second encoder at 960x540, resizes and
-rebinds the VirtualDisplay, stops the old encoder, keeps the desktop and every window, and
-scales incoming input from the 1920x1080 link space (`Phase5Session.governorLowerResolution`,
-emulator proof in `docs/PHASE12_RESULT.md`). `Phase12Profiles.choose()` is the unit-tested
-automatic profile choice (Light/Standard/Smooth); wiring it into session start is follow-up
-work.
+(hidden windows, 30 FPS, 15 FPS, lower bitrate, then a PC warning). **It never resizes the
+VirtualDisplay or the encoder mid-session (DECISIONS D22):** the desktop size is agreed once,
+before `video-on`, from the receiver's `CH_CONTROL display WxH` (height 1080, width from the
+client aspect clamped 1280-1920 and even; 16:10 -> 1728x1080), and the shell lays out against
+that runtime size. A mid-session size change made the composer crop the 1728x1080 desktop into
+the top-left of the old 1920x1200 surface (windows 2.2x, taskbar gone), so the governor lowers
+fps/bitrate only. Input is scaled from the same runtime size. `Phase12Profiles.choose()` is the
+unit-tested automatic profile choice (Light/Standard/Smooth); wiring it into session start is
+follow-up work.
 
 ## 5. Constraints (non-negotiable)
 

@@ -43,9 +43,13 @@ class AppCenterView(context: Context) : LinearLayout(context) {
     private val detailBody = TextView(context).apply {
         setTextColor(Theme.TEXT_SECONDARY)
         Theme.px(this, Theme.SMALL)
-        maxLines = 4
+        maxLines = 2
         ellipsize = android.text.TextUtils.TruncateAt.END
         setLineSpacing(2f, 1f)
+    }
+    private val detailChips = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
     }
     private val status = TextView(context).apply {
         setTextColor(Theme.TEXT_DIM)
@@ -54,7 +58,6 @@ class AppCenterView(context: Context) : LinearLayout(context) {
         ellipsize = android.text.TextUtils.TruncateAt.END
         setPadding(2, 2, 2, 2)
     }
-    private val exePath = shellField(context, "Path to a .exe under /sdcard/Download")
 
     private var selected: CatalogApp? = null
     private var picked: CatalogVersion? = null
@@ -96,19 +99,17 @@ class AppCenterView(context: Context) : LinearLayout(context) {
         }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = 6 })
         addView(shellCard(context).apply {
             addView(detailTitle)
+            addView(detailChips, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                topMargin = 3
+            })
             addView(detailBody, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
-                topMargin = 2
+                topMargin = 3
             })
-        }, LayoutParams(LayoutParams.MATCH_PARENT, 100).apply { topMargin = 6 })
+        }, LayoutParams(LayoutParams.MATCH_PARENT, 108).apply { topMargin = 6 })
         addView(actionRow(), LayoutParams(LayoutParams.MATCH_PARENT, 34).apply { topMargin = 6 })
-        addView(LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(exePath, LayoutParams(0, 28, 1f))
-            addView(shellButton(context, "Open .exe") { runExe(exePath.text.toString()) }, LayoutParams(100, 28).apply {
-                marginStart = 6
-            })
-        }, LayoutParams(LayoutParams.MATCH_PARENT, 30).apply { topMargin = 6 })
+        addView(shellButton(context, "Open a Windows program") { pickWindowsProgram() }, LayoutParams(248, 30).apply {
+            topMargin = 8
+        })
         addView(status, LayoutParams(LayoutParams.MATCH_PARENT, 18).apply { topMargin = 2 })
 
         search.addTextChangedListener(object : TextWatcher {
@@ -126,7 +127,16 @@ class AppCenterView(context: Context) : LinearLayout(context) {
     private fun setTab(t: Int) {
         tab = t
         styleTab()
+        if (t == 1) {
+            // The detail pane must never talk about an app that is not in the visible list.
+            val installed = apps.filter { Installed.read(context).containsKey(it.id) }
+            if (selected == null || installed.none { it.id == selected?.id }) {
+                selected = installed.firstOrNull()
+                picked = selected?.let { Catalog.pick(it) }
+            }
+        }
         refresh(search.text.toString())
+        renderDetail()
     }
 
     /** The two chips are the only "tabs"; the selected one is accent-tinted. */
@@ -145,7 +155,7 @@ class AppCenterView(context: Context) : LinearLayout(context) {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         addView(installBtn, LayoutParams(96, 32))
-        addView(openBtn, LayoutParams(70, 32).apply { marginStart = 6 })
+        addView(openBtn, LayoutParams(80, 32).apply { marginStart = 6 })
         addView(uninstallBtn, LayoutParams(96, 32).apply { marginStart = 6 })
     }
 
@@ -269,43 +279,112 @@ class AppCenterView(context: Context) : LinearLayout(context) {
     private fun renderDetail() {
         val app = selected ?: run {
             detailTitle.text = "No app selected"
+            detailChips.removeAllViews()
             detailBody.text = ""
+            installBtn.visibility = View.GONE
+            openBtn.isEnabled = false
+            openBtn.alpha = 0.45f
+            styleOpen(false)
+            uninstallBtn.visibility = View.GONE
             return
         }
         val v = picked ?: Catalog.pick(app)
         picked = v
         if (v == null) {
             detailTitle.text = app.name
-            detailBody.text = "No versions in the catalog"
-            installBtn.isEnabled = false
-            installBtn.alpha = 0.45f
+            detailChips.removeAllViews()
+            detailBody.text = "No versions in the catalog."
+            installBtn.visibility = View.GONE
             openBtn.isEnabled = false
             openBtn.alpha = 0.45f
+            styleOpen(false)
             uninstallBtn.visibility = View.GONE
             return
         }
         val usable = Catalog.isUsable(v)
-        val installer = installerState(v)
         val have = Installed.version(context, app.id)
-        val installable = v.kind == "windows" || v.kind == "linux" || v.kind == "android"
-        installBtn.text = when {
-            v.kind == "windows" || v.kind == "linux" -> Winget.actionLabel(v.version, have)
-            v.kind == "android" -> if (have.isNotEmpty()) "Installed" else "Install"
-            else -> "Included"
+        val installable = when {
+            v.kind == "android" -> v.packageName.isNotEmpty()
+            v.kind == "windows" -> v.source == "winget" && v.sha256.isNotEmpty() &&
+                v.fetch.startsWith("https://")
+            v.kind == "linux" -> v.source == "deb" && v.sha256.isNotEmpty() &&
+                v.fetch.startsWith("https://")
+            else -> false
         }
-        installBtn.isEnabled = usable && installable && have.isEmpty()
-        installBtn.alpha = if (installBtn.isEnabled) 1f else 0.45f
+        // Manager 04:55: "Included" looked like a pressed primary button. Show Install only
+        // when there is something to install; otherwise Open is the primary action and the
+        // source chip below says Built-in / Web / ...
+        val needsInstall = usable && have.isEmpty() && installable
+        installBtn.visibility = if (needsInstall) View.VISIBLE else View.GONE
+        if (needsInstall) {
+            installBtn.text = if (v.kind == "windows") Winget.actionLabel(v.version, have) else "Install"
+            installBtn.isEnabled = true
+            installBtn.alpha = 1f
+        }
         openBtn.isEnabled = usable
         openBtn.alpha = if (usable) 1f else 0.45f
+        styleOpen(usable && !needsInstall)
         uninstallBtn.visibility = if (have.isNotEmpty()) View.VISIBLE else View.GONE
         detailTitle.text = app.name
-        detailBody.text = buildString {
-            append(v.version).append(" · ").append(v.kind).append(" · ").append(v.rating).append('\n')
-            append(installer)
-            if (have.isNotEmpty()) append("\nInstalled: ").append(have)
-            if (!usable) append("\nNot yet: ").append(v.note.ifEmpty { v.rating })
-            else if (v.note.isNotEmpty()) append('\n').append(v.note)
+        detailChips.removeAllViews()
+        addDetailChip(sourceLabel(v.kind), Theme.TEXT, Theme.alpha(Theme.ACCENT, 34))
+        if (v.version.isNotBlank() && !v.version.equals(v.kind, true) && v.version != "web") {
+            addDetailChip(v.version, Theme.TEXT_SECONDARY, Theme.SURFACE_SUNKEN)
         }
+        if (usable) {
+            addDetailChip(v.rating, ratingTint(v.rating), Theme.alpha(ratingTint(v.rating), 24))
+        }
+        if (have.isNotEmpty()) addDetailChip("Installed", Theme.SUCCESS, Theme.alpha(Theme.SUCCESS, 28))
+        detailBody.text = plainSentence(v, have, installable)
+    }
+
+    private fun addDetailChip(text: String, tint: Int, fill: Int) {
+        detailChips.addView(shellChip(context, text, tint, fill), LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+        ).apply { marginEnd = 4 })
+    }
+
+    /** The user-facing source, never the catalog's internal kind string. */
+    private fun sourceLabel(kind: String): String = when (kind) {
+        "builtin" -> "Built-in"
+        "android" -> "Android"
+        "windows" -> "Windows"
+        "linux" -> "Linux"
+        "web" -> "Web"
+        else -> kind.replaceFirstChar { it.uppercase() }
+    }
+
+    private fun ratingTint(rating: String): Int = when (rating) {
+        Catalog.WORKS -> Theme.SUCCESS
+        Catalog.SLOW -> Theme.WARNING
+        else -> Theme.DANGER
+    }
+
+    /** The primary accent is for the action a user should take now (Install or Open). */
+    private fun styleOpen(primary: Boolean) {
+        openBtn.background = shellRounded(
+            if (primary) Theme.ACCENT else Theme.SURFACE_RAISED,
+            if (primary) Theme.ACCENT else Theme.BORDER,
+            Theme.RADIUS_BUTTON,
+        )
+        openBtn.setTextColor(if (primary) Color.WHITE else Theme.TEXT)
+        openBtn.typeface =
+            if (primary) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+        openBtn.text = "Open"
+    }
+
+    /** One plain sentence, no catalog/installer jargon. */
+    private fun plainSentence(v: CatalogVersion, have: String, installable: Boolean): String = when {
+        !Catalog.isUsable(v) -> "Not available yet on this phone."
+        v.kind == "builtin" -> "Runs in the desktop. Nothing to install."
+        v.kind == "web" -> "Opens in the Browser. Nothing to install."
+        have.isNotEmpty() -> "Installed on this phone. Ready to open."
+        v.kind == "android" && v.packageName.isNotEmpty() ->
+            "Uses the copy already installed on this phone."
+        v.kind == "windows" && installable -> "Installs on the phone and runs with Wine."
+        v.kind == "linux" && installable -> "Installs into the phone's Linux system."
+        v.kind == "linux" -> "Ships with the phone and opens in its own window."
+        else -> "Not available to install yet."
     }
 
     private fun installerState(v: CatalogVersion): String = when {
@@ -343,6 +422,27 @@ class AppCenterView(context: Context) : LinearLayout(context) {
         search.setText(q)
         search.setSelection(search.text.length)
         return "${Catalog.search(apps, q).size} rows: ${visibleNames()}"
+    }
+
+    /** Harness: switch to the Installed tab and return its status line. */
+    fun showInstalledTab(): String {
+        setTab(1)
+        return status.text.toString()
+    }
+
+    /**
+     * Manager 04:55: one button instead of a path field. It opens the Files window in .exe
+     * pick mode; choosing a file runs it through the same runExe path as before.
+     */
+    fun pickWindowsProgram(): String {
+        val s = shell() ?: return "no shell"
+        val w = s.openApp(ShellRoot.App.FILES)
+        val files = w.content as? FilesView ?: return "no files window"
+        files.pickFile("Choose a Windows program (.exe)") { f ->
+            post { runExe(f.absolutePath) }
+        }
+        status.text = "Choose a Windows program in Files"
+        return "Files opened: choose a .exe"
     }
 
     /** Install the selected app. Fast kinds answer now; downloads/imports run on a thread. */

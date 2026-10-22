@@ -205,7 +205,8 @@ class DesktopContextMenu(context: Context) : LinearLayout(context) {
                 setPadding(10, 0, 10, 0)
                 isClickable = true
                 setOnClickListener {
-                    visibility = View.GONE
+                    // Hide the menu itself, not this TextView (the `apply` receiver is the row).
+                    this@DesktopContextMenu.visibility = View.GONE
                     onPick?.invoke(id)
                 }
             }, LayoutParams(LayoutParams.MATCH_PARENT, 32))
