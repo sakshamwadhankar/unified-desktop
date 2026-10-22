@@ -6,22 +6,30 @@ corrects it after review.
 
 ## Now
 
-- **Phase 11 (2026-10-22 08:12): phone round done for clipboard and files; audio and the shim
-  are the open work.** B-098 fixed and phone-proven (`EXIT_MS=1807`; recheck 473 ms script /
-  657 ms click path). Clipboard both ways on the phone: PC -> phone held len=22 sha=c5f04e0e,
-  phone -> PC changed the PC clipboard (fixed `appCtx` never assigned; only length + SHA-256
-  prefix logged). Files both ways on the phone: 20 MB phone -> PC SHA `4515...53cc` both ends;
-  1 MB PC -> phone SHA `bdb1ca24...` both ends after fixing B-100 (a 64 KiB frame used one
-  `write` and a partial TLS write aborted the session; now `write_all`). PC webcam `camtest`
-  1280x720 RGB32, 15 frames, 11.6 fps, brightness 0.000 -> 0.165, released; mic mean RMS 0.0127
-  (numbers only, nothing saved). Audio: loopback flat even with `mute=false level=0.66`
-  (environment/driver fact, no BUGS row); phone AudioPlaybackCapture engine built but consent/
-  start not wired. WebView getUserMedia shim: asset page + JS bridge + tested CAM/PCM framing
-  (5 Kotlin tests), not yet loaded in the shell WebView. Gates: Android 169/0/3 + lint +
-  assemble, PC 73/0 + clippy clean, `git diff --check` 0. **Open:** phone -> PC audio,
-  AudioPlaybackCapture wiring, shim loading, X11 clipboard bridge. Record:
-  `docs/PHASE11_RESULT.md`; evidence `...\Temp\opencode\p11`; no commit. Final check 08:14:
-  `git diff --check` exit 0, no `udreceiver` process, phone `PID_NONE`, stay_on=0, brightness=699.
+- **Phase 11 round 2 (2026-10-22 12:20, dev path): the manager's 10:27 list is answered;
+  two partials.** Item 3(a) DONE: the camera shim is injected into **every** shell Browser page
+  at document start (`WebViewClient.shouldInterceptRequest` re-serves main-frame HTML; no
+  androidx.webkit, no new dependency). External https://webcamtests.com with its own "Test my
+  cam": 640x360, Quality Rating 8, **11 FPS**, "Testing was completed successfully" (numbers
+  from the session record - the phone logcat rotated before a durable copy; the app process was
+  gone at 12:0x). 3(b) DONE: the PC sends exactly **10.0 fps** - the UVC device is the cap
+  (1280x720 RGB32, USB2); the phone fix (one reused Image, brightness every 5th frame) took
+  ud:camtest **6-9 -> 10-11 fps**. 3(c): brightness numbers only (baseline 0.51-0.85; real dip
+  0.525 -> 0.285 at 11:36:46, jump to 0.869 at 11:55:28); six OWNER windows, **no deliberate
+  5 s cover** -> SKIP. Item 4: X11->Android verified (`x11->android len=133 sha=8d80920a`);
+  Android->X11 unverified (Wine issued no SelectionRequest) -> SKIP. Item 5 phone-verified:
+  `LOCK engaged switch_ms=19, first_frame_after_engage_ms=413`, import SHA
+  `1c59b867...5a1afe38` == PC, Exit `switch_ms=21 total_ms=110`. **B-102** found + fixed +
+  verified: after a link reconnect the shim re-asserts `cam-on` when frames freeze (kill/restart
+  the view -> camera returns alone). **B-101**: cause measured (packets arrive in bursts of ~5
+  per 50 ms; a 30 ms target drained empty and the 60 ms age window hid the age). Fix: target 6,
+  one underrun per gap, age window -50..500 ms, device buffer logged. PC-only 10 s tone:
+  `packets=1000 played=1000 late=0 dropped=0 underruns=1 depth_end=0` (1 = priming), loopback
+  0.00057/0.00060/0.00056. Real-path re-measure + click delay **BLOCKED** (phone
+  password-locked; consent needs the unlock) -> SKIP row. Gates: Android **169/0/3** + lint +
+  assemble `BUILD SUCCESSFUL` (48 s); PC **75/0**; clippy clean; `git diff --check` 0.
+  Cleanup 12:18: app force-stopped (0 processes), forward removed, `stay_on=0`, brightness 699,
+  view stopped, no Xvfb/Wine/NPP, no commit.
 - **Phase 10: COMPLETE on the phone (manager verdict 2026-10-22 08:25).** The last gate, the
   owner's real call, passed at 08:20 (1 min 37 s; same app PID, CPU advancing, frames kept
   flowing, dropped=0; `p10/call-test-manager.txt`). Round 2 on the real Wi-Fi link (no adb forward),
@@ -111,11 +119,12 @@ corrects it after review.
   1.0 fps, drag 30.6 fps; typing medians 0.14/8.4/26.8 ms; stuck keys 0. Emulator-only limits:
   **B-056** (mitigated in code), **B-057** (PC window black on the emulator stream; not
   reproduced on the phone).
-- **Last updated:** 2026-10-22 08:00, agent (Phase 10 close-out: PHASE9_RESULT and
-  PHASE10_RESULT corrected - Phase 9 Exit PASS 657 ms click / 473 ms named event, B-098
-  fixed; Phase 10 FAIL only for the resource governor PARTIAL; multi-monitor SKIP; phone
-  cleaned, brightness 699, Wi-Fi on).
-- **Next action:** Phase 11 (audio, clipboard, files, PC webcam/mic), starting with B-098.
+- **Last updated:** 2026-10-22 12:20, agent (Phase 11 round 2: items 3(a)(b) done, 4 partial,
+  5 done; B-102 fixed + verified; B-101 fix written and PC-tested; two SKIP rows for the locked
+  phone and the X11 paste; phone cleaned).
+- **Next action:** manager review of B-102, then the B-101 real-path re-measure when the phone is
+  unlocked (10 s tone + click delay) and the Phase 11 gate decision. Record:
+  `docs/PHASE11_RESULT.md` round 2.
 - **Agent setup:** OpenCode on Windows with free models (DeepSeek/GLM flash) until about
   Phase 4/5. The agent keeps `TODO.md` ("Done X of Y"). Dev runs on the phone need
   `svc power stayon true` + the harness activity in the foreground (B-027), the app

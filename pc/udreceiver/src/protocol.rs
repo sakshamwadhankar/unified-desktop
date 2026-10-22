@@ -201,6 +201,11 @@ impl<W: Write> PriorityWriter<W> {
         self.queues.iter().all(|q| q.is_empty())
     }
 
+    /// How many whole messages wait on [ch] (the camera cap uses this).
+    pub fn pending_len(&self, ch: u8) -> usize {
+        self.queues.get(ch as usize).map_or(0, |q| q.len())
+    }
+
     /// Emit one frame: the highest-priority channel, one chunk (<= 64 KiB) per call.
     pub fn emit_one(&mut self) -> io::Result<Option<usize>> {
         for &ch in CHANNEL_PRIORITY.iter() {

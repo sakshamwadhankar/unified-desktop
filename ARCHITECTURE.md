@@ -34,6 +34,7 @@
 | H7 | **Linux apps (x86-64)** | Box64 runs x86-64 Linux programs and their x86-64 libraries, through the same X11 server. | **[bet]** Phase 2 |
 | H8 | **Full-speed tools** | Native ARM64 programs **shipped inside the APK** as `lib*.so` (allowed to run): Node.js + code-server (VS Code), Python, Git, a shell. Their UI shows in built-in browser windows (Android WebView). Phase 3 (emulator): the first tool chain is proven end-to-end - node runs from `nativeLibraryDir`, code-server serves VS Code to `Phase3CodeActivity` (127.0.0.1 + password auth; B-037/B-038 fixes at start), the full gate flow (open folder, edit+save to disk, terminal command) runs from a WebView with injected taps/IME, APK 88.2 MiB, workbench-family ~330 MB PSS, 0.15%/core idle. Phone round open (SKIPS.md); Python/Git/tool packaging still [bet]. | **[bet]** Phase 3 |
 | H9 | **App Center** | Catalog, search, install/uninstall/update, best-version picker, compatibility ratings, "Open any .exe". | Phase 8 |
+| H10 | **PC camera + mic in web pages** | The shell Browser injects `camera-shim.js` into **every** page at document start by re-serving main-frame HTML from `WebViewClient.shouldInterceptRequest` (shim as the first `<head>` script plus a relaxed CSP - no androidx.webkit, no new dependency). The shim overrides `getUserMedia`/`enumerateDevices`, paints CH_CAM JPEG frames into one reused canvas `captureStream(15)` and CH_AUDIO s16 packets into a 48 kHz WebAudio destination, starts the stream on `getUserMedia`, and reports numbers through `UdBridge` to logcat. The PC side captures 1280x720 RGB32 (device-limited 10.0 fps), downscales to 640x360 JPEG in one pass, and sends the mic as 10 ms PCM. After a link reconnect the receiver has dropped the camera while the page still holds the stream, so the shim re-asserts `cam-on` when frames freeze (B-102). | Phase 11 (phone, dev path): external https://webcamtests.com sees 640x360 / 11 fps / "Testing was completed successfully" |
 
 ### H9 detail (Phase 8, implemented)
 
@@ -134,6 +135,13 @@ PC mouse / keyboard
   -> receiver -> link (input channel, highest priority)
   -> shell: which window is under the pointer? which window has focus?
   -> that window (Android: its virtual display; X11: the X server; WebView: the view)
+
+PC camera / microphone
+  -> receiver (MediaFoundation + WASAPI) -> CH_CAM / CH_AUDIO
+  -> shell WebView shim: canvas captureStream / WebAudio destination -> page getUserMedia
+
+phone desktop sound (our uid only, AudioPlaybackCapture)
+  -> CH_AUDIO 10 ms packets -> receiver jitter buffer -> WASAPI shared playback
 ```
 
 Phase 10 session lifetime is owned by `Phase4LinkService`, not by a resumed Activity:

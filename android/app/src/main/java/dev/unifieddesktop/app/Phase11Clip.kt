@@ -41,11 +41,13 @@ object Phase11Clip {
         appCtx = c
         m.addPrimaryClipChangedListener(listener)
         registered = true
+        Phase11X11Clip.start(c)
         Phase4Log.say(c, "P11CLIP start (Android clipboard <-> CH_CLIP)")
     }
 
     fun stop(ctx: Context) {
         if (!registered) return
+        Phase11X11Clip.stop()
         try { cm?.removePrimaryClipChangedListener(listener) } catch (_: Throwable) {}
         cm = null
         send = null
@@ -61,7 +63,14 @@ object Phase11Clip {
         main.post { applyRemote(copy) }
     }
 
-    private fun applyRemote(bytes: ByteArray) {
+    /** An X11 selection text arrived from the X11 clipboard bridge (bridge thread). */
+    fun onX11(payload: ByteArray) {
+        if (payload.isEmpty() || payload.size > MAX_BYTES) return
+        val copy = payload.copyOf()
+        main.post { applyRemote(copy, "X11") }
+    }
+
+    private fun applyRemote(bytes: ByteArray, source: String = "PC") {
         val ctx = appCtx ?: return
         val m = cm ?: return
         if (hash(bytes) == lastHash.get()) return // our own text echoed back
@@ -69,7 +78,8 @@ object Phase11Clip {
         try {
             m.setPrimaryClip(ClipData.newPlainText("unified-desktop", text))
             lastHash.set(hash(bytes))
-            Phase4Log.say(ctx, "P11CLIP <- PC len=${bytes.size} sha=${shaPrefix(bytes)}")
+            Phase11X11Clip.onAndroidText(bytes)
+            Phase4Log.say(ctx, "P11CLIP <- $source len=${bytes.size} sha=${shaPrefix(bytes)}")
         } catch (t: Throwable) {
             Phase4Log.say(ctx, "P11CLIP set refused ${t.javaClass.simpleName}")
         }
@@ -92,9 +102,10 @@ object Phase11Clip {
             return
         }
         val h = hash(bytes)
-        if (h == lastHash.get()) return // the text we just applied from the PC
+        if (h == lastHash.get()) return // the text we just applied from the PC/X11
         lastHash.set(h)
         send?.invoke(bytes)
+        Phase11X11Clip.onAndroidText(bytes)
         Phase4Log.say(ctx, "P11CLIP -> PC len=${bytes.size} sha=${shaPrefix(bytes)}")
     }
 

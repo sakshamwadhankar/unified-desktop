@@ -3,6 +3,16 @@
 <head>
 <meta charset="utf-8">
 <title>PC camera and microphone (shim test page)</title>
+<script>
+  // Report page errors as numbers/names only, so a broken shim is visible in logcat.
+  window.onerror = function (m, s, l, c) {
+    try { if (window.UdBridge) UdBridge.report('JSERR ' + m + ' @' + l + ':' + c); } catch (x) {}
+    return false;
+  };
+  window.addEventListener('unhandledrejection', function (e) {
+    try { if (window.UdBridge) UdBridge.report('JSREJECT ' + e.reason); } catch (x) {}
+  });
+</script>
 <style>
   body { background: #111; color: #ddd; font: 16px sans-serif; margin: 20px; }
   video { width: 640px; height: 360px; background: #000; }
@@ -19,13 +29,22 @@
   var s = document.getElementById('s');
   navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(function (st) {
     v.srcObject = st;
+    s.textContent = 'getUserMedia OK: ' + st.getVideoTracks().length + ' video / ' +
+      st.getAudioTracks().length + ' audio';
+    // Ask the PC for its camera and microphone (a control message on the link).
+    if (window.UdBridge && window.UdBridge.start) window.UdBridge.start();
     setInterval(function () {
       var k = window.udCam.stats();
       s.textContent = 'getUserMedia OK: ' + st.getVideoTracks().length + ' video / ' +
-        st.getAudioTracks().length + ' audio\nframes received: ' + k.frames +
-        ', samples received: ' + k.samples + ', seconds: ' + k.seconds.toFixed(1);
+        st.getAudioTracks().length + ' audio\n' + k.w + 'x' + k.h + ' @ ' + k.fps +
+        ' fps, frames ' + k.frames + ', brightness ' + k.brightness.toFixed(3) +
+        ' (change ' + k.changed.toFixed(3) + ')\nmic RMS ' + k.audioRms.toFixed(4) +
+        ', samples ' + k.samples + ', packets ' + k.packets;
     }, 500);
   }).catch(function (e) { s.textContent = 'getUserMedia failed: ' + e; });
+  window.addEventListener('beforeunload', function () {
+    if (window.UdBridge && window.UdBridge.stop) window.UdBridge.stop();
+  });
 </script>
 </body>
 </html>

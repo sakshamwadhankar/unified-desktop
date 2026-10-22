@@ -10,9 +10,11 @@ pub const SAMPLE_RATE: u32 = 48_000;
 pub const CHANNELS: usize = 2;
 /// 10 ms at 48 kHz stereo.
 pub const PACKET_FRAMES: usize = 480;
-/// Target buffer: 3 packets = 30 ms of audio, inside the 40-80 ms design window with the
-/// device's own latency on top.
-pub const JITTER_TARGET_PACKETS: usize = 3;
+/// Target buffer: 6 packets = 60 ms of audio. The phone's 10 ms packets reach the PC in
+/// bursts of ~5 (adb-forward TCP coalescing), so the old 30 ms target drained to empty
+/// between bursts - that is what produced 16-29k "underruns" per run (B-101). The gate
+/// must sit above one burst so the queue never empties.
+pub const JITTER_TARGET_PACKETS: usize = 6;
 
 /// One wire packet's PCM plus its sequence number (the phone clock stamp is not needed by
 /// the player; the phone logs it for the delay measurement).
@@ -74,7 +76,9 @@ impl JitterBuffer {
     }
 
     /// Frames ready for the device: nothing until the target depth is reached, then one
-    /// packet per call (the caller writes it to the render buffer).
+    /// packet per call (the caller writes it to the render buffer). A gap while playing
+    /// re-arms the target gate (re-buffer) instead of dribbling out single packets, and
+    /// counts one underrun for the whole gap, not one per pump call (B-101).
     pub fn next(&mut self) -> Option<Vec<i16>> {
         if !self.started {
             if self.q.len() < JITTER_TARGET_PACKETS {
@@ -88,6 +92,7 @@ impl JitterBuffer {
                 Some(p.samples)
             }
             None => {
+                self.started = false;
                 self.stats.underruns += 1;
                 None
             }
@@ -134,6 +139,30 @@ pub fn rms_i16(samples: &[i16]) -> f64 {
     (sum / samples.len() as f64).sqrt() / 32768.0
 }
 
+/// One CH_AUDIO payload: u32 sequence, u64 phone timestamp (ms), then big-endian s16 stereo.
+pub fn parse_packet(payload: &[u8]) -> Option<PcmPacket> {
+    if payload.len() < 12 || !(payload.len() - 12).is_multiple_of(4) {
+        return None;
+    }
+    let seq = u32::from_be_bytes(payload[0..4].try_into().ok()?);
+    let n = (payload.len() - 12) / 2;
+    let mut samples = Vec::with_capacity(n);
+    for i in 0..n {
+        let o = 12 + i * 2;
+        samples.push(i16::from_be_bytes([payload[o], payload[o + 1]]));
+    }
+    Some(PcmPacket { seq, samples })
+}
+
+/// The phone timestamp of a CH_AUDIO payload (ms, phone elapsedRealtime clock).
+pub fn packet_ts_ms(payload: &[u8]) -> Option<u64> {
+    if payload.len() < 12 {
+        return None;
+    }
+    Some(u64::from_be_bytes(payload[4..12].try_into().ok()?))
+}
+
+
 #[cfg(windows)]
 mod wasapi {
     use windows::Win32::Media::Audio::{
@@ -157,9 +186,13 @@ mod wasapi {
 
     pub fn init_com() -> Result<(), String> {
         unsafe {
-            CoInitializeEx(None, COINIT_MULTITHREADED)
-                .ok()
-                .map_err(|e| format!("CoInitializeEx: {e}"))
+            match CoInitializeEx(None, COINIT_MULTITHREADED).ok() {
+                Ok(()) => Ok(()),
+                // RPC_E_CHANGED_MODE: the view thread is already an STA (D3D11/DirectComposition).
+                // WASAPI works there too; only the apartment mode differs.
+                Err(e) if e.code().0 as u32 == 0x8001_0106 => Ok(()),
+                Err(e) => Err(format!("CoInitializeEx: {e}")),
+            }
         }
     }
 
@@ -360,6 +393,132 @@ mod wasapi {
         )
     }
 
+    /// Append mono samples (channel average) in -1..1 from whatever the capture client has.
+    pub fn read_mono(
+        d: &Device,
+        cc: &IAudioCaptureClient,
+        out: &mut Vec<f32>,
+    ) -> Result<u32, String> {
+        let mut frames_total = 0u32;
+        loop {
+            let packet = unsafe {
+                cc.GetNextPacketSize().map_err(|e| format!("GetNextPacketSize: {e}"))?
+            };
+            if packet == 0 {
+                break;
+            }
+            let mut data: *mut u8 = std::ptr::null_mut();
+            let mut frames = 0u32;
+            let mut flags = 0u32;
+            unsafe {
+                cc.GetBuffer(&mut data, &mut frames, &mut flags, None, None)
+                    .map_err(|e| format!("capture GetBuffer: {e}"))?;
+            }
+            let silent = flags & 0x2 != 0;
+            let ch = d.channels.max(1) as usize;
+            if !silent && !data.is_null() {
+                if d.float32 {
+                    let s = unsafe { std::slice::from_raw_parts(data as *const f32, frames as usize * ch) };
+                    for f in 0..frames as usize {
+                        let mut v = 0.0f32;
+                        for c in 0..ch { v += s[f * ch + c]; }
+                        out.push(v / ch as f32);
+                    }
+                } else {
+                    let s = unsafe { std::slice::from_raw_parts(data as *const i16, frames as usize * ch) };
+                    for f in 0..frames as usize {
+                        let mut v = 0i32;
+                        for c in 0..ch { v += i32::from(s[f * ch + c]); }
+                        out.push(v as f32 / ch as f32 / 32768.0);
+                    }
+                }
+            } else {
+                out.extend(std::iter::repeat_n(0.0f32, frames as usize));
+            }
+            frames_total += frames;
+            unsafe { cc.ReleaseBuffer(frames).map_err(|e| format!("capture ReleaseBuffer: {e}"))? };
+        }
+        Ok(frames_total)
+    }
+
+    /// Shared-mode player fed by the Phase-11 jitter buffer (CH_AUDIO).
+    pub struct Player {
+        dev: Device,
+        rc: IAudioRenderClient,
+        pub jb: super::JitterBuffer,
+        pub written_frames: u64,
+        pub max_depth: usize,
+        /// Frames the shared-mode device buffer holds; the render side of the end-to-end delay.
+        pub buffer_frames: u32,
+    }
+
+    impl Player {
+        pub fn new() -> Result<Self, String> {
+            init_com()?;
+            let (dev, rc, _vol) = render()?;
+            start(&dev)?;
+            let buffer_frames = unsafe { dev.client.GetBufferSize().unwrap_or(0) };
+            println!(
+                "AUDIO device buffer={buffer_frames} frames ({:.0} ms)",
+                buffer_frames as f32 * 1000.0 / dev.rate as f32
+            );
+            Ok(Player {
+                dev,
+                rc,
+                jb: super::JitterBuffer::new(),
+                written_frames: 0,
+                max_depth: 0,
+                buffer_frames,
+            })
+        }
+
+        /// Render-side latency: what the shared-mode device buffer adds to the wire delay.
+        pub fn buffer_ms(&self) -> f32 {
+            self.buffer_frames as f32 * 1000.0 / self.dev.rate as f32
+        }
+
+        pub fn feed(&mut self, payload: &[u8]) -> bool {
+            match super::parse_packet(payload) {
+                Some(p) => self.jb.push(p),
+                None => false,
+            }
+        }
+
+        /// Write every whole 10 ms packet the device has room for.
+        pub fn pump(&mut self) -> Result<u32, String> {
+            let mut total = 0u32;
+            loop {
+                let free = buffer_frames(&self.dev).saturating_sub(padding(&self.dev));
+                if free < super::PACKET_FRAMES as u32 {
+                    break;
+                }
+                let Some(samples) = self.jb.next() else { break };
+                let n = write_i16(&self.dev, &self.rc, super::PACKET_FRAMES as u32, &samples)?;
+                if n == 0 {
+                    break;
+                }
+                total += n;
+                self.written_frames += u64::from(n);
+                self.max_depth = self.max_depth.max(self.jb.depth());
+            }
+            Ok(total)
+        }
+
+        pub fn depth(&self) -> usize {
+            self.jb.depth()
+        }
+
+        pub fn describe(&self) -> String {
+            describe(&self.dev)
+        }
+    }
+
+    impl Drop for Player {
+        fn drop(&mut self) {
+            stop(&self.dev);
+        }
+    }
+
 }
 
 #[cfg(windows)]
@@ -505,6 +664,38 @@ pub fn mic_level(seconds: f32) -> Result<String, String> {
     ))
 }
 
+/// Loopback RMS over `seconds` (numbers only). Used to test whether the endpoint's loopback
+/// can see a WAV played by Windows itself (`System.Media.SoundPlayer`).
+#[cfg(windows)]
+pub fn loopback_level(seconds: f32) -> Result<String, String> {
+    use std::time::{Duration, Instant};    init_com()?;
+    let (cap, cc) = loopback()?;
+    let desc = describe(&cap);
+    start(&cap)?;
+    let started = Instant::now();
+    let wall0 = std::time::SystemTime::now();
+    let mut values = Vec::new();
+    let mut last = Instant::now();
+    while started.elapsed() < Duration::from_secs_f64(f64::from(seconds)) {
+        let (rms, _) = read_rms(&cap, &cc)?;
+        if last.elapsed() >= Duration::from_millis(100) {
+            let t_ms = wall0.elapsed().map(|d| d.as_millis()).unwrap_or(0);
+            println!("LOOPBACK_SAMPLE t_ms={t_ms} rms={rms:.6}");
+            values.push(rms);
+            last = Instant::now();
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    stop(&cap);
+    let max = values.iter().copied().fold(0.0f64, f64::max);
+    let mean = if values.is_empty() { 0.0 } else { values.iter().sum::<f64>() / values.len() as f64 };
+    let nonzero = values.iter().filter(|v| **v > 0.0005).count();
+    Ok(format!(
+        "LOOPBACK {desc}: seconds={seconds} samples={} mean_rms={mean:.5} max_rms={max:.5} above_0.0005={nonzero}",
+        values.len()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,24 +707,49 @@ mod tests {
     #[test]
     fn jitter_buffer_waits_for_target_depth() {
         let mut jb = JitterBuffer::new();
-        jb.push(pkt(1, 100));
-        jb.push(pkt(2, 100));
-        assert!(jb.next().is_none(), "1-2 packets are below the 3-packet target");
-        jb.push(pkt(3, 100));
-        assert!(jb.next().is_some(), "three packets start playback");
+        for s in 1..JITTER_TARGET_PACKETS as u32 {
+            jb.push(pkt(s, 100));
+        }
+        assert!(jb.next().is_none(), "below the target depth: silence");
+        jb.push(pkt(JITTER_TARGET_PACKETS as u32, 100));
+        assert!(jb.next().is_some(), "the target depth starts playback");
+    }
+
+    #[test]
+    fn jitter_buffer_rebuffers_after_a_gap_and_counts_one_underrun() {
+        let mut jb = JitterBuffer::new();
+        for s in 1..=JITTER_TARGET_PACKETS as u32 {
+            jb.push(pkt(s, 1));
+        }
+        for _ in 0..JITTER_TARGET_PACKETS {
+            assert!(jb.next().is_some());
+        }
+        assert!(jb.next().is_none(), "queue empty: a gap");
+        assert_eq!(jb.stats.underruns, 1, "one underrun for the whole gap");
+        // Dry pump calls while re-arming are not counted again.
+        assert!(jb.next().is_none());
+        assert_eq!(jb.stats.underruns, 1);
+        for s in 10..(10 + JITTER_TARGET_PACKETS as u32 - 1) {
+            jb.push(pkt(s, 1));
+        }
+        assert!(jb.next().is_none(), "below the target again: still silent");
+        assert_eq!(jb.stats.underruns, 1);
+        jb.push(pkt(10 + JITTER_TARGET_PACKETS as u32 - 1, 1));
+        assert!(jb.next().is_some(), "playback restarts at the target depth");
+        assert_eq!(jb.stats.underruns, 1);
     }
 
     #[test]
     fn jitter_buffer_drops_late_and_duplicate_packets() {
         let mut jb = JitterBuffer::new();
-        for s in 1..=3 {
+        for s in 1..=JITTER_TARGET_PACKETS as u32 {
             jb.push(pkt(s, 1));
         }
         assert!(jb.next().is_some());
         assert!(!jb.push(pkt(2, 1)), "older than the last played packet");
         assert!(!jb.push(pkt(3, 1)), "duplicate");
         assert_eq!(jb.stats.late, 2);
-        assert!(jb.push(pkt(4, 1)));
+        assert!(jb.push(pkt(JITTER_TARGET_PACKETS as u32 + 1, 1)));
     }
 
     #[test]
@@ -557,5 +773,19 @@ mod tests {
         // one period at 1 kHz is 48 frames; the first sample is 0 and the 12th is positive
         assert_eq!(pk[0].samples[0], 0);
         assert!(pk[0].samples[24] > 0);
+    }
+
+    #[test]
+    fn audio_payload_is_big_endian_and_checked() {
+        let mut p = vec![0u8, 0, 0, 7];
+        p.extend_from_slice(&1234u64.to_be_bytes());
+        p.extend_from_slice(&1000i16.to_be_bytes());
+        p.extend_from_slice(&(-1000i16).to_be_bytes());
+        let pkt = parse_packet(&p).expect("valid packet");
+        assert_eq!(pkt.seq, 7);
+        assert_eq!(pkt.samples, vec![1000, -1000]);
+        assert_eq!(packet_ts_ms(&p), Some(1234));
+        assert!(parse_packet(&p[..10]).is_none(), "short packet refused");
+        assert!(parse_packet(&[0u8; 13]).is_none(), "odd tail refused");
     }
 }

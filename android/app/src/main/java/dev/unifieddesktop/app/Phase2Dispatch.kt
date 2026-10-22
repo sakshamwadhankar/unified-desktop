@@ -50,6 +50,16 @@ object Phase2Dispatch {
                         Phase2Data.say("PHASE2_T3_DONE what=all (broadcast)")
                     }
                     "type" -> Phase2X11.typeViaXtest(ctx, arg)
+                    "xctrl" -> {
+                        val sym = when (arg.trim().lowercase()) {
+                            "a" -> 0x61
+                            "c" -> 0x63
+                            "v" -> 0x76
+                            else -> 0
+                        }
+                        if (sym == 0) Phase2X11.say("PHASE2X xctrl wants a/c/v, got [$arg]")
+                        else Phase2X11.typeCtrl(ctx, sym)
+                    }
                     "wineexec" -> Phase2Wine.execTree(ctx, arg)
                     "wsrv" -> Phase2Wine.ensureWineserver(ctx)
                     "killall" -> { Phase2Wine.reapLeftoverProcesses(ctx, "killall"); Phase2Wine.killWine(); Phase2X11.killXvfb() }

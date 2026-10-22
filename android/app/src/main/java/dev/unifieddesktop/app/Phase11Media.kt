@@ -91,6 +91,69 @@ object Phase11Media {
         web.post { web.evaluateJavascript(js, null) }
     }
 
+    // ---------------------------------------------------------------- CH_CAM (PC webcam + mic)
+    /** CH_CAM carries either a camera frame or a mic packet; the first byte says which. */
+    const val CAM_KIND_CAM: Byte = 1
+    const val CAM_KIND_PCM: Byte = 2
+
+    fun encodeMic(seq: Int, tsMs: Long, samples: ShortArray): ByteArray {
+        val pcm = encodePcm(seq, tsMs, samples)
+        val out = ByteArray(pcm.size + 1)
+        out[0] = CAM_KIND_PCM
+        System.arraycopy(pcm, 0, out, 1, pcm.size)
+        return out
+    }
+
+    /** The JS call that feeds the shim's 48 kHz WebAudio queue. */
+    fun audioScript(b64: String): String = "window.udCam&&udCam.pushAudio('$b64')"
+
+    fun pushAudio(web: WebView, packet: PcmPacket) {
+        val raw = ByteArray(AUDIO_HEADER + packet.samples.size * 2)
+        putInt(raw, 0, packet.seq)
+        putLong(raw, 4, packet.tsMs)
+        for (i in packet.samples.indices) {
+            raw[AUDIO_HEADER + i * 2] = (packet.samples[i].toInt() ushr 8).toByte()
+            raw[AUDIO_HEADER + i * 2 + 1] = packet.samples[i].toByte()
+        }
+        val b64 = Base64.encodeToString(raw, Base64.NO_WRAP)
+        val js = audioScript(b64)
+        web.post { web.evaluateJavascript(js, null) }
+    }
+
+    /** Counters, logged at most once a second (numbers only, never a frame). */
+    @Volatile var rxFrames = 0L
+    @Volatile var rxAudio = 0L
+    private var lastLogMs = 0L
+    private var lastW = 0
+    private var lastH = 0
+    private var lastFormat = 0
+
+    /** Route one CH_CAM message to the live shim WebView; true when it was a known kind. */
+    fun handleCamMessage(web: WebView, payload: ByteArray): Boolean {
+        if (payload.isEmpty()) return false
+        when (payload[0]) {
+            CAM_KIND_CAM -> {
+                val f = try { parseCam(payload) } catch (_: Throwable) { return false }
+                lastW = f.width; lastH = f.height; lastFormat = f.format
+                pushCamFrame(web, f)
+                rxFrames++
+            }
+            CAM_KIND_PCM -> {
+                val p = try { parsePcm(payload.copyOfRange(1, payload.size)) } catch (_: Throwable) { return false }
+                pushAudio(web, p)
+                rxAudio++
+            }
+            else -> return false
+        }
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastLogMs >= 1000) {
+            lastLogMs = now
+            android.util.Log.i("Phase11Cam", "P11CAMRX frames=$rxFrames audio=$rxAudio ${lastW}x$lastH fmt=$lastFormat")
+        }
+        return true
+    }
+
+
     private fun putInt(b: ByteArray, off: Int, v: Int) {
         b[off] = (v ushr 24).toByte(); b[off + 1] = (v ushr 16).toByte()
         b[off + 2] = (v ushr 8).toByte(); b[off + 3] = v.toByte()

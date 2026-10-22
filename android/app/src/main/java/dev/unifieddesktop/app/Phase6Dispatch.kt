@@ -87,6 +87,28 @@ object Phase6Dispatch {
             // B-083: fixed + real installed-app rows, and the shared launch route by id.
             "menurows" -> s.menuRows()
             "openid" -> s.openCatalogApp(arg.trim())
+            // Phase 11 D-e: our in-APK camera shim test page and its numbers.
+            "camopen" -> {
+                val w = s.openApp(ShellRoot.App.BROWSER)
+                (w.content as? BrowserView)?.loadUdPage(arg.ifBlank { "camtest" })
+                    ?: "no browser"
+            }
+            "camstop" -> {
+                val web = s.cameraWeb() ?: return "no camera page open"
+                web.evaluateJavascript("window.UdBridge&&UdBridge.stop()", null)
+                "cam-off requested"
+            }
+            "camstats" -> {
+                val web = s.cameraWeb() ?: return "no camera page open"
+                web.evaluateJavascript(
+                    "(function(){var t=typeof window.udCam;var k=window.udCam?udCam.stats():null;" +
+                        "if(window.UdBridge){UdBridge.report(k?JSON.stringify(k):" +
+                        "('PROBE udCam='+t+' body='+String(document.body&&document.body.innerText).slice(0,180)));}" +
+                        "return k;})()",
+                    null
+                )
+                "stats requested (see Phase11Cam log)"
+            }
             // B-086 diagnostics: read the live prefix's Uninstall tree.
             "regquery" -> try {
                 val text = Phase2Wine.queryUninstallRegistry(ctx)
@@ -167,6 +189,32 @@ object Phase6Dispatch {
                 b.keysSeen { v -> ref.set(v); l.countDown() }
                 l.await(3, java.util.concurrent.TimeUnit.SECONDS)
                 "pageKeys=${ref.get()}"
+            }
+            // Phase 11 D-e: run JavaScript in the CURRENT Browser window. The result comes
+            // back through UdBridge.report() to logcat (tag P11CAMSTATS, "JSB ..."), because a
+            // broadcast receiver runs on the UI thread and evaluateJavascript's callback is
+            // delivered on that same thread - awaiting it here deadlocks until timeout.
+            "jsb" -> {
+                val b = browser(s)
+                b.web.evaluateJavascript(
+                    "(function(){try{var r=(" + arg + ");" +
+                        "if(window.UdBridge&&UdBridge.report)UdBridge.report('JSB '+String(r));" +
+                        "}catch(e){if(window.UdBridge&&UdBridge.report)UdBridge.report('JSB ERR '+e);}})()",
+                    null
+                )
+                "jsb sent (see P11CAMSTATS log)"
+            }
+            // Same as "jsb", but the JS is base64 so quotes and parens survive the adb shell.
+            "jsb64" -> {
+                val b = browser(s)
+                val js = String(android.util.Base64.decode(arg.trim(), android.util.Base64.DEFAULT), Charsets.UTF_8)
+                b.web.evaluateJavascript(
+                    "(function(){try{var r=(function(){" + js + "})();" +
+                        "if(window.UdBridge&&UdBridge.report)UdBridge.report('JSB '+String(r));" +
+                        "}catch(e){if(window.UdBridge&&UdBridge.report)UdBridge.report('JSB ERR '+e);}})()",
+                    null
+                )
+                "jsb64 sent (see P11CAMSTATS log)"
             }
             // Run JavaScript in the VS Code/Browser page and log the result. Debug-only, used
             // to find where DOM focus is (Monaco's hidden textarea) when a key event reaches

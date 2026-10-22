@@ -81,6 +81,25 @@ class Phase4LinkService : Service() {
         private val liveSessions = java.util.concurrent.ConcurrentHashMap.newKeySet<LiveSession>()
         private val sessionIds = AtomicLong(0)
 
+        /** The live service, for the in-app consent hand-off (Phase 11 D-b). */
+        @Volatile private var instance: Phase4LinkService? = null
+
+        /** The foreground type that actually worked on this phone (connectedDevice or dataSync). */
+        @Volatile private var foregroundBaseType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+
+        /**
+         * Phase 11 D-b: the MediaProjection consent result arrives in HarnessActivity. The
+         * service must be foreground with the mediaProjection type before getMediaProjection.
+         */
+        fun audioConsentReady(resultCode: Int, data: Intent?) {
+            val svc = instance
+            if (svc == null || !running.get()) {
+                Log.w(TAG, "P11AUDIO consent but link service is not running")
+                return
+            }
+            svc.handleAudioConsent(resultCode, data)
+        }
+
         /** Open AOA accessory FD handed over by the USB attach path (manager 21:55). */
         @Volatile private var accessoryPfd: ParcelFileDescriptor? = null
 
@@ -127,6 +146,11 @@ class Phase4LinkService : Service() {
     }
 
     // ------------------------------------------------------------ lifecycle
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -176,6 +200,7 @@ class Phase4LinkService : Service() {
 
     override fun onDestroy() {
         stopping = true
+        instance = null
         try { stopAll() } catch (t: Throwable) { say("DESTROY stop failed ${t.javaClass.simpleName}") }
         releaseSessionWakeLock("service destroyed")
         super.onDestroy()
@@ -360,6 +385,7 @@ class Phase4LinkService : Service() {
         currentPhase5 = null
         currentLive = null
         Phase11Clip.stop(this)
+        Phase11Audio.unbindSink("service stop")
         desktopRuntime.stop()
         Phase5Dispatch.bind(null)
         releaseSessionWakeLock("service stop")
@@ -400,6 +426,7 @@ class Phase4LinkService : Service() {
     private fun startForegroundCompat(n: Notification) {
         try {
             startForeground(47600, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            foregroundBaseType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             say("FGS type connectedDevice")
         } catch (t: Throwable) {
             // Some phones refuse connectedDevice without an attached device. The session
@@ -407,12 +434,42 @@ class Phase4LinkService : Service() {
             Log.w(TAG, "FGS connectedDevice failed: $t")
             try {
                 startForeground(47600, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                foregroundBaseType = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 say("FGS fallback dataSync (${t.javaClass.simpleName})")
             } catch (t2: Throwable) {
                 say("FGS FAILED both: ${t2.javaClass.simpleName}")
                 throw t2
             }
         }
+    }
+
+    /**
+     * Phase 11 D-b: Android 14+ requires the foreground service to carry the mediaProjection
+     * type BEFORE getMediaProjection is called. The consent itself is the owner's dialog.
+     */
+    private fun handleAudioConsent(resultCode: Int, data: Intent?) {
+        if (resultCode != android.app.Activity.RESULT_OK || data == null) {
+            say("P11AUDIO consent denied code=$resultCode")
+            return
+        }
+        val n = buildNotification(
+            "Desktop audio capture",
+            "Capturing this phone's desktop sound for the PC",
+            false
+        )
+        try {
+            startForeground(
+                47600,
+                n,
+                foregroundBaseType or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+            say("FGS type mediaProjection added")
+        } catch (t: Throwable) {
+            say("P11AUDIO mediaProjection FGS FAILED ${t.javaClass.simpleName}: ${t.message}")
+            return
+        }
+        Phase11Audio.storeConsent(this, resultCode, data)
+        Phase11Audio.startWithStoredConsent()
     }
 
     // ------------------------------------------------------------ identity
@@ -582,6 +639,11 @@ class Phase4LinkService : Service() {
         }
         // B-047: a paired session gets NO video until the PC asks with "video-on".
         p5.start(false)
+        // Phase 11 D-b: phone sound -> PC on CH_AUDIO, only while this session is live.
+        Phase11Audio.bindSink { bytes ->
+            p5.writer.push(Phase4Protocol.Message.create(Phase4Protocol.CH_AUDIO, bytes))
+        }
+        var camDropped = 0
         try {
             while (running.get()) {
                 val n: Int
@@ -670,6 +732,22 @@ class Phase4LinkService : Service() {
                             // Phase 11 D-c: text from the PC clipboard
                             Phase11Clip.onRemote(m.payload)
                         }
+                        m.channel == Phase4Protocol.CH_AUDIO && m.payload.isNotEmpty() -> {
+                            // phone -> PC only; a PC must never push audio into our player
+                            say("DROP audio from PC len=${m.payload.size}")
+                        }
+                        m.channel == Phase4Protocol.CH_CAM && m.payload.isNotEmpty() -> {
+                            // Phase 11 D-e: PC webcam JPEG / mic PCM for the shim page
+                            val web = p5.shell()?.cameraWeb()
+                            if (web == null) {
+                                camDropped++
+                                if (camDropped % 100 == 1) {
+                                    say("P11CAM no camera page open, dropping (${camDropped} msgs)")
+                                }
+                            } else if (!Phase11Media.handleCamMessage(web, m.payload)) {
+                                say("P11CAM bad message kind=${m.payload[0].toInt() and 0xFF}")
+                            }
+                        }
                         m.channel == Phase4Protocol.CH_FILE && m.payload.isNotEmpty() -> {
                             // Phase 11 D-d: a file from the PC; the sink verifies its SHA-256
                             try {
@@ -690,6 +768,7 @@ class Phase4LinkService : Service() {
             say("SESSION io ${t.javaClass.simpleName}: ${t.message?.take(60)}")
         } finally {
             p5.stop(if (stopping) "service stop" else "link lost")
+            Phase11Audio.unbindSink(if (stopping) "service stop" else "session end")
             liveSessions.remove(live)
             synchronized(sessionGuard) {
                 if (currentLive === live) {

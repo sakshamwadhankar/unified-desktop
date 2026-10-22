@@ -83,7 +83,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::phase5::{self, InputEvent, VideoFrame};
-use crate::protocol::{Message, PriorityWriter, CH_CLIP, CH_CONTROL, CH_FILE, CH_INPUT, CH_VIDEO};
+use crate::protocol::{Message, PriorityWriter, CH_AUDIO, CH_CAM, CH_CLIP, CH_CONTROL, CH_FILE, CH_INPUT, CH_VIDEO};
 use windows::Win32::System::DataExchange::{AddClipboardFormatListener, RemoveClipboardFormatListener};
 use windows::Win32::UI::Shell::{DragAcceptFiles, DragFinish, DragQueryFileW, HDROP};
 
@@ -903,6 +903,7 @@ fn pipeline_loop(
     let mut last_csq = Instant::now() - Duration::from_secs(2);
     let mut clock = phase5::ClockSync::new();
     let mut last_need = Instant::now() - Duration::from_secs(9);
+    let mut media = MediaBridge::new();
     // B-047: ask for video; keep asking until the first access unit shows up.
     let mut video_on = phase5::VideoOnPacer::new();
     let started_at = Instant::now();
@@ -916,6 +917,8 @@ fn pipeline_loop(
         flush_input(&mut session.tls, shared)?;
         flush_clip(&mut session.tls, shared)?;
         service_files(&mut session.tls, shared, &mut file_out, &mut next_file_id)?;
+        media.pump_audio()?;
+        media.drain_cam(&mut session.tls)?;
         if shared.release_all.swap(0, Ordering::SeqCst) == 1 {
             let mut w = PriorityWriter::new(&mut session.tls);
             let _ = w.push(Message::new(CH_CONTROL, phase5::CTRL_RELEASE_ALL.as_bytes().to_vec())?);
@@ -985,6 +988,8 @@ fn pipeline_loop(
             flush_input(&mut session.tls, shared)?;
             flush_clip(&mut session.tls, shared)?;
             service_files(&mut session.tls, shared, &mut file_out, &mut next_file_id)?;
+            media.pump_audio()?;
+            media.drain_cam(&mut session.tls)?;
             let Some(m) = pending.pop_front() else {
                 match std::io::Read::read(&mut session.tls, &mut read_buf) {
                     Ok(0) => {
@@ -1041,13 +1046,17 @@ fn pipeline_loop(
                 }
                 CH_CONTROL => {
                     if let Some(whole) = asm_other.feed(m.flags, &m.payload)? {
-                        if whole.starts_with(b"lat ") {
-                            p.handle_lat(&whole, &clock);
-                        } else {
-                            handle_control(&whole, &mut clock);
+                        let text = String::from_utf8_lossy(&whole);
+                        match text.trim() {
+                            "cam-on" => media.cam_on(),
+                            "cam-off" => media.cam_off("phone asked"),
+                            _ if whole.starts_with(b"lat ") => p.handle_lat(&whole, &clock),
+                            _ => handle_control(&whole, &mut clock),
                         }
                     }
                 }
+                CH_AUDIO => media.on_audio(&m.payload, &clock),
+                CH_CAM => { /* phone -> PC camera is not a thing; ignore */ }
                 CH_FILE => match file_sink.on_message(&m.payload) {
                     Ok(Some(done)) => println!(
                         "[{TAG}] <- phone file {} {} bytes sha_ok={}",
@@ -1095,6 +1104,9 @@ fn pipeline_loop(
         let _ = w.emit_all();
     }
     println!("[{TAG}] pipeline stopping (release-all sent)");
+    // Phase 11: the webcam light must go off and the microphone must be released on every
+    // exit path, including Exit and link loss.
+    media.stop("pipeline end");
     // B-098: the phone must not keep streaming to a process that is leaving; closing the
     // write side also ends the session on its side. Any blocked read is woken here.
     if let Ok(mut w) = shared.wake_socket.lock() {
@@ -1257,6 +1269,160 @@ fn flush_input<W: std::io::Write>(tls: &mut W, shared: &Shared) -> Result<(), St
         .map_err(|e| e.to_string())?;
     w.emit_all().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Phase 11 D-b/D-e: the PC-side media bridge for one view session. Audio packets become
+/// WASAPI playback through the jitter buffer; `cam-on` starts the webcam + microphone and
+/// their CH_CAM messages are sent from here. Dropping the cam handle releases both devices.
+struct MediaBridge {
+    audio: Option<crate::audio::Player>,
+    audio_recv: u64,
+    audio_bad: u64,
+    audio_players: u32,
+    audio_log: std::time::Instant,
+    audio_age_ms: Vec<f64>,
+    cam: Option<(crate::cam::CamStream, std::sync::mpsc::Receiver<Vec<u8>>)>,
+    cam_sent: u64,
+    cam_dropped: u64,
+    cam_log: std::time::Instant,
+}
+
+impl MediaBridge {
+    fn new() -> Self {
+        MediaBridge {
+            audio: None,
+            audio_recv: 0,
+            audio_bad: 0,
+            audio_players: 0,
+            audio_log: std::time::Instant::now() - std::time::Duration::from_secs(2),
+            audio_age_ms: Vec::new(),
+            cam: None,
+            cam_sent: 0,
+            cam_dropped: 0,
+            cam_log: std::time::Instant::now(),
+        }
+    }
+
+    fn on_audio(&mut self, payload: &[u8], clock: &phase5::ClockSync) {
+        if self.audio.is_none() {
+            match crate::audio::Player::new() {
+                Ok(p) => {
+                    println!("[{TAG}] AUDIO player {} (shared mode, 48 kHz stereo)", p.describe());
+                    self.audio = Some(p);
+                    self.audio_players += 1;
+                }
+                Err(e) => {
+                    println!("[{TAG}] AUDIO player failed: {e}");
+                    self.audio_bad += 1;
+                    return;
+                }
+            }
+        }
+        self.audio_recv += 1;
+        let Some(p) = self.audio.as_mut() else { return };
+        if !p.feed(payload) {
+            self.audio_bad += 1;
+        }
+        // Arrival age in the phone->PC clock frame (network + jitter, before the device).
+        if let (Some(ts), Some(off)) = (crate::audio::packet_ts_ms(payload), clock.offset_us()) {
+            let arrival = now_us64() as f64 - (ts as f64 * 1000.0 - off);
+            if (-50_000.0..500_000.0).contains(&arrival) {
+                self.audio_age_ms.push(arrival / 1000.0);
+            }
+        }
+        if self.audio_log.elapsed() >= std::time::Duration::from_secs(1) {
+            self.audio_log = std::time::Instant::now();
+            let jb = &p.jb.stats;
+            let age = if self.audio_age_ms.is_empty() {
+                "n/a".to_string()
+            } else {
+                let n = self.audio_age_ms.len() as f64;
+                format!("{:.1}", self.audio_age_ms.iter().sum::<f64>() / n)
+            };
+            println!(
+                "[{TAG}] AUDIO recv={} played={} late={} dropped={} underruns={} frames={} depth={} age_ms={} devbuf_ms={:.0} bad={}",
+                self.audio_recv, jb.played, jb.late, jb.dropped, jb.underruns,
+                p.written_frames, p.depth(), age, p.buffer_ms(), self.audio_bad
+            );
+            self.audio_age_ms.clear();
+        }
+    }
+
+    fn pump_audio(&mut self) -> Result<(), String> {
+        if let Some(p) = self.audio.as_mut() {
+            p.pump()?;
+        }
+        Ok(())
+    }
+
+    fn cam_on(&mut self) {
+        if self.cam.is_some() {
+            println!("[{TAG}] CAM already on");
+            return;
+        }
+        match crate::cam::start_stream(640, 480, 70) {
+            Ok((s, rx)) => {
+                self.cam = Some((s, rx));
+                println!("[{TAG}] CAM on (phone asked; 640x480 JPEG <=15 fps + 48 kHz mic)");
+            }
+            Err(e) => println!("[{TAG}] CAM start failed: {e}"),
+        }
+    }
+
+    fn cam_off(&mut self, why: &str) {
+        if let Some((s, _)) = self.cam.take() {
+            println!(
+                "[{TAG}] CAM off ({why}) frames={} audio_packets={}",
+                s.frames.load(std::sync::atomic::Ordering::Relaxed),
+                s.audio_packets.load(std::sync::atomic::Ordering::Relaxed)
+            );
+            drop(s); // joins both threads: camera light off, microphone released
+        }
+    }
+
+    fn drain_cam<W: std::io::Write>(&mut self, tls: &mut W) -> Result<(), String> {
+        let Some((stream, rx)) = self.cam.as_ref() else { return Ok(()) };
+        let mut w = PriorityWriter::new(tls);
+        let mut n = 0usize;
+        loop {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    // Keep the microphone flowing: only camera frames are dropped when the
+                    // link is congested (freshness beats completeness for video, never for
+                    // 10 ms audio packets).
+                    let is_cam = msg.first() == Some(&1u8);
+                    if is_cam && (n >= 8 || w.pending_len(CH_CAM) >= 8) {
+                        self.cam_dropped += 1;
+                        continue;
+                    }
+                    w.push(Message::new(CH_CAM, msg).map_err(|e| e.to_string())?)?;
+                    n += 1;
+                    self.cam_sent += 1;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+        if n > 0 {
+            w.emit_all().map_err(|e| e.to_string())?;
+        }
+        if self.cam_log.elapsed() >= std::time::Duration::from_secs(3) {
+            self.cam_log = std::time::Instant::now();
+            println!(
+                "[{TAG}] CAMSTAT sent={} dropped={} frames={} audio_packets={}",
+                self.cam_sent,
+                self.cam_dropped,
+                stream.frames.load(std::sync::atomic::Ordering::Relaxed),
+                stream.audio_packets.load(std::sync::atomic::Ordering::Relaxed)
+            );
+        }
+        Ok(())
+    }
+
+    fn stop(&mut self, why: &str) {
+        self.cam_off(why);
+        self.audio = None;
+    }
 }
 
 fn handle_control(whole: &[u8], clock: &mut phase5::ClockSync) {

@@ -54,6 +54,9 @@ class HarnessActivity : Activity() {
         (application as Application).registerActivityLifecycleCallbacks(HarnessCallbacks())
         buildUi()
         maybeAskNotifications()
+        if (intent?.getBooleanExtra("p11audio", false) == true) {
+            main.postDelayed({ startAudioConsent() }, 400)
+        }
         if (intent?.getBooleanExtra("show_phase10_onboarding", false) == true) {
             main.post { Phase10Onboarding.show(this, force = true) }
         }
@@ -64,6 +67,9 @@ class HarnessActivity : Activity() {
         super.onNewIntent(i)
         setIntent(i)
         maybeRunGuestFromIntent(i)
+        if (i?.getBooleanExtra("p11audio", false) == true) {
+            main.postDelayed({ startAudioConsent() }, 400)
+        }
         if (i?.getBooleanExtra("show_phase10_onboarding", false) == true) {
             main.post { Phase10Onboarding.show(this, force = true) }
         }
@@ -88,6 +94,9 @@ class HarnessActivity : Activity() {
         val row3 = LinearLayout(this)
         button(row3,"Start link") { startLink() }; button(row3,"Stop link") { stopLink() }
         box.addView(row3)
+        val row3b = LinearLayout(this)
+        button(row3b,"Grant audio capture") { startAudioConsent() }
+        box.addView(row3b)
         val row4 = LinearLayout(this)
         button(row4, "Background activity setup") {
             Phase10Onboarding.show(this, force = true)
@@ -123,6 +132,41 @@ class HarnessActivity : Activity() {
 
     private fun notificationsGranted() = Build.VERSION.SDK_INT < 33 ||
         checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    // Phase 11 D-b: the owner's real consent path. RECORD_AUDIO first, then Android's own
+    // MediaProjection dialog. The result goes to the running link service, which adds the
+    // mediaProjection foreground type before it calls getMediaProjection (Android 14 rule).
+    private fun startAudioConsent() {
+        if (!Phase4LinkService.isRunning()) {
+            say("Start link first, then grant audio capture")
+            return
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), Phase11Audio.REQ_RECORD_AUDIO)
+            say("Audio permission requested (tap Allow)")
+            return
+        }
+        val mgr = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+        startActivityForResult(mgr.createScreenCaptureIntent(), Phase11Audio.REQ_CONSENT)
+        say("MediaProjection consent requested (tap Start now)")
+    }
+
+    override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
+        super.onRequestPermissionsResult(code, perms, results)
+        if (code == Phase11Audio.REQ_RECORD_AUDIO) {
+            val ok = results.isNotEmpty() && results[0] == PackageManager.PERMISSION_GRANTED
+            say("Audio permission ${if (ok) "granted" else "denied"}")
+            if (ok) startAudioConsent()
+        }
+    }
+
+    override fun onActivityResult(code: Int, result: Int, data: Intent?) {
+        super.onActivityResult(code, result, data)
+        if (code == Phase11Audio.REQ_CONSENT) {
+            say("MediaProjection result code=$result")
+            Phase4LinkService.audioConsentReady(result, data)
+        }
+    }
 
     /** Real user path: Android 13+ asks for the notification permission on first launch. */
     private fun maybeAskNotifications() {

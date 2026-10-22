@@ -277,3 +277,25 @@ these facts.** Re-verify anything critical: Android changes.
   captures are for the end-to-end PC-input proofs.
 - **Ctrl+A in an Android EditText does not select all** when sent as a synthetic Ctrl+key
   event; it left the App Center search text in place. Clear with repeated Backspace.
+- **A broadcast receiver runs on the UI thread: never await `evaluateJavascript` there.**
+  The callback needs the same thread and the broadcast times out. Run the JS and let it report
+  back through the JS bridge (`UdBridge.report` -> logcat tag); pass the script base64
+  (`p6:jsb64`) so the shell's quoting cannot eat it.
+- **`adb forward tcp:47600` disappears silently** when adbd/the device reconnects; the view then
+  sits at `connecting to 127.0.0.1:47600` forever. Check `adb forward --list` first (empty =
+  re-add) before blaming the link or the app.
+- **The receiver window closing is a clean shutdown, not a crash**: `pipeline stopping
+  (release-all sent)` -> `CAM off (pipeline end)` -> `window closed`. It takes the video, camera
+  and mic with it, so keep the window open during timed camera windows and treat
+  `window closed` as the owner's action.
+- **MediaProjection consent is tied to the link session.** A view restart/reconnect or an app
+  restart ends the session and the next one logs `P11AUDIO session open, waiting for consent`;
+  re-granting needs the system dialog on an **unlocked** phone. An APK install also force-stops
+  the app. Plan the audio measurement before any install/reconnect, or budget the re-consent.
+- **Measure the sender before blaming the phone.** The UVC device delivers exactly 10.0 fps at
+  1280x720 RGB32 (~295 Mbit/s = USB2 ceiling) even though the code paces 15 fps; the fixable
+  part was the shim's per-frame `getImageData` + new `Image` (6-9 -> 10-11 fps after reuse and
+  sampling brightness every 5th frame).
+- **A link reconnect releases the receiver's camera while the page still holds the stream**
+  (B-102): no track event fires, so nothing re-sends `cam-on`. A shim keepalive that re-asserts
+  `cam-on` after ~3 s of frozen frames restores it without a reload.

@@ -694,6 +694,10 @@ object Phase2X11 {
             say("KEYMAP kc=$minKeycode..$maxKeycode per=$ksymsPerKc")
         }
 
+        fun keyEvent(down: Boolean, keycode: Int) {
+            fakeInput(if (down) 2 else 3 /* KeyPress / KeyRelease */, keycode)
+        }
+
         fun keycodeFor(keys: Int): Pair<Int, Boolean>? {
             for (i in kcKeysyms.indices) {
                 val ks = kcKeysyms[i]
@@ -842,6 +846,112 @@ object Phase2X11 {
 
         fun close() { try { sock.close() } catch (_: Throwable) { } }
 
+        // ---------------- Phase 11 D-c: X11 clipboard selection primitives ----------------
+        // The bridge owns an InputOnly window, serves SelectionRequest events and polls the
+        // selection with ConvertSelection. Events and replies are both 32-byte packets;
+        // callers drain events before issuing a call that expects a reply.
+
+        fun clipCreateWindow(): Int {
+            val id = idBase + 0x200 // this connection is dedicated to the clipboard bridge
+            put(1); put(0); putShort(8) // CreateWindow
+            putInt(id); putInt(root)
+            putShort(0); putShort(0); putShort(1); putShort(1)
+            putShort(0); putShort(1)   // border-width 0, InputOutput
+            putInt(0)                  // visual CopyFromParent (depth 0)
+            putInt(0)                  // no value-mask
+            out.flush()
+            return id
+        }
+
+        /** One 32-byte packet, or null when nothing arrived within [timeoutMs]. */
+        fun clipRead32(timeoutMs: Int): ByteArray? {
+            val old = sock.soTimeout
+            return try {
+                sock.soTimeout = timeoutMs
+                readFully(32)
+            } catch (_: java.net.SocketTimeoutException) {
+                null
+            } finally {
+                try { sock.soTimeout = old } catch (_: Throwable) { }
+            }
+        }
+
+        fun clipAvailable(): Int = try { ins.available() } catch (_: Throwable) { 0 }
+
+        fun clipSetOwner(selection: Int, owner: Int) {
+            put(22); put(0); putShort(4) // SetSelectionOwner
+            putInt(owner); putInt(selection); putInt(0) // CurrentTime
+            out.flush()
+        }
+
+        /** GetSelectionOwner reply (0 = nobody); bounded wait, skips non-reply packets. */
+        fun clipOwner(selection: Int, timeoutMs: Int = 2000): Int {
+            put(23); put(0); putShort(2)
+            putInt(selection)
+            out.flush()
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (System.currentTimeMillis() < deadline) {
+                val rep = clipRead32(250) ?: continue
+                if ((rep[0].toInt() and 0xff) == 1) {
+                    return ByteBuffer.wrap(rep, 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                }
+            }
+            throw IllegalStateException("GetSelectionOwner: no reply")
+        }
+
+        fun clipConvert(requestor: Int, selection: Int, target: Int, property: Int) {
+            put(24); put(0); putShort(6) // ConvertSelection
+            putInt(requestor); putInt(selection); putInt(target); putInt(property); putInt(0)
+            out.flush()
+        }
+
+        /** GetProperty (formats 8/32); null when the property is unset. */
+        fun clipGetProperty(window: Int, property: Int, maxBytes: Int = 1 shl 20): ByteArray? {
+            put(20); put(0); putShort(6)
+            putInt(window); putInt(property); putInt(0) // AnyPropertyType
+            putInt(0); putInt((maxBytes + 3) / 4)
+            out.flush()
+            val deadline = System.currentTimeMillis() + 3000
+            var rep: ByteArray? = null
+            while (rep == null && System.currentTimeMillis() < deadline) {
+                val p = clipRead32(250) ?: continue
+                if ((p[0].toInt() and 0xff) == 1) rep = p
+            }
+            val r = rep ?: throw IllegalStateException("GetProperty: no reply")
+            val format = r[1].toInt() and 0xff
+            val type = ByteBuffer.wrap(r, 8, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            val len = ByteBuffer.wrap(r, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int * 4
+            val valueLen = ByteBuffer.wrap(r, 16, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            val data = readFully(len)
+            if (type == 0) return null
+            return when (format) {
+                8 -> data.copyOf(minOf(valueLen, data.size).coerceAtLeast(0))
+                32 -> data.copyOf(minOf(valueLen * 4, data.size).coerceAtLeast(0))
+                else -> null
+            }
+        }
+
+        fun clipChangeProperty(window: Int, property: Int, type: Int, format: Int, data: ByteArray) {
+            val words = (data.size + 3) / 4
+            put(18); put(0); putShort(6 + words) // ChangeProperty, mode Replace
+            putInt(window); putInt(property); putInt(type)
+            put(format and 0xff); put(0); put(0); put(0)
+            putInt(data.size)
+            out.write(data)
+            repeat(words * 4 - data.size) { put(0) }
+            out.flush()
+        }
+
+        fun clipSendSelectionNotify(requestor: Int, selection: Int, target: Int, property: Int) {
+            put(25); put(0); putShort(11) // SendEvent
+            putInt(requestor); putInt(0)  // propagate=false, event-mask=0
+            put(31); put(0); putShort(0)  // SelectionNotify
+            putInt(0)                     // time
+            putInt(requestor); putInt(selection); putInt(target); putInt(property)
+            repeat(8) { put(0) }
+            out.flush()
+        }
+
         /** Deterministic known pattern: 8 alternating green/black horizontal bars
          *  drawn straight onto the root window (raw CreateGC + FillRectangles). */
         fun drawBars() {
@@ -921,6 +1031,27 @@ object Phase2X11 {
         true
     } catch (t: Throwable) {
         say("XTEST_FAIL $t"); writeLog(ctx); false
+    }
+
+    /** Harness: Ctrl+<keysym> via XTEST (a=select all, c=copy, v=paste). */
+    fun typeCtrl(ctx: Context, keysym: Int): Boolean = try {
+        val x = X11.connect()
+        try {
+            x.initXtest()
+            x.initKeyboard()
+            val ctrl = x.keycodeFor(0xFFE3)?.first ?: error("no Control_L")
+            val key = x.keycodeFor(keysym)?.first ?: error("no keysym 0x${Integer.toHexString(keysym)}")
+            x.keyEvent(true, ctrl)
+            x.keyEvent(true, key)
+            x.keyEvent(false, key)
+            x.keyEvent(false, ctrl)
+        } finally {
+            x.close()
+        }
+        say("XCTRL keysym=0x${Integer.toHexString(keysym)} ok")
+        true
+    } catch (t: Throwable) {
+        say("XCTRL_FAIL $t"); writeLog(ctx); false
     }
 
     /**

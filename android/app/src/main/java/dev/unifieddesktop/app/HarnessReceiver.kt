@@ -19,6 +19,18 @@ class HarnessReceiver : BroadcastReceiver() {
         val p11 = intent.getStringExtra("phase11x")
         if (p11 != null) {
             when {
+                p11 == "link-start" -> {
+                    ctx.startForegroundService(
+                        Intent(ctx, Phase4LinkService::class.java).setAction(Phase4LinkService.ACTION_START)
+                    )
+                    android.util.Log.i("Phase11", "P11LINK start requested")
+                }
+                p11 == "link-stop" -> {
+                    ctx.startService(
+                        Intent(ctx, Phase4LinkService::class.java).setAction(Phase4LinkService.ACTION_STOP)
+                    )
+                    android.util.Log.i("Phase11", "P11LINK stop requested")
+                }
                 p11.startsWith("clip-set:") -> Phase11Clip.setLocal(ctx, p11.removePrefix("clip-set:"))
                 p11 == "clip-show" -> Phase11Clip.showLocal(ctx)
                 p11.startsWith("files-send:") -> {

@@ -8,6 +8,10 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
@@ -16,7 +20,11 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Shared styling for the shell's app windows (desktop pixels: the display is 240 dpi). */
 internal object ShellUi {
@@ -219,6 +227,18 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
 
     private val status = ShellUi.label(context, "ready", 17f)
 
+    /** B-082: the desktop Chrome UA, kept out of WebSettings so the fetch thread can use it. */
+    private val desktopUa =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+    /** Phase 11 D-e: the getUserMedia shim, injected into every main-frame HTML response. */
+    private val shimJs: String by lazy {
+        context.assets.open("phase11/camera-shim.js").bufferedReader().readText()
+    }
+    /** True once a page carrying the injected shim has been served on this WebView. */
+    @Volatile private var shimServed = false
+
     /** code-server login state (only used when [codeServer]). */
     private var serverPort = 0
     private var pendingFolder: String? = null
@@ -238,13 +258,27 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         // B-082: Play Store sends an Android WebView to intent://, which this Browser cannot
         // load. A desktop Chrome UA keeps it on https (and gives sites their desktop page).
         if (!codeServer) {
-            settings.userAgentString =
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            settings.userAgentString = desktopUa
         }
         isFocusable = true
         isFocusableInTouchMode = true
         webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(
+                v: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? {
+                val req = request ?: return null
+                if (!req.isForMainFrame || req.method != "GET") return null
+                val scheme = req.url.scheme ?: return null
+                if (scheme != "http" && scheme != "https") return null
+                return try {
+                    injectShimIntoMainFrame(req)
+                } catch (t: Throwable) {
+                    android.util.Log.i("Phase6", "BROWSER shim inject skipped: ${t.javaClass.simpleName}")
+                    null
+                }
+            }
+
             override fun onPageFinished(v: WebView?, url: String?) {
                 status.text = "loaded ${url ?: ""}"
                 v?.evaluateJavascript(
@@ -268,8 +302,127 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         }
     }
 
+    /**
+     * Phase 11 D-e: document-start shim injection without androidx.webkit (not in the offline
+     * Gradle cache, and dl.google.com is unreachable). The main-frame HTML is fetched here and
+     * re-served with the shim as the first script in <head>, so it runs before page scripts;
+     * CSP is relaxed for this one response or an inline script would be blocked. Non-HTML,
+     * redirects, errors and oversized bodies return null and load normally.
+     */
+    private fun injectShimIntoMainFrame(req: WebResourceRequest): WebResourceResponse? {
+        val url = req.url.toString()
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            instanceFollowRedirects = false
+            connectTimeout = 5000
+            readTimeout = 7000
+            setRequestProperty("User-Agent", desktopUa)
+            setRequestProperty("Accept", req.requestHeaders["Accept"] ?: "text/html,application/xhtml+xml")
+            req.requestHeaders["Accept-Language"]?.let { setRequestProperty("Accept-Language", it) }
+            CookieManager.getInstance().getCookie(url)?.let { setRequestProperty("Cookie", it) }
+        }
+        try {
+            if (conn.responseCode != 200) return null
+            val ctype = conn.contentType ?: ""
+            if (!ctype.contains("text/html", ignoreCase = true)) return null
+            var body = ByteArray(0)
+            conn.inputStream.use { ins ->
+                val buf = ByteArray(8192)
+                val chunks = ArrayList<ByteArray>()
+                var total = 0
+                while (total < 3_000_000) {
+                    val n = ins.read(buf)
+                    if (n <= 0) break
+                    chunks.add(buf.copyOf(n)); total += n
+                }
+                body = ByteArray(total)
+                var off = 0
+                for (c in chunks) { System.arraycopy(c, 0, body, off, c.size); off += c.size }
+            }
+            if (body.isEmpty()) return null
+            val charsetName = Regex("charset=([A-Za-z0-9._-]+)", RegexOption.IGNORE_CASE)
+                .find(ctype)?.groupValues?.get(1) ?: "UTF-8"
+            val charset = try { java.nio.charset.Charset.forName(charsetName) } catch (_: Throwable) { Charsets.UTF_8 }
+            val html = String(body, charset)
+            val at = when {
+                html.indexOf("<head", 0, true) >= 0 ->
+                    html.indexOf('>', html.indexOf("<head", 0, true)) + 1
+                html.indexOf("<html", 0, true) >= 0 ->
+                    html.indexOf('>', html.indexOf("<html", 0, true)) + 1
+                else -> 0
+            }
+            val injected = html.substring(0, at) +
+                "<script>/*__udCamShim*/$shimJs</script>" +
+                html.substring(at)
+            shimServed = true
+            android.util.Log.i("Phase6", "BROWSER shim injected ${url.take(80)} bytes=${body.size}")
+            return WebResourceResponse(
+                "text/html", charset.name(), 200, "OK",
+                mapOf("Content-Security-Policy" to "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:"),
+                ByteArrayInputStream(injected.toByteArray(Charsets.UTF_8))
+            )
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** True when the current page carries the injected shim (camera frames may be pushed). */
+    fun camShimActive(): Boolean = udPage == "camtest" || shimServed
+
     private var history = ArrayList<String>()
     private var pos = -1
+
+    /** Phase 11: the in-APK page currently shown ("camtest", "tone"), or null. */
+    var udPage: String? = null
+        private set
+    /**
+     * Added to every page (init). The shim asks for the PC camera and microphone with
+     * start()/stop(); reports are counters only (no frame, no audio). Methods are the whole
+     * surface: @JavascriptInterface only, so a page cannot reach anything else through it.
+     */
+    private val udBridge = object {
+        @JavascriptInterface
+        fun start() {
+            android.util.Log.i("Phase11Cam", "P11CAMPAGE start requested")
+            Phase5Dispatch.session()?.sendControl("cam-on")
+        }
+
+        @JavascriptInterface
+        fun stop() {
+            android.util.Log.i("Phase11Cam", "P11CAMPAGE stop requested")
+            Phase5Dispatch.session()?.sendControl("cam-off")
+        }
+
+        @JavascriptInterface
+        fun report(json: String) {
+            android.util.Log.i("Phase11Cam", "P11CAMSTATS $json")
+        }
+    }
+
+    /**
+     * Load one of our in-APK pages into this WebView. The shim script is inlined into the
+     * page (this is our own local page), so no document-start hook or file access is needed.
+     */
+    fun loadUdPage(name: String): String {
+        val page = name.trim().lowercase()
+        val asset = when (page) {
+            "camtest" -> "phase11/camera-shim.html"
+            "tone" -> "phase11/tone.html"
+            else -> return "no page [$name]"
+        }
+        var html = context.assets.open(asset).bufferedReader().readText()
+        if (page == "camtest") {
+            val js = context.assets.open("phase11/camera-shim.js").bufferedReader().readText()
+            html = html.replace("<script src=\"camera-shim.js\"></script>", "<script>\n$js\n</script>")
+        }
+        udPage = page
+        if (pos >= 0 && pos < history.size - 1) history = ArrayList(history.subList(0, pos + 1))
+        history.add("ud:$page"); pos = history.size - 1
+        address.setText("ud:$page")
+        status.text = "loading ud:$page"
+        web.loadDataWithBaseURL("https://ud.local/", html, "text/html; charset=utf-8", "UTF-8", null)
+        android.util.Log.i("Phase6", "BROWSER ud:$page")
+        return "opened ud:$page"
+    }
 
     init {
         orientation = VERTICAL
@@ -282,6 +435,8 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         bar.addView(address, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(web, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        // Phase 11 D-e: document-start shim pages reach us through this on every page.
+        web.addJavascriptInterface(udBridge, "UdBridge")
         addView(status)
         // Enter from the PC keyboard must navigate, not insert a newline into the address.
         address.setOnKeyListener { _, code, e ->
@@ -339,6 +494,11 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     fun go() {
         val typed = address.text.toString().trim()
         if (typed.isEmpty()) return
+        // Phase 11: our own pages ship in the APK and are inlined into the page (section 4).
+        if (typed.startsWith("ud:")) {
+            status.text = loadUdPage(typed.removePrefix("ud:"))
+            return
+        }
         val url = BrowserUrl.normalize(typed)
         status.text = "loading $url"
         if (pos >= 0 && pos < history.size - 1) history = ArrayList(history.subList(0, pos + 1))

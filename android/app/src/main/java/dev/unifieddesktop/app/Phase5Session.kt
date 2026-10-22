@@ -399,6 +399,14 @@ class Phase5Session(
 
     // ---------------------------------------------------------------- control in
 
+    /** Send one control line to the PC (Phase 11: cam-on / cam-off for the webcam + mic). */
+    fun sendControl(text: String): Boolean {
+        if (!running.get()) return false
+        writer.push(Phase4Protocol.Message.create(Phase4Protocol.CH_CONTROL, text.toByteArray()))
+        say("P5 -> PC control \"$text\"")
+        return true
+    }
+
     fun onControlMessage(text: String, gateOpen: Boolean = true) {
         when (val c = Phase5Protocol.parseControl(text)) {
             Phase5Protocol.Control.NeedKeyframe -> {

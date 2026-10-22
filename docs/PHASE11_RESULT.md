@@ -71,3 +71,61 @@ git diff --check 0. Open: phone -> PC audio (loopback silent even unmuted; envir
 AudioPlaybackCapture consent/start wiring, WebView getUserMedia shim loading, X11 clipboard.
 No commit made.
 ```
+
+## Round 2 (2026-10-22 09:20-12:10): external-page webcam, X11 bridge, lock import, B-101
+
+All phone results are on `2c0f6edc`, Android 16, on the **dev path**: the PC connected through
+`adb forward tcp:47600 -> tcp:47600` to 127.0.0.1. The phone's Wi-Fi address
+`10.17.106.29:47600` was NOT reachable from the laptop this round (`ping`: host unreachable;
+TCP connect: timeout), so no round-2 result proves the Wi-Fi path - every row below is labelled
+**dev path**. No network settings were changed.
+
+| Item | What I did | Files | Test | Verified on | Numbers |
+|---|---|---|---|---|---|
+| 3(a) shim on every page | `WebViewClient.shouldInterceptRequest` re-serves main-frame HTML with the shim as the first `<head>` script + relaxed CSP (androidx.webkit is not in the offline Gradle cache and dl.google.com is unreachable, so no new dependency and no THIRD_PARTY row). `UdBridge` exists for every page; the shim marks `window.__udCamShim` and starts the stream on `getUserMedia`. New harness action `p6:jsb64` runs JS in the current Browser window and reports through `UdBridge.report` (a receiver cannot await `evaluateJavascript` on the UI thread - deadlock). | `Phase6Apps.kt`, `Phase6Dispatch.kt`, `assets/phase11/camera-shim.js`, `HarnessReceiver.kt` | external page https://webcamtests.com, its own "Test my cam" button | phone (dev path) | `BROWSER shim injected https://webcamtests.com/ bytes=31238`; its table: `Webcam Name: PC camera (unified-desktop); Quality Rating: 8; Frame rate: 11 FPS; Stream Type: video; Image Mode: rgb; 0.23 MP; 640x360; nHD; Aspect 1.78`; "Testing was completed successfully". zoom.us/test not tried. |
+| 3(b) fps | PC send rate is exactly 10.0 fps before and after (frames 300->400 in 10 s); the UVC device is the cap (MF negotiates 1280x720 RGB32, ~295 Mbit/s ~ USB2 ceiling). Phone was the fixable part: the shim allocated a fresh Image and read back `getImageData` on every frame; now one reused Image and brightness every 5th frame. PC converts+downscales RGB in one pass and paces from the sample time (`next = got + 66 ms`). | `camera-shim.js`, `cam.rs` | ud:camtest frame counter; PC CAMSTAT | phone (dev path) + PC-only | shim 6-9 fps -> **10-11 fps** (frames advance 10/s = the full PC feed); PC sends 10.0 fps; >10 fps not achievable (device). |
+| 3(c) brightness | `OWNER: cover the laptop webcam...` at 10:38, 10:52, 11:08, 11:22, 11:40 and 12:05 in TODO.md, plus a sampler reading the shim's `brightness`/`changed`. | `TODO.md`, shim report | P11CAMSTATS samples every 3 s | phone (dev path) | baseline 0.51-0.85, `changed` 0-0.063; real observed dip **0.525 -> 0.285 at 11:36:46** (~4 s at 0.41-0.44), jump to 0.766-0.85 from 11:37:35. No deliberate 5 s cover happened: 11:22 lost the stream to B-102, 11:40 to the view window being closed at 11:39:32 (`pipeline stopping (release-all sent)` -> `window closed`). The 12:05 window also had no stream: the app process was gone at ~12:0x (the owner removed the task; `ForegroundServiceDidNotStartInTimeException` at 11:26) and the view window was closed again, so the sampler got 0 lines. No deliberate cover in six windows. |
+| 4 X11 clipboard | Both directions implemented; Wine's SendEvent-delivered SelectionNotify has bit 7 set (`0x9F` = 31&#124;0x80), masked with `0x7f`; bounded property waits + 5 s liveness tick. | `Phase11X11Clip.kt`, `x11clip.c` | Notepad++ marker in Xvfb | phone | X11->Android: `notify target=238 prop=242`, `property bytes=133`, `x11->android len=133 sha=8d80920a`. Android->X11: claim/serve works (`android->x11 len=133`, `selection owner=2097664`) but Notepad++ Ctrl+V issued **no SelectionRequest** - unverified, SKIP row. |
+| 5 lock import | `view --lock-max-seconds 180` on the dev path; new `lock-inject --import <path>` = foreground-PID check before every synthetic key, Ctrl+O, dialog `#32770` PID check, path typed, Enter; `--click-exit` for the Exit button. | `view.rs`, `lock.rs`, `HarnessReceiver.kt` | phone lock desktop, 1 MB file | phone | `LOCK engaged switch_ms=19, first_frame_after_engage_ms=413`; saved `import-1mb.bin` 1,048,576 B SHA-256 `1c59b867...5a1afe38` == PC; `--click-exit` -> `switch_ms=21 total_ms=110`. |
+| B-102 keepalive | A link reconnect makes the receiver release camera+mic, but the page keeps its MediaStream and no track event fires, so nothing re-sends `cam-on` and the webcam stays dark until reload. The shim now re-asserts `cam-on` after ~3 s of frozen frames (the receiver ignores duplicates). | `camera-shim.js` | kill + restart the view mid-stream | phone (dev path) | after the restart the camera came back on its own: page frames 260->281, PC `CAM stream frames=` resumed; no reload, no user action. |
+| B-101 audio | Measured the real path before the fix: packets arrive in **bursts of ~5 every 50 ms** (adb-forward TCP coalescing), the 30 ms target drained empty between bursts, and the 60 ms age window rejected the late arrivals (`age_ms=n/a`). Fix: target 6 packets (above one burst), re-buffer after a gap counting **one** underrun per gap, age window -50..500 ms, and log the device buffer (`AUDIO device buffer=N frames (N ms)`, `devbuf_ms=` in stats). | `audio.rs`, `view.rs` | PC-only `audiotest --seconds 10`; real-path run blocked | PC-only + code | pre-fix real path: `underruns=29185` over 17,389 packets (~20/s), depth 1, `age_ms=n/a`. PC-only after fix: `packets=1000 played=1000 late=0 dropped=0 underruns=1 depth_end=0` (the 1 is the priming pump before the first packet), `window_ms=11203 frames_written=480000 max_padding=960`; loopback baseline 0.00057 / during 0.00060 / after 0.00056 / max 0.00063. Real-path re-measure BLOCKED (phone password-locked; MediaProjection consent needs the unlock). |
+| Gates | Android unit tests + lint + assemble; PC tests + clippy; whitespace. | - | - | code-only | Android **169 tests / 0 fail / 3 skip**, lint + assemble `BUILD SUCCESSFUL` (48 s); PC **75/0** `cargo test --release`; `cargo clippy --release --all-targets` clean; `git diff --check` exit 0. |
+
+### What failed or was skipped (round 2)
+
+- **Android -> X11 paste** stayed unverified: Wine made no SelectionRequest (`no served request`),
+  and a background Android clipboard read is refused while WhatsApp is foreground. Timeboxed,
+  SKIP row.
+- **Real-path audio after the B-101 fix**: the phone went to a password lock at ~11:50 and the
+  MediaProjection consent does not survive a link-session end (`P11AUDIO session open, waiting
+  for consent`). The 10 s tone/underrun and the click end-to-end delay could not be re-measured;
+  only the pre-fix numbers and the PC-only buffer result exist. SKIP row.
+- **A deliberate 5 s hand cover** never happened inside any OWNER window (six windows). Numbers
+  and a real observed luminance drop are recorded; that is not the requested proof.
+- **zoom.us/test** was not tried.
+- **fps above 10** is not achievable: the PC capture device is the cap, not the code.
+
+### Bugs (round 2)
+
+- **B-102** logged and fixed: webcam stays off after a link reconnect (description and
+  evidence above and in BUGS.md).
+- **B-101** fix written and unit/PC-tested; its real-path proof is still open (blocked), so the
+  row stays open until a locked-free re-measure.
+
+```
+PHASE 11 GATE: NOT FULLY PASSED - item 3(a)(b) pass on the phone on the dev path (external
+https://webcamtests.com sees 640x360 / 11 fps / "Testing was completed successfully"; shim
+6-9 -> 10-11 fps, PC sends 10.0 fps = device cap). Item 3(c) numbers recorded but no
+deliberate 5 s cover. Item 4 X11->Android pass, Android->X11 unverified. Item 5 lock import
+pass (switch_ms=19, import SHA match, Exit switch_ms=21 total_ms=110). B-102 fixed and
+verified. B-101 fix + PC-only 10 s tone (underruns=1 at priming, 0 after); real-path
+re-measure blocked by the phone password lock. Gates: Android 169/0/3 + lint + assemble,
+PC 75/0 + clippy clean, git diff --check 0. No commit made.
+AUDIO: phone -> PC works end to end (tone proven earlier); B-101 jitter/re-buffer fixed;
+       underruns 29185 -> 1 (PC-only 10 s); real-path re-measure and click delay BLOCKED
+       (phone locked, MediaProjection consent).
+CLIPBOARD: X11 -> Android pass; Android -> X11 unverified (Wine issues no SelectionRequest).
+FILES: phone <-> PC pass (1 MB lock import SHA match this round; 20 MB + 1 MB earlier).
+WEBCAM+MIC: PC camera visible in an external page at 640x360 / 11 fps, mic RMS present,
+       release on stop; B-102 keepalive verified.
+```

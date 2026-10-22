@@ -70,7 +70,22 @@ fn main() -> ExitCode {
                     ExitCode::FAILURE
                 }
             }
-        }        #[cfg(windows)]
+        }
+        #[cfg(windows)]
+        "loopback" => {
+            let secs: f32 = flag(&args[2..], "--seconds", "3").parse().unwrap_or(3.0);
+            match audio::loopback_level(secs) {
+                Ok(text) => {
+                    println!("{text}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("loopback: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        #[cfg(windows)]
         "aoa" => cmd_aoa(&args[2..]),
         "pair" => cmd_pair(&args[2..]),
         "bench" => cmd_bench(&args[2..]),
@@ -108,6 +123,7 @@ fn main() -> ExitCode {
             };
             let expect = flag(rest, "--expect", "");
             let shot = flag(rest, "--shot", "");
+            let import = flag(rest, "--import", "");
             let windows = rest.iter().any(|a| a == "--windows");
             code(lock::cmd_inject(
                 keys,
@@ -116,6 +132,7 @@ fn main() -> ExitCode {
                 if shot.is_empty() { None } else { Some(&shot) },
                 windows,
                 if expect.is_empty() { None } else { Some(&expect) },
+                if import.is_empty() { None } else { Some(&import) },
             ))
         }
         "trust" => cmd_trust(&args[2..]),
@@ -160,7 +177,7 @@ fn print_usage() {
          udreceiver lock-recover                         restore a dirty journal / return input to Default\n  \
          udreceiver lock-guard --parent <pid>            (internal) crash supervisor for a lock session\n  \
          udreceiver lock-selftest [--seconds <s>]        switch, inject 8 blocked keys, restore\n  \
-         udreceiver lock-inject [--keys] [--click <x>,<y>] [--click-exit] [--expect <desktop>]\n  \
+         udreceiver lock-inject [--keys] [--click <x>,<y>] [--click-exit] [--import <path>] [--expect <desktop>]\n  \
          udreceiver trust list\n  udreceiver trust forget <fpr-prefix>"
     );
 }

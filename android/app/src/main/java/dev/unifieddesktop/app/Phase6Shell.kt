@@ -142,6 +142,11 @@ class ShellRoot(context: Context) : FrameLayout(context) {
     fun x11Content(): X11WindowContent? =
         frames.values.firstNotNullOfOrNull { it.content as? X11WindowContent }
 
+    /** Phase 11 D-e: the live Browser WebView. The injected shim checks for itself, so
+     *  pushing into a page without it is a no-op (`window.udCam && ...`). */
+    fun cameraWeb(): android.webkit.WebView? =
+        frames.values.firstNotNullOfOrNull { (it.content as? BrowserView)?.web }
+
     /** The catalog, read once; the start menu and the App Center share these entries. */
     private val catalog: List<CatalogApp> by lazy {
         try {

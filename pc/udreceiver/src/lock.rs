@@ -58,13 +58,14 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, SetFocus, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE,
-    KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, MOUSEINPUT, MOUSEEVENTF_ABSOLUTE,
+    KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEINPUT, MOUSEEVENTF_ABSOLUTE,
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, VIRTUAL_KEY, VK_CONTROL,
     VK_ESCAPE, VK_F4, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     GetClassNameW, GetClientRect, GetForegroundWindow, GetSystemMetrics, GetWindowTextW,
+    GetWindowThreadProcessId,
     KillTimer, LoadCursorW, PeekMessageW, PostMessageW, RegisterClassW, SetCursor,
     SetForegroundWindow, SetTimer, SetWindowPos, SetWindowsHookExW, ShowWindow, TranslateMessage,
     UnhookWindowsHookEx, HC_ACTION, HTCLIENT, HWND_TOPMOST, IDC_ARROW, KBDLLHOOKSTRUCT, MSG,
@@ -964,6 +965,39 @@ fn tap(vk: u16) {
     std::thread::sleep(Duration::from_millis(25));
     send_key(vk, true);
     std::thread::sleep(Duration::from_millis(25));
+}
+
+/// One UTF-16 code unit as a Unicode keystroke (the file dialog's edit control).
+fn send_unicode_unit(unit: u16, up: bool) {
+    let flags = if up {
+        KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
+    } else {
+        KEYEVENTF_UNICODE
+    };
+    let input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(0),
+                wScan: unit,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    unsafe {
+        SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// PID of a window, used to prove the foreground belongs to the receiver.
+fn window_pid(hwnd: HWND) -> u32 {
+    let mut pid = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    }
+    pid
 }
 
 /// All eight blocked combinations, injected from the lock desktop.
@@ -2209,6 +2243,7 @@ pub fn cmd_inject(
     shot: Option<&str>,
     windows: bool,
     expect: Option<&str>,
+    import: Option<&str>,
 ) -> i32 {
     let desk = match unsafe {
         OpenInputDesktop(
@@ -2246,6 +2281,62 @@ pub fn cmd_inject(
     if keys {
         inject_all_keys();
         println!("lock-inject: injected 8 blocked-key combinations (harness-injected)");
+    }
+    if let Some(path) = import {
+        // PC input safety: every synthetic keystroke below is only sent after the
+        // foreground window is proven to belong to the receiver process that owns the
+        // lock (the status journal's pid). Anything else is refused.
+        let st = read_status_file();
+        let receivers_pid = st.pid;
+        let (_, _, fg) = foreground_info();
+        let fg_pid = window_pid(HWND(fg as *mut std::ffi::c_void));
+        if receivers_pid == 0 || fg_pid != receivers_pid {
+            eprintln!(
+                "lock-inject: import refused: foreground pid={fg_pid}, receiver pid={receivers_pid}"
+            );
+            let _ = unsafe { CloseDesktop(desk) };
+            return 1;
+        }
+        println!(
+            "lock-inject: import foreground verified: hwnd=0x{fg:x} pid={fg_pid} == receiver; sending Ctrl+O"
+        );
+        send_key(VK_CONTROL.0, false);
+        std::thread::sleep(Duration::from_millis(25));
+        tap(0x4F); // O
+        send_key(VK_CONTROL.0, true);
+        std::thread::sleep(Duration::from_millis(900));
+        let (cls, title, dlg) = foreground_info();
+        let dlg_pid = window_pid(HWND(dlg as *mut std::ffi::c_void));
+        println!(
+            "lock-inject: dialog hwnd=0x{dlg:x} class='{cls}' title='{title}' pid={dlg_pid}"
+        );
+        if dlg_pid != receivers_pid {
+            eprintln!(
+                "lock-inject: import refused: dialog pid={dlg_pid}, receiver pid={receivers_pid}"
+            );
+            let _ = unsafe { CloseDesktop(desk) };
+            return 1;
+        }
+        // The standard file dialog puts focus on the file-name edit; Alt+N re-focuses it
+        // explicitly. The dialog is our own process (verified above).
+        send_key(VK_MENU.0, false);
+        std::thread::sleep(Duration::from_millis(20));
+        tap(0x4E); // N
+        send_key(VK_MENU.0, true);
+        std::thread::sleep(Duration::from_millis(200));
+        let units: Vec<u16> = path.encode_utf16().collect();
+        for u in &units {
+            send_unicode_unit(*u, false);
+            send_unicode_unit(*u, true);
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        std::thread::sleep(Duration::from_millis(150));
+        tap(0x0D); // Enter
+        println!(
+            "lock-inject: typed import path ({}) and pressed Enter (dialog pid={dlg_pid})",
+            units.len()
+        );
+        std::thread::sleep(Duration::from_millis(700));
     }
     if let Some(path) = shot {
         match screenshot_bmp(std::path::Path::new(path)) {

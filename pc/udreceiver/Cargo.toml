@@ -7,6 +7,9 @@ edition = "2021"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
 ring = "0.17"
 rcgen = "0.14"
+# Phase 11 D-e (added to THIRD_PARTY.md before first use): pure-Rust baseline JPEG encoder
+# for the PC webcam frames sent to the phone shim.
+jpeg-encoder = "0.6"
 
 # AOA switch for item 8 (THIRD_PARTY.md row added 2026-10-18 before first use).
 # Phase 5 adds windowing/input + Media Foundation + D3D11 (row updated 2026-10-19).

@@ -4,6 +4,9 @@
  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+ <!-- Phase 11 D-b: phone playback capture (AudioPlaybackCapture) for our own uid only. -->
+ <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
  <uses-permission android:name="android.permission.WAKE_LOCK"/>
  <!-- The phone can also be the USB accessory side (Phase 4 AOA); host UI not required. -->
@@ -28,7 +31,7 @@
   <!-- Phase 4 link: the foreground service owning the PC session (B-027/B-033/B-035). -->
   <service android:name=".Phase4LinkService"
            android:exported="false"
-           android:foregroundServiceType="connectedDevice|dataSync"/>
+           android:foregroundServiceType="connectedDevice|dataSync|mediaProjection"/>
   <!-- AOA attachment entry: Android shows the "Open with [our app]?" dialog once and
        always stays with the ticked box (USER_WORKFLOW 2.3; developer mode never needed). -->
   <activity android:name=".Phase4AccessoryActivity" android:exported="true" android:label="Unified Desktop">
