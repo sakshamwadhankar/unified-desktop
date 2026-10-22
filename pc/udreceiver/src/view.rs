@@ -48,7 +48,8 @@ use windows::Win32::Graphics::Dxgi::{
     IDXGIDevice, IDXGIFactory2, IDXGISwapChain1, IDXGISwapChain2, DXGI_MWA_NO_ALT_ENTER,
     DXGI_SCALING_STRETCH,
     DXGI_PRESENT, DXGI_PRESENT_ALLOW_TEARING, DXGI_SWAP_CHAIN_DESC1,
-    DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING, DXGI_SWAP_EFFECT_FLIP_DISCARD,
+    DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING,
+    DXGI_SWAP_EFFECT_FLIP_DISCARD,
     DXGI_USAGE_RENDER_TARGET_OUTPUT,
 };
 use windows::Win32::Media::MediaFoundation::{
@@ -126,6 +127,9 @@ struct Shared {
     win_h: i32,
     client_w: AtomicU32,
     client_h: AtomicU32,
+    /// D8: the desktop size the phone renders, chosen from the client aspect before video-on.
+    desktop_w: AtomicU32,
+    desktop_h: AtomicU32,
     need_keyframe: AtomicU32,
     release_all: AtomicU32,
     presented: AtomicU64,
@@ -160,6 +164,8 @@ impl Shared {
             win_h: h,
             client_w: AtomicU32::new(1920),
             client_h: AtomicU32::new(1080),
+            desktop_w: AtomicU32::new(1920),
+            desktop_h: AtomicU32::new(1080),
             need_keyframe: AtomicU32::new(0),
             release_all: AtomicU32::new(0),
             presented: AtomicU64::new(0),
@@ -220,6 +226,14 @@ impl Shared {
         (
             self.client_w.load(Ordering::SeqCst) as i32,
             self.client_h.load(Ordering::SeqCst) as i32,
+        )
+    }
+
+    /// D8: the desktop the phone asked us to render for. Fixed for the whole session.
+    fn desktop(&self) -> (i32, i32) {
+        (
+            self.desktop_w.load(Ordering::SeqCst) as i32,
+            self.desktop_h.load(Ordering::SeqCst) as i32,
         )
     }
 }
@@ -576,8 +590,14 @@ fn create_window(shared: &Arc<Shared>) -> Result<HWND, String> {
         focus_window(hwnd);
         let mut rc = RECT::default();
         let _ = GetClientRect(hwnd, &mut rc);
-        shared.client_w.store((rc.right - rc.left).max(1) as u32, Ordering::SeqCst);
-        shared.client_h.store((rc.bottom - rc.top).max(1) as u32, Ordering::SeqCst);
+        let cw = (rc.right - rc.left).max(1);
+        let ch = (rc.bottom - rc.top).max(1);
+        shared.client_w.store(cw as u32, Ordering::SeqCst);
+        shared.client_h.store(ch as u32, Ordering::SeqCst);
+        // D8: one desktop size for the session, from this window's aspect (16:10 -> 1920x1200).
+        let (dw, dh) = phase5::desktop_for_client(cw, ch);
+        shared.desktop_w.store(dw as u32, Ordering::SeqCst);
+        shared.desktop_h.store(dh as u32, Ordering::SeqCst);
         Ok(hwnd)
     }
 }
@@ -604,10 +624,10 @@ fn now_us64() -> i64 {
 
 fn scaled(shared: &Shared, x: i32, y: i32) -> (i32, i32) {
     let (cw, ch) = shared.client();
-    // B-064: the same letterbox math the blit uses, now pure and unit-tested in phase5.rs
-    // (`scale_client_to_desktop`). The old inline copy was correct, but the round's clicks
-    // were aimed with video-rectangle pixels, which skipped the bar offset.
-    phase5::scale_client_to_desktop(x, y, cw, ch)
+    // B-064: the same letterbox math the blit uses, now pure and unit-tested in phase5.rs.
+    // D8: the target is the negotiated desktop, not the old fixed 1920x1080.
+    let (dw, dh) = shared.desktop();
+    phase5::scale_client_to_desktop_for(x, y, cw, ch, dw, dh)
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -632,6 +652,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let w = (lparam.0 & 0xFFFF) as u32;
             let h = ((lparam.0 >> 16) & 0xFFFF) as u32;
             if w > 0 && h > 0 {
+                println!("[{TAG}] WM_SIZE {w}x{h}");
                 shared.client_w.store(w, Ordering::SeqCst);
                 shared.client_h.store(h, Ordering::SeqCst);
             }
@@ -784,6 +805,7 @@ struct Pipeline {
     present_sync: u32,
     present_flags: u32,
     awaiting_keyframe: bool,
+    geom_logged: bool,
     logged_frames: u64,
     /// B-047: every access unit the phone sent, decoded or not (the video-on pacer stops on
     /// the first one).
@@ -911,6 +933,7 @@ fn pipeline_loop(
         present_sync,
         present_flags,
         awaiting_keyframe: false,
+        geom_logged: false,
         logged_frames: 0,
         frames_in: 0,
         frames: std::collections::VecDeque::with_capacity(FRAME_RING),
@@ -938,6 +961,10 @@ fn pipeline_loop(
     let mut media = MediaBridge::new();
     // B-047: ask for video; keep asking until the first access unit shows up.
     let mut video_on = phase5::VideoOnPacer::new();
+    // D8: tell the phone the desktop size once, on the first ask, before video-on. Both
+    // messages share the priority writer, so the phone sees the size before it creates
+    // the encoder and the shell.
+    let mut display_sent = false;
     let started_at = Instant::now();
 
     'pipeline: while shared.running.load(Ordering::SeqCst) {
@@ -974,6 +1001,16 @@ fn pipeline_loop(
         // exists. `pair` and `bench` do not run this loop at all.
         if video_on.due(started_at.elapsed().as_millis() as u64, p.frames_in > 0) {
             let mut w = PriorityWriter::new(&mut session.tls);
+            if !display_sent {
+                let (dw, dh) = shared.desktop();
+                let (cw, ch) = shared.client();
+                let _ = w.push(Message::new(
+                    CH_CONTROL,
+                    format!("display {dw} {dh}").into_bytes(),
+                )?);
+                println!("[{TAG}] -> phone display {dw}x{dh} (client {cw}x{ch})");
+                display_sent = true;
+            }
             let _ = w.push(Message::new(
                 CH_CONTROL,
                 phase5::CTRL_VIDEO_ON.as_bytes().to_vec(),
@@ -1709,6 +1746,34 @@ impl Pipeline {
     }
 
     /// Drain every decodable frame and put it on screen. Returns how many were presented.
+    /// Phase 13: a window resize (F11, a DPI change) changes the client but not the desktop.
+    /// Resize the swap chain so the picture still fills the window; without this the old
+    /// back buffer keeps only the top-left of a larger dest rect (the 2.2x crop seen on the
+    /// 03:56 capture). The video processor output view is created per blit, so it follows.
+    fn ensure_swap_size(&mut self, out_w: i32, out_h: i32) -> Result<(), String> {
+        let d = unsafe { self.swap.GetDesc1() }.map_err(|e| format!("GetDesc1: {e}"))?;
+        if d.Width as i32 == out_w && d.Height as i32 == out_h {
+            return Ok(());
+        }
+        unsafe {
+            self.swap
+                .ResizeBuffers(
+                    0,
+                    out_w.max(2) as u32,
+                    out_h.max(2) as u32,
+                    d.Format,
+                    DXGI_SWAP_CHAIN_FLAG(d.Flags as i32),
+                )
+                .map_err(|e| format!("ResizeBuffers {out_w}x{out_h}: {e}"))?;
+        }
+        println!(
+            "[{TAG}] swap chain resized {}x{} -> {out_w}x{out_h}",
+            d.Width, d.Height
+        );
+        self.vp = None;
+        Ok(())
+    }
+
     fn drain_outputs(&mut self) -> Result<usize, String> {
         let mut produced = 0usize;
         loop {
@@ -1774,6 +1839,16 @@ impl Pipeline {
             }
             let (in_w, in_h) = (self.dec.out_w, self.dec.out_h);
             let (out_w, out_h) = self.shared.client();
+            let (desk_w, desk_h) = self.shared.desktop();
+            self.ensure_swap_size(out_w, out_h)?;
+            if !self.geom_logged {
+                let d = unsafe { self.swap.GetDesc1() }.unwrap_or_default();
+                println!(
+                    "[{TAG}] geom client={out_w}x{out_h} swap={}x{} desk={desk_w}x{desk_h} dec={in_w}x{in_h}",
+                    d.Width, d.Height
+                );
+                self.geom_logged = true;
+            }
             if self.dec.d3d11 {
                 let need_new = match &self.vp {
                     Some(v) => v.key != (in_w, in_h, out_w, out_h),
@@ -1783,9 +1858,9 @@ impl Pipeline {
                     self.vp = Some(VideoProc::build(&self.video_device, in_w, in_h, out_w, out_h)?);
                 }
                 let v = self.vp.as_ref().ok_or("no video processor")?;
-                blit_dxgi(&self.video_ctx, &self.video_device, v, &self.dec, &self.swap, in_w, in_h, out_w, out_h)?;
+                blit_dxgi(&self.video_ctx, &self.video_device, v, &self.dec, &self.swap, in_w, in_h, out_w, out_h, desk_w, desk_h)?;
             } else {
-                blit_soft(&self.d3d_ctx, &mut self.dec, &self.swap)?;
+                blit_soft(&self.d3d_ctx, &mut self.dec, &self.swap, desk_w, desk_h)?;
             }
             produced += 1;
         }
@@ -2246,6 +2321,8 @@ fn blit_dxgi(
     in_h: i32,
     out_w: i32,
     out_h: i32,
+    desk_w: i32,
+    desk_h: i32,
 ) -> Result<(), String> {
     let tex = dec.latest.as_ref().ok_or("no decoded texture")?;
     unsafe {
@@ -2276,7 +2353,7 @@ fn blit_dxgi(
         let out_view = out_view.ok_or("no output view")?;
 
         // Keep the aspect ratio: fit the visible desktop inside the window.
-        let (vis_w, vis_h) = visible_size(in_w, in_h);
+        let (vis_w, vis_h) = visible_size(in_w, in_h, desk_w, desk_h);
         let (dw, dh) = fit(vis_w, vis_h, out_w, out_h);
         let dest = RECT {
             left: (out_w - dw) / 2,
@@ -2319,7 +2396,7 @@ fn blit_dxgi(
 }
 
 /// System-memory NV12 -> BGRA -> back buffer (fallback path, no scaling).
-fn blit_soft(d3d_ctx: &ID3D11DeviceContext, dec: &mut Decoder, swap: &IDXGISwapChain1) -> Result<(), String> {
+fn blit_soft(d3d_ctx: &ID3D11DeviceContext, dec: &mut Decoder, swap: &IDXGISwapChain1, desk_w: i32, desk_h: i32) -> Result<(), String> {
     let (w, h) = (dec.out_w.max(2), dec.out_h.max(2));
     if dec.soft_nv12.is_empty() {
         return Ok(());
@@ -2366,7 +2443,7 @@ fn blit_soft(d3d_ctx: &ID3D11DeviceContext, dec: &mut Decoder, swap: &IDXGISwapC
         back.GetDesc(&mut bdesc);
         let (bw, bh) = (bdesc.Width as i32, bdesc.Height as i32);
         // Crop the decoder's macroblock padding, exactly as the hardware path does.
-        let (vis_w, vis_h) = visible_size(w, h);
+        let (vis_w, vis_h) = visible_size(w, h, desk_w, desk_h);
         let (dw, dh) = fit(vis_w, vis_h, bw, bh);
         let src_box = D3D11_BOX {
             left: 0,
@@ -2387,11 +2464,16 @@ fn blit_soft(d3d_ctx: &ID3D11DeviceContext, dec: &mut Decoder, swap: &IDXGISwapC
 /// 1920x1088. Those last eight rows contain no picture data: scaled into the window they leave
 /// the green band seen below the taskbar (B-085). The input type declares the real desktop size,
 /// so the visible rectangle is the coded size clamped to that size.
-fn visible_size(in_w: i32, in_h: i32) -> (i32, i32) {
-    (
-        in_w.clamp(2, phase5::DESKTOP_W),
-        in_h.clamp(2, phase5::DESKTOP_H),
-    )
+/// H.264 codes picture in 16x16 macroblocks, so the decoder pads 1920x1080 to 1920x1088 and a
+/// half-size 960x1200 stream to 960x1216. Those extra rows contain no picture data: scaled into
+/// the window they leave the green band seen below the taskbar (B-085). The desktop size declares
+/// the real aspect, so crop the coded height to that aspect (D8).
+fn visible_size(in_w: i32, in_h: i32, desk_w: i32, desk_h: i32) -> (i32, i32) {
+    let in_w = in_w.max(2);
+    let in_h = in_h.max(2);
+    let (dw, dh) = (desk_w.max(2), desk_h.max(2));
+    let aspect_h = ((in_w as f64 * dh as f64 / dw as f64).round() as i32).clamp(2, in_h);
+    (in_w, aspect_h)
 }
 
 /// Fit `iw x ih` inside `ow x oh`, keeping the aspect ratio.
@@ -2496,13 +2578,17 @@ mod tests {
     /// desktop). Only the declared desktop area is picture; the padding must be cropped.
     #[test]
     fn macroblock_padding_is_cropped() {
-        assert_eq!(visible_size(1920, 1088), (1920, 1080));
-        assert_eq!(visible_size(1920, 1080), (1920, 1080));
-        assert_eq!(visible_size(1280, 720), (1280, 720));
-        assert_eq!(visible_size(640, 480), (640, 480));
-        // Never produce an empty or oversized rectangle.
-        assert_eq!(visible_size(1, 1), (2, 2));
-        assert_eq!(visible_size(4096, 2160), (1920, 1080));
+        assert_eq!(visible_size(1920, 1088, 1920, 1080), (1920, 1080));
+        assert_eq!(visible_size(1920, 1080, 1920, 1080), (1920, 1080));
+        assert_eq!(visible_size(1280, 736, 1920, 1080), (1280, 720));
+        assert_eq!(visible_size(640, 368, 1920, 1080), (640, 360));
+        // Never produce an empty rectangle.
+        assert_eq!(visible_size(1, 1, 1920, 1080), (2, 2));
+        assert_eq!(visible_size(4096, 2160, 1920, 1080), (4096, 2160));
+        // D8: a 16:10 desktop keeps all 1200 rows (no 1080 crop, no green band).
+        assert_eq!(visible_size(1920, 1216, 1920, 1200), (1920, 1200));
+        // The governor's half-size 960x600 stream pads to 960x608: crop to 600, not 1200.
+        assert_eq!(visible_size(960, 608, 1920, 1200), (960, 600));
     }
 
     /// B-067: raw Windows timeout/pending codes from a socket read are transient (the loop

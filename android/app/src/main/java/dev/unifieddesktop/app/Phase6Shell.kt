@@ -28,26 +28,33 @@ import android.widget.TextView
  * Windows live in [model] (`ShellModel`, pure logic, unit-tested); this class only mirrors
  * the model into child views.
  */
-class ShellRoot(context: Context) : FrameLayout(context) {
+class ShellRoot(
+    context: Context,
+    /** D8: the desktop the PC asked for; the shell lays out at exactly this size. */
+    val desktopW: Int = Phase5Desktop.W,
+    val desktopH: Int = Phase5Desktop.H,
+) : FrameLayout(context) {
 
     companion object {
         const val TAG = "Phase6"
-        /** Desktop pixels; the display is 1920x1080 at 240 dpi (Phase-5 numbers). */
-        const val DESKTOP_W = Phase5Desktop.W
-        const val DESKTOP_H = Phase5Desktop.H
-        const val TASKBAR_H = 64
-        const val TITLE_H = 44
+        const val TASKBAR_H = Theme.TASKBAR_H
+        const val TITLE_H = Theme.TITLE_H
     }
 
-    val model = ShellModel(DESKTOP_W, DESKTOP_H, TASKBAR_H)
+    val model = ShellModel(desktopW, desktopH, TASKBAR_H)
 
     /** Fired whenever the shell's state changes, for the link's stats line. */
     var onChanged: (() -> Unit)? = null
 
+    private val wallpaper = WallpaperView(context)
     private val cursorView = CursorView(context)
     private val taskbar = TaskbarView(context)
     private val startMenu = StartMenuView(context)
+    private val contextMenu = DesktopContextMenu(context)
     private val frames = HashMap<Int, ShellWindowView>()
+
+    /** Remembered window rectangles, per app (UX_AUDIT D5), in the shell's own preferences. */
+    private val prefs by lazy { context.getSharedPreferences("shell", Context.MODE_PRIVATE) }
 
     /**
      * Harness-only typing probe (Phase 12 round 2). The Phase-5 latency probe reports the
@@ -95,8 +102,8 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         }
     }
 
-    private var cursorX = DESKTOP_W / 2
-    private var cursorY = DESKTOP_H / 2
+    private var cursorX = desktopW / 2
+    private var cursorY = desktopH / 2
 
     private val heldKeys = HashSet<Int>()
     private val heldButtons = HashSet<Int>()
@@ -107,20 +114,47 @@ class ShellRoot(context: Context) : FrameLayout(context) {
     private var keyAtFocused = 0
 
     init {
-        setBackgroundColor(0xFF10312B.toInt()) // a calm wallpaper
+        // Layer order, bottom to top: wallpaper, windows, taskbar, start menu, cursor. The
+        // taskbar is re-raised after every window change, so it is always above windows
+        // (UX_AUDIT D4/A1: a maximized window used to cover the clock).
+        addView(wallpaper, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         taskbar.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, TASKBAR_H).apply {
             gravity = android.view.Gravity.BOTTOM
         }
         addView(taskbar)
         addView(startMenu)
+        addView(contextMenu)
         addView(probeChip)
         addView(cursorView)
         startMenu.visibility = GONE
+        contextMenu.visibility = GONE
+        contextMenu.onPick = { id ->
+            when (id) {
+                "appcenter" -> openApp(App.APPCENTER)
+                "files" -> openApp(App.FILES)
+                "wallpaper", "settings" -> openApp(App.SETTINGS)
+            }
+        }
         taskbar.onStart = { toggleStartMenu() }
         taskbar.onWindowButton = { id -> onTaskbarWindowClick(id) }
+        taskbar.iconFor = { id ->
+            frames[id]?.let { it.app.iconKind() to it.app.iconColor() }
+                ?: (DeskIcon.WINDOW to Theme.ACCENT)
+        }
         startMenu.onLaunch = { app -> openApp(app); closeStartMenu() }
         startMenu.onLaunchInstalled = { id -> openCatalogApp(id); closeStartMenu() }
+        SettingsDispatch.onWallpaperPick = { i -> setWallpaper(i) }
     }
+
+    /** Change the desktop wallpaper (Settings or the desktop menu) and remember it. */
+    fun setWallpaper(index: Int) {
+        val i = index.coerceIn(0, Wallpaper.styles.size - 1)
+        wallpaper.index = i
+        Wallpaper.save(context, i)
+        runCatching { SettingsDispatch.wallpaperChanged(i) }
+    }
+
+    fun wallpaperIndex(): Int = wallpaper.index
 
     // ------------------------------------------------------------------ windows
 
@@ -166,9 +200,23 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         } else {
             app.title()
         }
-        val win = model.open(initialTitle, 900, 620)
+        val workH = desktopH - TASKBAR_H
+        val defW = (desktopW * 0.70f).toInt()
+        val defH = (workH * 0.70f).toInt()
+        val saved = rememberedRect(app)
+        val win = if (saved != null) {
+            model.open(initialTitle, saved[2], saved[3], saved[0], saved[1])
+        } else {
+            // D5: centred in the work area at about 70 %; a small cascade keeps a second
+            // window from covering the first exactly.
+            val n = model.size()
+            val cx = ((desktopW - defW) / 2 + n * 24).coerceIn(0, (desktopW - defW).coerceAtLeast(0))
+            val cy = ((workH - defH) / 2 + n * 20).coerceIn(0, (workH - defH).coerceAtLeast(0))
+            model.open(initialTitle, defW, defH, cx, cy)
+        }
         val frame = ShellWindowView(context, win, app, guest)
         frame.onDragBy = { id, dx, dy, edges -> frameDrag(id, dx, dy, edges) }
+        frame.onDragEnd = { id, x, y -> frameDragEnd(id, x, y) }
         frame.onClose = { closeWindow(it) }
         frame.onMinimize = { minimizeWindow(it) }
         frame.onMaximize = { id -> model.toggleMaximize(id); syncViews() }
@@ -271,10 +319,35 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     fun closeWindow(id: Int) {
         val f = frames.remove(id) ?: return
+        saveWindowRect(f)
         if (f.content is AppCenterView) appCenter = null
         removeView(f)
         model.close(id)
         syncViews()
+    }
+
+    // ------------------------------------------------------------- window memory
+
+    private fun rectKey(app: App): String = "win_" + app.name
+
+    private fun rememberedRect(app: App): IntArray? {
+        val s = prefs.getString(rectKey(app), null) ?: return null
+        val parts = s.split(',').mapNotNull { it.trim().toIntOrNull() }
+        return if (parts.size == 4 && parts[2] > 0 && parts[3] > 0) parts.toIntArray() else null
+    }
+
+    private fun saveWindowRect(f: ShellWindowView) {
+        prefs.edit().putString(rectKey(f.app), f.win.rect().joinToString(",")).apply()
+    }
+
+    /** Persist every open window's rectangle (called when the desktop goes away). */
+    fun persistWindows() {
+        for (f in frames.values) saveWindowRect(f)
+    }
+
+    override fun onDetachedFromWindow() {
+        persistWindows()
+        super.onDetachedFromWindow()
     }
 
     /** Close the X11 frame (its content reconnects when the next X11 app opens). */
@@ -318,7 +391,11 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         // z-order: model order is bottom-to-top. bringChildToFront keeps Android's touch
         // targets alive (remove+add would cancel a drag in progress), so raise in that order.
         for (win in model.all()) frames[win.id]?.let { bringChildToFront(it) }
+        // ... then the chrome above every window: taskbar, menu, probe, cursor.
+        taskbar.bringToFront()
         if (startMenu.visibility == View.VISIBLE) startMenu.bringToFront()
+        if (contextMenu.visibility == View.VISIBLE) contextMenu.bringToFront()
+        probeChip.bringToFront()
         cursorView.bringToFront()
         taskbar.buttons = model.taskbar()
         taskbar.invalidate()
@@ -331,6 +408,37 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     fun toggleStartMenu() {
         if (startMenu.visibility == View.VISIBLE) closeStartMenu() else openStartMenu()
+    }
+
+    // ------------------------------------------------------------------ desktop menu
+
+    private val menuW = 200
+    private val menuH = 4 * 32 + 8
+
+    fun contextMenuOpen(): Boolean = contextMenu.visibility == View.VISIBLE
+
+    /** Show at the click, clamped so the whole panel stays above the taskbar. */
+    private fun showContextMenu(x: Int, y: Int) {
+        val left = x.coerceIn(4, (desktopW - menuW - 4).coerceAtLeast(4))
+        val top = y.coerceIn(4, (desktopH - TASKBAR_H - menuH - 4).coerceAtLeast(4))
+        contextMenu.layoutParams = LayoutParams(menuW, LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = left
+            topMargin = top
+        }
+        contextMenu.visibility = View.VISIBLE
+        contextMenu.bringToFront()
+        probeChip.bringToFront()
+        cursorView.bringToFront()
+        requestLayout()
+        invalidate()
+        P7Log.say(context, "P7SHELL context menu at=$left,$top")
+    }
+
+    private fun hideContextMenu() {
+        if (contextMenu.visibility != View.GONE) {
+            contextMenu.visibility = View.GONE
+            invalidate()
+        }
     }
 
     /** Rebuild the installed section from the records (after an install or uninstall). */
@@ -347,21 +455,28 @@ class ShellRoot(context: Context) : FrameLayout(context) {
     fun openStartMenu() {
         refreshInstalledRows()
         startMenu.visibility = View.VISIBLE
-        // Anchor the menu's bottom edge to the top of the taskbar and let it grow upward:
-        // a fixed 300px panel clipped the fourth row at 240 dpi (seen in the first gate capture,
-        // 2026-10-19).
-        startMenu.layoutParams = LayoutParams(420, LayoutParams.WRAP_CONTENT).apply {
+        // D8/manager 03:56: 560 wide (was 440) and sized to its content, at most 70 % of the
+        // work area tall, so the search box and the top of the pinned row are always on
+        // screen. The list inside scrolls when it hits the cap; the panel sits just above
+        // the taskbar.
+        val workH = desktopH - TASKBAR_H
+        val menuH = minOf(startMenu.preferredHeight(), (workH * 0.70f).toInt())
+        startMenu.layoutParams = LayoutParams(560, menuH).apply {
             gravity = Gravity.BOTTOM or Gravity.START
-            bottomMargin = TASKBAR_H
+            leftMargin = 8
+            bottomMargin = TASKBAR_H + 8
         }
         startMenu.bringToFront()
         cursorView.bringToFront()
+        hideContextMenu()
+        startMenu.focusSearch()
         startMenu.invalidate()
         onChanged?.invoke()
     }
 
     fun closeStartMenu() {
         startMenu.visibility = View.GONE
+        startMenu.clearSearch()
         onChanged?.invoke()
     }
 
@@ -393,12 +508,19 @@ class ShellRoot(context: Context) : FrameLayout(context) {
      * hover only moves our cursor and updates the resize-handle feedback.
      */
     fun moveTo(x: Int, y: Int) {
-        cursorX = x.coerceIn(0, DESKTOP_W - 1)
-        cursorY = y.coerceIn(0, DESKTOP_H - 1)
+        cursorX = x.coerceIn(0, desktopW - 1)
+        cursorY = y.coerceIn(0, desktopH - 1)
         cursorView.setCursor(cursorX, cursorY)
         val frame = frameUnder(cursorX, cursorY)
         hoveredEdges = frame?.let { model.edgesAt(cursorX, cursorY, it.win) } ?: 0
-        for (f in frames.values) f.setHover(f === frame)
+        for (f in frames.values) {
+            if (f === frame) f.setHover(true, cursorX - f.win.x, cursorY - f.win.y) else f.setHover(false)
+        }
+        if (cursorY >= desktopH - TASKBAR_H) {
+            taskbar.hover(cursorX, cursorY - (desktopH - TASKBAR_H))
+        } else {
+            taskbar.hover(-1, -1)
+        }
         cursorView.hoverEdges = hoveredEdges
         cursorView.invalidate()
         // With a button held a "move" is a drag: the PC sends moves, not separate drag
@@ -435,7 +557,24 @@ class ShellRoot(context: Context) : FrameLayout(context) {
                 "under=${model.windowAt(x, y)?.title ?: "desktop"} focus=${model.focusedId ?: -1}")
         }
         moveTo(x, y)
+        if (button == Phase5Protocol.BTN_RIGHT) {
+            // Phase 13: a right-click on the wallpaper opens the desktop menu. A right-click
+            // anywhere else closes it (window/taskbar context menus are not part of this run).
+            if (down) {
+                hideContextMenu()
+                if (startMenuOpen()) closeStartMenu()
+                if (y < desktopH - TASKBAR_H && model.windowAt(x, y) == null) showContextMenu(x, y)
+            }
+            invalidate()
+            return
+        }
         if (button != Phase5Protocol.BTN_LEFT) { invalidate(); return }
+        // A left click outside an open desktop menu dismisses it before it reaches anything.
+        if (down && contextMenuOpen()) {
+            val inside = x >= contextMenu.left && x < contextMenu.right &&
+                y >= contextMenu.top && y < contextMenu.bottom
+            if (!inside) hideContextMenu()
+        }
         // click-anywhere-focuses: the window under the pointer is raised before its content
         // sees the press (the design rule), except for clicks on the desktop itself.
         if (down) {
@@ -456,8 +595,8 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     /** Pointer moved while a button is held: a real ACTION_MOVE to the same target. */
     fun dragTo(x: Int, y: Int) {
-        val cx = x.coerceIn(0, DESKTOP_W - 1)
-        val cy = y.coerceIn(0, DESKTOP_H - 1)
+        val cx = x.coerceIn(0, desktopW - 1)
+        val cy = y.coerceIn(0, desktopH - 1)
         cursorX = cx; cursorY = cy
         cursorView.setCursor(cx, cy)
         dispatchPointer(MotionEvent.ACTION_MOVE, cx, cy, 1)
@@ -476,6 +615,25 @@ class ShellRoot(context: Context) : FrameLayout(context) {
         onChanged?.invoke()
     }
 
+    /**
+     * D6: drop a dragged title bar at the top edge to maximise, or at the left/right edge to
+     * snap to that half. The pointer position is the title bar's press point in desktop
+     * coordinates.
+     */
+    internal fun frameDragEnd(id: Int, x: Int, y: Int) {
+        val f = frames[id] ?: return
+        val win = f.win
+        if (!win.maximized) {
+            when {
+                y <= 3 -> model.toggleMaximize(id)
+                x <= 3 -> model.snap(id, 0)
+                x >= desktopW - 4 -> model.snap(id, 1)
+            }
+        }
+        syncViews()
+        saveWindowRect(f)
+    }
+
     /** Wheel over the desktop: scroll whatever is under the pointer (the shell itself). */
     fun wheel(delta: Int, x: Int, y: Int) {
         moveTo(x, y)
@@ -491,6 +649,18 @@ class ShellRoot(context: Context) : FrameLayout(context) {
      */
     fun key(down: Boolean, keyCode: Int, scan: Int, meta: Int): Boolean {
         if (keyCode == 0) return false
+        // The Windows key opens the start menu from the PC keyboard (D3).
+        if (down && (keyCode == KeyEvent.KEYCODE_META_LEFT || keyCode == KeyEvent.KEYCODE_META_RIGHT)) {
+            toggleStartMenu()
+            return true
+        }
+        if (startMenuOpen()) {
+            if (down && keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                closeStartMenu()
+                return true
+            }
+            return startMenu.handleKey(down, keyCode, scan, meta)
+        }
         if (down) { heldKeys.add(keyCode); keysAllTime++ } else heldKeys.remove(keyCode)
         if (down && keyCode == KeyEvent.KEYCODE_F4 && (meta and KeyEvent.META_ALT_ON) != 0) {
             model.focusedId?.let { closeWindow(it) }
@@ -530,6 +700,7 @@ class ShellRoot(context: Context) : FrameLayout(context) {
 
     fun stats(): String =
         "windows=${model.size()} focused=${model.focusedId ?: -1} startMenu=${if (startMenuOpen()) 1 else 0} " +
+            "context=${if (contextMenuOpen()) 1 else 0} " +
             "keysDown=${heldKeys.size} buttonsDown=${heldButtons.size} keysAllTime=$keysAllTime " +
             "buttonsAllTime=$buttonsAllTime keyAtFocused=$keyAtFocused keyFlashes=$keyFlashes " +
             "drags=${dragCount}"

@@ -257,8 +257,8 @@ object Phase6Dispatch {
             // emulator's H.264 stream does not decode on the PC yet (BUGS B-057), so the pixels
             // are taken on the phone side with the same views the PC would show.
             "shot" -> {
-                val w = if (s.width > 0) s.width else ShellRoot.DESKTOP_W
-                val h = if (s.height > 0) s.height else ShellRoot.DESKTOP_H
+                val w = if (s.width > 0) s.width else s.desktopW
+                val h = if (s.height > 0) s.height else s.desktopH
                 val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
                 val c = android.graphics.Canvas(bmp)
                 c.drawColor(android.graphics.Color.BLACK)

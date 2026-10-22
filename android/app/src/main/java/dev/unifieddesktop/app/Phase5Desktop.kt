@@ -30,7 +30,12 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * Every method here runs on the UI thread; the link session posts to it.
  */
-class Phase5Desktop(private val context: Context, private val fallbackContext: Context? = null) {
+class Phase5Desktop(
+    private val context: Context,
+    private val fallbackContext: Context? = null,
+    wantedW: Int = W,
+    wantedH: Int = H,
+) {
     companion object {
         const val W = Phase5Protocol.DESKTOP_W
         const val H = Phase5Protocol.DESKTOP_H
@@ -51,9 +56,12 @@ class Phase5Desktop(private val context: Context, private val fallbackContext: C
     private var vd: VirtualDisplay? = null
     private var pres: Presentation? = null
 
-    /** Current display size; starts at the fixed desktop size and drops with the governor. */
-    @Volatile private var displayW = W
-    @Volatile private var displayH = H
+    /** Current display size; set from the PC's requested desktop size (D8). */
+    @Volatile private var displayW = wantedW
+    @Volatile private var displayH = wantedH
+
+    /** D8: the size the shell is laid out at (and the link's input coordinate space). */
+    fun size(): Pair<Int, Int> = displayW to displayH
 
     fun start(surface: Surface): Boolean {
         if (running) return true
@@ -74,7 +82,7 @@ class Phase5Desktop(private val context: Context, private val fallbackContext: C
             // (HarnessActivity.createDisplay). Adding VIRTUAL_DISPLAY_FLAG_PUBLIC makes the
             // window add fail with InvalidDisplayException on ColorOS (phone 2026-10-19).
             val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
-            val d = dm.createVirtualDisplay("phase5-desktop", W, H, DPI, surface, flags)
+            val d = dm.createVirtualDisplay("phase5-desktop", displayW, displayH, DPI, surface, flags)
             vd = d
             val display = d.display ?: throw RuntimeException("virtual display has no Display")
             // Do not gate on Display.getState(): for an app-created display this reads
@@ -125,7 +133,7 @@ class Phase5Desktop(private val context: Context, private val fallbackContext: C
                 android.util.Log.i(TAG, "shell density=" + shellContext.resources.displayMetrics.density +
                         " dpi=" + shellContext.resources.displayMetrics.densityDpi +
                         " displayDensity=" + displayContext.resources.displayMetrics.density)
-                p.setContentView(ShellRoot(shellContext).also {
+                p.setContentView(ShellRoot(shellContext, displayW, displayH).also {
                     // B-095: the PC draws the only mouse pointer during a PC session.
                     it.setPcPointerVisible(false)
                     desktop = it
@@ -174,31 +182,18 @@ class Phase5Desktop(private val context: Context, private val fallbackContext: C
         try { vd?.surface = null } catch (_: Throwable) {}
     }
 
-    /**
-     * Phase 12: really move the virtual display to a lower size. The Presentation and every
-     * shell window stay alive; Android relayouts them into the smaller display.
-     */
-    fun resizeDisplay(w: Int, h: Int): Boolean {
-        val d = vd ?: return false
-        return try {
-            d.resize(w, h, DPI)
-            displayW = w
-            displayH = h
-            android.util.Log.i(TAG, "virtual display resized to ${w}x$h")
-            true
-        } catch (t: Throwable) {
-            android.util.Log.e(TAG, "virtual display resize failed", t)
-            false
-        }
-    }
+    // D8: there is deliberately no resizeDisplay(). The shell lays out at one size for the
+    // session; the governor lowers the encoder's surface instead (Phase5Session), so the
+    // display geometry and every input coordinate stay put.
 
     // ------------------------------------------------------------------ input ops
-    // All of these are called on the UI thread by the session. The link's coordinate space
-    // stays 1920x1080 even after a governor resize, so scale here.
+    // All of these are called on the UI thread by the session. The PC maps its window onto
+    // the negotiated desktop size (D8), so the link's coordinates are already desktop
+    // coordinates: 1:1, never rescaled here.
     // ------------------------------------------------------------------ input ops
 
-    private fun sx(x: Int) = (x.toLong() * displayW / W).toInt()
-    private fun sy(y: Int) = (y.toLong() * displayH / H).toInt()
+    private fun sx(x: Int) = x.coerceIn(0, displayW - 1)
+    private fun sy(y: Int) = y.coerceIn(0, displayH - 1)
 
     /** Hover move (no button held) or drag (button held): the shell decides from its state. */
     fun setCursor(x: Int, y: Int) = desktop?.moveTo(sx(x), sy(y)) ?: Unit

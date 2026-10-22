@@ -78,6 +78,8 @@ object Phase5Protocol {
         object VideoOn : Control()
         /** `csq <t_pc_us>`; the stamp is echoed back verbatim in `csr`. */
         data class ClockSyncRequest(val pcStamp: String) : Control()
+        /** `display <w> <h>`: the PC's window size, sent once before video-on (D8). */
+        data class Display(val w: Int, val h: Int) : Control()
         /** `vq ...`: the PC's own video stats, logged on this side. */
         data class PcVideoStats(val text: String) : Control()
         data class Unknown(val text: String) : Control()
@@ -90,6 +92,12 @@ object Phase5Protocol {
             t == CTRL_RELEASE_ALL -> Control.ReleaseAll
             t == CTRL_VIDEO_ON -> Control.VideoOn
             t.startsWith("csq ") -> Control.ClockSyncRequest(t.removePrefix("csq ").trim())
+            t.startsWith("display ") -> {
+                val p = t.removePrefix("display ").trim().split(Regex("\\s+"))
+                val w = p.getOrNull(0)?.toIntOrNull()
+                val h = p.getOrNull(1)?.toIntOrNull()
+                if (w != null && h != null) Control.Display(w, h) else Control.Unknown(t)
+            }
             t.startsWith("vq ") -> Control.PcVideoStats(t)
             else -> Control.Unknown(t)
         }

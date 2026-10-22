@@ -316,4 +316,17 @@ class Phase5ProtocolTest {
         assertEquals(Phase5Protocol.Control.Unknown("csq"), Phase5Protocol.parseControl("csq"))
         assertEquals(Phase5Protocol.Control.Unknown(""), Phase5Protocol.parseControl(""))
     }
+
+    @Test
+    fun controlParsesTheDisplayHandshake() {
+        // D8: the PC's window size, sent before video-on.
+        assertEquals(Phase5Protocol.Control.Display(1920, 1200), Phase5Protocol.parseControl("display 1920 1200"))
+        assertEquals(
+            Phase5Protocol.Control.Display(1280, 800),
+            Phase5Protocol.parseControl("  display   1280   800  ")
+        )
+        // Malformed sizes stay unknown instead of starting a 0-sized desktop.
+        assertEquals(Phase5Protocol.Control.Unknown("display 1920"), Phase5Protocol.parseControl("display 1920"))
+        assertEquals(Phase5Protocol.Control.Unknown("display x y"), Phase5Protocol.parseControl("display x y"))
+    }
 }

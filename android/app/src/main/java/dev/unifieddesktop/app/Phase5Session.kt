@@ -85,6 +85,9 @@ class Phase5Session(
     private val keyframeWatchdog = KeyframeWatchdog()
     private val encoderRestarts = AtomicInteger(0)
     private val displayScale = AtomicInteger(100)
+    /** D8: the desktop size the PC asked for before video-on; the encoder and shell use it. */
+    @Volatile private var wantedW = Phase5Desktop.W
+    @Volatile private var wantedH = Phase5Desktop.H
 
     /** Latency probe for the current key-down (all Âµs on the PHONE clock). */
     private class Probe(val tPcUs: Long, val tRecvUs: Long) {
@@ -117,7 +120,7 @@ class Phase5Session(
             say("P5 video-on already on ($why)")
             return true
         }
-        val enc = Phase5Encoder(Phase5Desktop.W, Phase5Desktop.H, encoderListener())
+        val enc = Phase5Encoder(wantedW, wantedH, encoderListener())
         encoder = enc
         if (!enc.prepare()) {
             say("P5 encoder prepare FAILED")
@@ -132,9 +135,21 @@ class Phase5Session(
             videoGate.set(false)
             return false
         }
+        val ew = wantedW
+        val eh = wantedH
         val d = service.desktopRuntime.current()
         val resumed = Phase5Host.activity()
         val started = AtomicBoolean(false)
+        // D8: a desktop left over from an earlier link may have the old size. Only reuse it
+        // when it matches; otherwise close it and build the shell at the new size.
+        if (d != null && d.running && d.size() != (ew to eh)) {
+            say("P5 desktop ${d.size().first}x${d.size().second} -> ${ew}x$eh: recreating")
+            val latch = java.util.concurrent.CountDownLatch(1)
+            main.post {
+                try { d.stop() } finally { latch.countDown() }
+            }
+            latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        }
         val liveDesktop = if (d != null && d.running) {
             if (!d.rebindSurface(android.view.Surface(st))) {
                 say("P5 existing desktop surface rebind FAILED")
@@ -145,7 +160,7 @@ class Phase5Session(
             started.set(true)
             d
         } else {
-            val fresh = Phase5Desktop(service.applicationContext, resumed)
+            val fresh = Phase5Desktop(service.applicationContext, resumed, ew, eh)
             if (!fresh.createDisplay(android.view.Surface(st))) {
                 say("P5 virtual display FAILED to come up")
                 enc.stop(); encoder = null
@@ -231,65 +246,63 @@ class Phase5Session(
         val old = encoder ?: return "no live encoder"
         val d = desktop ?: return "no live desktop"
         if (displayScale.get() <= 50) {
-            say("P5 governor lower-resolution already applied at ${Phase5Desktop.W / 2}x${Phase5Desktop.H / 2}")
+            say("P5 governor lower-resolution already applied")
             return "already low"
         }
-        val nw = Phase5Desktop.W / 2
-        val nh = Phase5Desktop.H / 2
-        say("P5 governor lower-resolution begin ${Phase5Desktop.W}x${Phase5Desktop.H} -> ${nw}x${nh}")
+        val (dw, dh) = d.size()
+        // D8/B-110: the encoded size must never change during a session. A smaller encoder
+        // surface makes the composer crop the 1728x1080 desktop into the top-left of the
+        // 864x540 frame (seen at 04:32: windows at 2.2x, taskbar gone), and resizing the
+        // display is worse still (the fixed shell relaid out at half size). Lower the
+        // bitrate and frame rate instead: real power savings, identical geometry.
+        say("P5 governor low-power begin ${dw}x$dh (size fixed, half bitrate, ${Phase5Encoder.FPS / 2} fps)")
         val startSeq = old.stats().substringAfter("frames=").substringBefore(' ').toIntOrNull() ?: 0
         val next = Phase5Encoder(
-            nw, nh, encoderListener(),
+            dw, dh, encoderListener(),
             bitrate = Phase5Encoder.BITRATE / 2,
-            fps = Phase5Encoder.FPS,
+            fps = Phase5Encoder.FPS / 2,
             initialSeq = startSeq,
         )
         if (!next.prepare()) {
-            say("P5 governor lower-resolution FAILED: encoder prepare")
+            say("P5 governor low-power FAILED: encoder prepare")
             next.stop()
             return "encoder prepare failed"
         }
         val st = next.surfaceTexture
         if (st == null) {
-            say("P5 governor lower-resolution FAILED: no input surface")
+            say("P5 governor low-power FAILED: no input surface")
             next.stop()
             return "no input surface"
         }
-        // Swap the display onto the new encoder surface first, then shrink the display. The
-        // old encoder sees no more buffers, so the two never interleave on the wire.
+        // Swap the display onto the new encoder surface. The old encoder sees no more
+        // buffers, so the two never interleave on the wire; the size stays identical.
         val oldSt = old.surfaceTexture
         val latch = java.util.concurrent.CountDownLatch(1)
         val ok = AtomicBoolean(false)
         main.post {
             try {
                 val bound = d.rebindSurface(android.view.Surface(st))
-                val resized = bound && d.resizeDisplay(nw, nh)
-                if (bound && !resized) {
-                    // put the display back on the old encoder and geometry; the old encoder
-                    // has not been stopped yet and is still healthy
-                    d.resizeDisplay(Phase5Desktop.W, Phase5Desktop.H)
-                    if (oldSt != null) d.rebindSurface(android.view.Surface(oldSt))
-                }
-                ok.set(bound && resized)
+                if (!bound && oldSt != null) d.rebindSurface(android.view.Surface(oldSt))
+                ok.set(bound)
             } catch (t: Throwable) {
-                say("P5 governor lower-resolution swap threw ${t.javaClass.simpleName}: ${t.message}")
+                say("P5 governor low-power swap threw ${t.javaClass.simpleName}: ${t.message}")
             } finally {
                 latch.countDown()
             }
         }
         latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
         if (!ok.get()) {
-            say("P5 governor lower-resolution FAILED: display swap")
+            say("P5 governor low-power FAILED: surface swap")
             next.stop()
-            return "display swap failed"
+            return "surface swap failed"
         }
         encoder = next
         displayScale.set(50)
         old.stop()
         Phase5Dispatch.bind(this)
         main.postDelayed({ next.redrawNow(); next.requestKeyframe() }, 300)
-        say("P5 governor lower-resolution applied ${nw}x${nh} (desktop and windows kept)")
-        return "applied ${nw}x${nh}"
+        say("P5 governor low-power applied ${dw}x$dh at ${Phase5Encoder.FPS / 2} fps (size kept)")
+        return "applied low-power ${dw}x$dh at ${Phase5Encoder.FPS / 2} fps"
     }
 
     /** Shared by the initial encoder and the governor's lower-resolution rebuild. */
@@ -506,6 +519,20 @@ class Phase5Session(
                         Phase4Protocol.CH_CONTROL, "csr ${c.pcStamp} $tPhone".toByteArray()
                     )
                 )
+            }
+            is Phase5Protocol.Control.Display -> {
+                // D8: the PC picks the desktop size from its window aspect and sends it before
+                // video-on. Only valid before the shell exists; the encoder and shell take it.
+                val (w, h) = c.w to c.h
+                if (w < 640 || h < 360 || w > 2560 || h > 1600 || w % 2 != 0 || h % 2 != 0) {
+                    say("P5 display ${w}x$h ignored (out of range or odd)")
+                } else if (videoGate.get()) {
+                    say("P5 display ${w}x$h ignored (video already on)")
+                } else {
+                    wantedW = w
+                    wantedH = h
+                    say("P5 display requested ${w}x$h")
+                }
             }
             is Phase5Protocol.Control.PcVideoStats -> say("P5 PCVID ${c.text}")
             is Phase5Protocol.Control.Unknown -> say("P5 control unknown \"${c.text.take(40)}\"")

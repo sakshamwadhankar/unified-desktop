@@ -147,6 +147,23 @@ class ShellModel(
     }
 
     /**
+     * Snap to the left ([side] 0) or right (1) half of the work area (UX_AUDIT D6). A
+     * maximized window is restored to its old rectangle first? No: the user asked for this
+     * half, so the half is the new normal rectangle and the old maximise state is dropped.
+     */
+    fun snap(id: Int, side: Int): Boolean {
+        val win = byId(id) ?: return false
+        val w = (desktopW / 2).coerceAtLeast(minW)
+        win.maximized = false
+        win.restore = null
+        win.x = if (side == 0) 0 else desktopW - w
+        win.y = 0
+        win.w = w
+        win.h = workH
+        return focus(id)
+    }
+
+    /**
      * Resize by dragging the given edge/corner combination of [edges]. The dragged edge
      * follows the pointer, the opposite one stays; the minimum size wins, and the whole
      * window stays inside the work area.

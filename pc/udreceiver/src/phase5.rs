@@ -279,25 +279,58 @@ pub fn scale_to_desktop(px: i32, py: i32, client_w: i32, client_h: i32, dw: i32,
 /// uses). B-064: this offsets the black bars, so a click aimed at a video pixel lands on
 /// that desktop pixel; unit-tested below.
 pub fn scale_client_to_desktop(px: i32, py: i32, client_w: i32, client_h: i32) -> (i32, i32) {
+    scale_client_to_desktop_for(px, py, client_w, client_h, DESKTOP_W, DESKTOP_H)
+}
+
+/// Phase 13 (D8): the same mapping for the desktop size the phone is actually rendering,
+/// which the PC chooses from its client aspect and sends to the phone before video-on.
+pub fn scale_client_to_desktop_for(
+    px: i32,
+    py: i32,
+    client_w: i32,
+    client_h: i32,
+    dw: i32,
+    dh: i32,
+) -> (i32, i32) {
     if client_w <= 0 || client_h <= 0 {
         return (0, 0);
     }
-    let (vw, vh) = fit_video(client_w, client_h);
+    let (vw, vh) = fit_video_for(client_w, client_h, dw, dh);
     let (ox, oy) = ((client_w - vw) / 2, (client_h - vh) / 2);
-    scale_to_desktop(px - ox, py - oy, vw, vh, DESKTOP_W, DESKTOP_H)
+    scale_to_desktop(px - ox, py - oy, vw, vh, dw, dh)
+}
+
+/// D8: pick the phone's desktop size from the PC client so the picture fills the window with
+/// no bars. The encoder on the test phone starts reliably at 1080 lines but rejects 1200
+/// (`codec.start()` throws), so the height stays 1080 and the width follows the client
+/// aspect: 16:10 -> 1728x1080, 16:9 -> 1920x1080. The receiver scales 1728 to 1920 (1.11x),
+/// which is sharp enough and keeps the desktop's UI 1:1 relative to itself.
+pub fn desktop_for_client(cw: i32, ch: i32) -> (i32, i32) {
+    if cw <= 0 || ch <= 0 {
+        return (DESKTOP_W, DESKTOP_H);
+    }
+    let dh = 1080;
+    let dw = ((dh as f64 * cw as f64 / ch as f64).round() as i32) & !1;
+    (dw.clamp(1280, 1920), dh)
 }
 
 /// The size the 1920x1080 desktop is blitted to inside a client of `cw x ch`.
 pub fn fit_video(cw: i32, ch: i32) -> (i32, i32) {
+    fit_video_for(cw, ch, DESKTOP_W, DESKTOP_H)
+}
+
+/// Fit a desktop of `dw x dh` inside the client, keeping its aspect (D8).
+pub fn fit_video_for(cw: i32, ch: i32, dw: i32, dh: i32) -> (i32, i32) {
     if cw <= 0 || ch <= 0 {
         return (cw.max(2), ch.max(2));
     }
-    let sx = cw as f64 / DESKTOP_W as f64;
-    let sy = ch as f64 / DESKTOP_H as f64;
+    let (dw, dh) = (dw.max(2), dh.max(2));
+    let sx = cw as f64 / dw as f64;
+    let sy = ch as f64 / dh as f64;
     let s = sx.min(sy);
     (
-        ((DESKTOP_W as f64 * s) as i32).max(2),
-        ((DESKTOP_H as f64 * s) as i32).max(2),
+        ((dw as f64 * s) as i32).max(2),
+        ((dh as f64 * s) as i32).max(2),
     )
 }
 
@@ -560,6 +593,30 @@ mod tests {
         assert_eq!(scale_client_to_desktop(0, 0, 1536, 960), (0, 0));
         // exactly 1:1 when the client is the desktop size
         assert_eq!(scale_client_to_desktop(400, 128, 1920, 1080), (400, 128));
+    }
+
+    #[test]
+    fn d8_desktop_matches_the_pc_aspect() {
+        // The owner's 16:10 screen: a 1728x1080 desktop fills 1920x1200 with a 1.11x
+        // scale (the encoder cannot start at 1200 lines on the test phone).
+        assert_eq!(desktop_for_client(1920, 1200), (1728, 1080));
+        assert_eq!(fit_video_for(1920, 1200, 1728, 1080), (1920, 1200));
+        assert_eq!(
+            scale_client_to_desktop_for(960, 600, 1920, 1200, 1728, 1080),
+            (864, 540)
+        );
+        // 16:9 stays 1920x1080 (no needless scaling).
+        assert_eq!(desktop_for_client(1920, 1080), (1920, 1080));
+        assert_eq!(fit_video_for(1920, 1080, 1920, 1080), (1920, 1080));
+        // A small 16:10 client still gets the same 16:10 desktop; the receiver downscales.
+        assert_eq!(desktop_for_client(1280, 800), (1728, 1080));
+        // A 4K client caps the desktop at 1920 wide and keeps 16:9.
+        assert_eq!(desktop_for_client(3840, 2160), (1920, 1080));
+        // A 3:2 client gets 1620x1080 (and bars in the client are tiny).
+        assert_eq!(desktop_for_client(1920, 1280), (1620, 1080));
+        // Even dimensions only; junk falls back to the defaults.
+        assert_eq!(desktop_for_client(1367, 769), (1920, 1080));
+        assert_eq!(desktop_for_client(0, 0), (DESKTOP_W, DESKTOP_H));
     }
 
     #[test]

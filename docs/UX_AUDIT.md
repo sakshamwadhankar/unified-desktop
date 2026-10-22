@@ -104,6 +104,69 @@ working) but loses the LAUNCHER category in release builds.
 
 ## 6. Agent walk-through (the coding agent fills this in at Phase 13 step 6)
 
+Run on 2026-10-23 03:07-03:18 on the final Phase-12 build (app on 2c0f6edc, receiver
+`udreceiver view --addr 127.0.0.1:47600 --no-lock`, PC window 1920x1200). Pictures:
+`p13\before\d0-desktop-empty.png`, `d0-phone-app.png`, `d1-start-menu.png`,
+`d2-appcenter.png`, `d3-settings.png`, `d4-browser.png`, `d5-files.png`,
+`d6-focus-over-max.png`.
+
+Row by row (what the pictures show):
+
+- **D1** - the wallpaper is one flat dark green (`#10312B`); no gradient, no depth. Confirmed.
+- **D2** - "Test" is the fifth row of the start menu. Confirmed.
+- **D3** - the menu is a plain text list on a flat panel, 420 px wide: "Programs" header,
+  then App Center, Files, Browser, Settings, Test, then "Notepad++" in green with its version
+  (`8.9.8.1`) after a dot. No search, no icons, no pinned grid, no way to close with Esc.
+- **D4** - the taskbar has a text "Start" box, no icon, a clock with seconds (`03:07:50`),
+  and no window buttons although two windows were open. In `d5`/`d6` the labels on the
+  taskbar are cut off at x~120 and the clock is gone: a window is drawn over the taskbar, so
+  it is not above every window. The empty desktop's taskbar (d0) is fully visible.
+- **D5** - App Center's Install / Open / Uninstall row is cut by the bottom edge (d2): the
+  buttons are half below the visible work area. Confirmed.
+- **D6** - an equally flat full-width title bar; three equal rounded-square cells for
+  minimise/maximise/close; white bold text; focused and unfocused differ only in blue vs grey.
+  The maximised title says "Settings [max]" (an internal word). No icon, no hover.
+- **D7** - the VS Code window is a `BrowserView`, so it carries the "address" bar (code read;
+  visually the browser's toolbar in d4 is the same widget).
+- **D8** - the PC is 1920x1200 (16:10) and the picture is 16:9: black bars top and bottom;
+  the last rows of the video are a bright green strip (YUV padding, not the wallpaper).
+- **D9** - the start-menu rows and the phone-style text are far too large for 1080p; 22 sp at
+  240 dpi is 33 px, about twice a Windows menu row.
+- **D10** - App Center is a text list; the details pane prints internal sentences ("fetch:
+  code-server, built into the app (Phase 3)"); no cards, chips, progress or Installed tab;
+  "Open any .exe" is not a button in the picture.
+- **D11** - Settings says "Link: waiting for the receiver's status line" while the session is
+  live, and "Video: 1920x1080 @ 60 fps paced" while the stream is 960x544 (B-105). About
+  shows "unified-desktop (working codename) - Phase 6 shell".
+- **D14** - the empty desktop has no shortcuts and no first-run hint.
+- **D15** - the Browser page is blank white; the toolbar is plain text ("<", ">", "Reload",
+  "Go", an "address (https://...)" field). No home page, no icons, no tab.
+- **D16** - measured in Phase 12: Browser 65.7/74.5, Notepad++ 66.2/73.7, shell 87.0/97.0
+  (p50/p90, n=25). Two of three pass; the shell still misses.
+- **§4 phone app** - the launcher opens the "Phase 1 harness": title under the status-bar
+  icons, grey buttons, a wrapping debug line, internal words (link, acc, guest, harness).
+- **P1-P6 / R1-R4** - nothing on the phone or the receiver beyond the harness and the CLI
+  exists yet, as the audit says.
+- **B-091** - reproduced on this build: maximised Settings stays above focused Files
+  (`d6-focus-over-max.png`); its title bar is drawn across the top while Files has focus.
+- **B-105** - reproduced in `d3-settings.png` (stale link text, hard-coded video line).
+
+New findings not in the audit table (A rows):
+
+- **A1 (taskbar z-order)** - a window drawn while Settings is maximised covers the taskbar,
+  including the clock; only ~120 px of "Start" remains. This is the same defect as D4's
+  "always above every window"; the pictures make it reproducible.
+- **A2 (no window buttons)** - the taskbar showed no buttons for the two open windows (the
+  button list was built but not visible), so windows can only be reached through the desktop.
+- **A3 (window title)** - a maximised window appends "[max]" to its title; an internal state
+  word the user does not need.
+- **A4 (menu clipping)** - the start menu is a fixed 420 px wide panel; the installed row is
+  indented by 40 px and its version suffix reads like developer output.
+- **A5 (phone status bar)** - the harness title sits under the status-bar icons; the screen
+  is edge-to-edge without insets.
+- **A6 (App Center buttons)** - the action row is not just clipped by the window; it is
+  below the bottom edge of the work area, so no size of window shows it completely (D5).
+
 ## 7. Status
 
 Every row above (D1-D16, P1-P6, R1-R4, plus the agent's own rows) gets one status: **DONE**

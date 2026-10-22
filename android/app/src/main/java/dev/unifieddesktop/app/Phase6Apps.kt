@@ -2,7 +2,9 @@ package dev.unifieddesktop.app
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.view.Gravity
 import android.view.KeyEvent
@@ -80,35 +82,64 @@ class FilesView(context: Context) : LinearLayout(context) {
     private var dir: File = store
     private var selected: File? = null
 
-    private val pathLabel = ShellUi.label(context, "", 18f, bold = true)
-    private val listBox = ShellUi.column(context, 0xFF171A20.toInt())
-    private val status = ShellUi.label(context, "", 17f)
+    private val pathLabel = TextView(context).apply {
+        setTextColor(Theme.TEXT)
+        Theme.px(this, Theme.BODY)
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        setPadding(6, 0, 8, 0)
+    }
+    private val listBox = LinearLayout(context).apply {
+        orientation = VERTICAL
+        setBackgroundColor(Theme.SURFACE)
+    }
+    private val status = TextView(context).apply {
+        setTextColor(Theme.TEXT_DIM)
+        Theme.px(this, Theme.CAPTION)
+        setPadding(10, 4, 10, 4)
+    }
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(0xFF1F2531.toInt())
-        val bar = LinearLayout(context).apply { orientation = HORIZONTAL }
-        bar.addView(ShellUi.button(context, "Up") { goUp() })
-        bar.addView(ShellUi.button(context, "New folder") { newFolder() })
-        bar.addView(ShellUi.button(context, "Rename") { renameSelectedPrompt() })
-        bar.addView(ShellUi.button(context, "Delete") { deleteSelected() })
-        bar.addView(ShellUi.button(context, "Send to PC") {
-            val f = selected
-            if (f == null) say("select a file first")
-            else if (f.isDirectory) say("select a file, not a folder")
-            else say(Phase11Files.sendToPc(f))
-        })
-        // Scrollable, not squeezed: a narrowed window scrolls the toolbar instead of wrapping
-        // "Delete" onto two lines (seen at 240 dpi, fixed 2026-10-19).
+        setBackgroundColor(Theme.SURFACE)
+        // Phase 13: icon toolbar in the shell's own language, no 20 px blue text buttons.
+        val bar = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            setPadding(4, 3, 4, 3)
+            addView(DeskIconButton(context, DeskIcon.UP, "Up") { goUp() }, LayoutParams(34, 30))
+            addView(DeskIconButton(context, DeskIcon.PLUS, "New folder") { newFolder() }, LayoutParams(34, 30))
+            addView(DeskIconButton(context, DeskIcon.PENCIL, "Rename") { renameSelectedPrompt() }, LayoutParams(34, 30))
+            addView(DeskIconButton(context, DeskIcon.TRASH, "Delete") { deleteSelected() }, LayoutParams(34, 30))
+            addView(DeskIconButton(context, DeskIcon.SEND, "Send to PC") {
+                val f = selected
+                if (f == null) say("select a file first")
+                else if (f.isDirectory) say("select a file, not a folder")
+                else say(Phase11Files.sendToPc(f))
+            }, LayoutParams(34, 30))
+        }
+        // Scrollable, not squeezed: a narrowed window scrolls the toolbar instead of wrapping.
         val barScroll = HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             addView(bar)
         }
-        addView(barScroll, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        addView(pathLabel)
-        val scroll = ScrollView(context).apply { addView(listBox) }
+        addView(barScroll, LayoutParams(LayoutParams.MATCH_PARENT, 36))
+        val pathRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundColor(Theme.SURFACE_SUNKEN)
+            setPadding(8, 0, 0, 0)
+            addView(DeskIconView(context, DeskIcon.FOLDER, Theme.ACCENT, 13f), LayoutParams(18, LayoutParams.MATCH_PARENT))
+            addView(pathLabel, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
+        }
+        addView(pathRow, LayoutParams(LayoutParams.MATCH_PARENT, 30))
+        addView(shellDivider(context), LayoutParams(LayoutParams.MATCH_PARENT, 1))
+        val scroll = ScrollView(context).apply {
+            isFillViewport = true
+            addView(listBox)
+        }
         addView(scroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
-        addView(status)
+        addView(shellDivider(context), LayoutParams(LayoutParams.MATCH_PARENT, 1))
+        addView(status, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         FilesDispatch.bind(this)
         refresh()
     }
@@ -119,14 +150,55 @@ class FilesView(context: Context) : LinearLayout(context) {
         listBox.removeAllViews()
         pathLabel.text = "files/desktop" + dir.absolutePath.removePrefix(store.absolutePath).replace('\\', '/')
         val entries = dir.listFiles()?.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })) ?: emptyList()
-        if (entries.isEmpty()) listBox.addView(ShellUi.row(context, "(empty folder)") {})
+        if (entries.isEmpty()) {
+            listBox.addView(TextView(context).apply {
+                text = "This folder is empty"
+                setTextColor(Theme.TEXT_DIM)
+                Theme.px(this, Theme.SMALL)
+                setPadding(14, 14, 14, 14)
+            })
+        }
         for (f in entries) {
-            val name = if (f.isDirectory) "\uD83D\uDCC1 ${f.name}" else "\uD83D\uDCC4 ${f.name}  (${f.length()} B)"
-            val row = ShellUi.row(context, name) {
-                if (f.isDirectory) { dir = f; selected = null; refresh() } else { selected = f; say("selected ${f.name}") }
+            val row = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(10, 0, 10, 0)
+                isClickable = true
+                setBackgroundColor(if (f == selected) Theme.alpha(Theme.ACCENT, 44) else Color.TRANSPARENT)
+                addView(
+                    DeskIconView(
+                        context,
+                        if (f.isDirectory) DeskIcon.FOLDER else DeskIcon.NOTE,
+                        if (f.isDirectory) Theme.ACCENT else Theme.TEXT_SECONDARY,
+                        15f,
+                    ),
+                    LayoutParams(24, LayoutParams.MATCH_PARENT),
+                )
+                addView(TextView(context).apply {
+                    text = f.name
+                    setTextColor(Theme.TEXT)
+                    Theme.px(this, Theme.BODY)
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).apply { marginStart = 6 })
+                if (!f.isDirectory) {
+                    addView(shellChip(context, "${f.length()} B", Theme.TEXT_DIM), LayoutParams(
+                        LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT,
+                    ))
+                }
+                setOnClickListener {
+                    if (f.isDirectory) {
+                        dir = f
+                        selected = null
+                        refresh()
+                    } else {
+                        selected = f
+                        refresh()
+                        say("selected ${f.name}")
+                    }
+                }
             }
-            row.setBackgroundColor(if (f == selected) 0xFF33436B.toInt() else Color.TRANSPARENT)
-            listBox.addView(row)
+            listBox.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, 40))
         }
         status.text = "${entries.size} item(s)"
     }
@@ -212,20 +284,18 @@ object FilesDispatch {
 class BrowserView(context: Context, private val codeServer: Boolean = false) :
     LinearLayout(context), ShellTextContent {
 
-    val address: EditText = EditText(context).apply {
-        hint = "address (https://...)"
+    val address: EditText = shellField(context, "address (https://...)").apply {
         setText("")
-        setTextColor(Color.BLACK)
-        setBackgroundColor(0xFFE8E8E8.toInt())
-        textSize = 20f
-        isFocusable = true
-        isFocusableInTouchMode = true
         // B-060: a desktop address bar selects its text when it gets the focus, so typing a
         // new URL replaces the old one instead of appending to it.
         setSelectAllOnFocus(true)
     }
 
-    private val status = ShellUi.label(context, "ready", 17f)
+    private val status = TextView(context).apply {
+        setTextColor(Theme.TEXT_DIM)
+        Theme.px(this, Theme.CAPTION)
+        setPadding(10, 3, 10, 3)
+    }
 
     /** B-082: the desktop Chrome UA, kept out of WebSettings so the fetch thread can use it. */
     private val desktopUa =
@@ -431,18 +501,30 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(0xFF101418.toInt())
-        val bar = LinearLayout(context).apply { orientation = HORIZONTAL }
-        bar.addView(ShellUi.button(context, "<") { back() })
-        bar.addView(ShellUi.button(context, ">") { forward() })
-        bar.addView(ShellUi.button(context, "Reload") { web.reload() })
-        bar.addView(ShellUi.button(context, "Go") { go() })
-        bar.addView(address, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-        addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        setBackgroundColor(Theme.SURFACE)
+        // Phase 13: the address bar belongs to the Browser only. The VS Code window is the
+        // code-server page itself; showing a blue Chrome toolbar under the shell title bar
+        // (the 04:37 AFTER capture) is exactly the chrome the audit wants gone.
+        if (!codeServer) {
+            val bar = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(6, 4, 6, 4)
+                addView(DeskIconButton(context, DeskIcon.LEFT, "Back") { back() }, LayoutParams(30, 28))
+                addView(DeskIconButton(context, DeskIcon.RIGHT, "Forward") { forward() }, LayoutParams(30, 28))
+                addView(DeskIconButton(context, DeskIcon.RELOAD, "Reload") { web.reload() }, LayoutParams(30, 28))
+                addView(address, LayoutParams(0, 28, 1f).apply { marginStart = 4 })
+                addView(shellButton(context, "Go", primary = true) { go() }, LayoutParams(56, 28).apply {
+                    marginStart = 6
+                })
+            }
+            addView(bar, LayoutParams(LayoutParams.MATCH_PARENT, 36))
+            addView(shellDivider(context), LayoutParams(LayoutParams.MATCH_PARENT, 1))
+        }
         addView(web, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         // Phase 11 D-e: document-start shim pages reach us through this on every page.
         web.addJavascriptInterface(udBridge, "UdBridge")
-        addView(status)
+        if (!codeServer) addView(status)
         // Enter from the PC keyboard must navigate, not insert a newline into the address.
         address.setOnKeyListener { _, code, e ->
             if (code == android.view.KeyEvent.KEYCODE_ENTER && e.action == android.view.KeyEvent.ACTION_DOWN) {
@@ -724,38 +806,178 @@ class KeyWebView(context: Context) : WebView(context) {
     }
 }
 
-/** Settings: link status, the video profile in use, and About with versions. */
+/**
+ * Settings (UX_AUDIT D11): real values only. The wallpaper picker writes through the shell,
+ * and the connection block is fed from the live Phase-5 session once a second - no more
+ * "waiting for the receiver's status line" and no hard-coded video line (B-105).
+ */
 class SettingsView(context: Context) : ScrollView(context) {
 
-    private val col = ShellUi.column(context, 0xFF1F2531.toInt())
+    private val col = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(20, 16, 20, 20)
+    }
+    private val wallpaperRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+    private val connection = ShellUi.label(context, "Checking...", Theme.BODY)
+    private val activity = ShellUi.label(context, "", Theme.BODY)
+    private var current = Wallpaper.load(context)
+    private var swatches = ArrayList<WallpaperSwatch>()
 
     init {
+        setBackgroundColor(Theme.SURFACE)
         addView(col, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        col.addView(ShellUi.label(context, "Settings", Theme.DISPLAY, bold = true))
+
+        col.addView(section("Personalization"))
+        col.addView(ShellUi.label(context, "Wallpaper", Theme.BODY_LARGE))
+        col.addView(wallpaperRow, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = 6; bottomMargin = 4 })
+        for (i in Wallpaper.styles.indices) {
+            val sw = WallpaperSwatch(context, i, current == i) { picked ->
+                current = picked
+                SettingsDispatch.onWallpaperPick?.invoke(picked)
+                updateSwatches()
+            }
+            swatches.add(sw)
+            wallpaperRow.addView(sw, LinearLayout.LayoutParams(72, 44).apply { rightMargin = 8 })
+        }
+
+        col.addView(section("Display"))
+        col.addView(infoRow("Desktop", "${Phase5Desktop.W} x ${Phase5Desktop.H}"))
+        col.addView(infoRow("Quality", "Automatic (light / standard / smooth)"))
+        col.addView(infoRow("Text size", "Desktop scale, 100 %"))
+
+        col.addView(section("Connection"))
+        col.addView(connection)
+        col.addView(activity)
+
+        col.addView(section("About"))
+        col.addView(infoRow("Version", appVersion()))
+        col.addView(infoRow("Android", "${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})"))
+        col.addView(infoRow("Device", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"))
+
         SettingsDispatch.bind(this)
-        col.addView(ShellUi.label(context, "Settings", 26f, bold = true))
-        col.addView(ShellUi.label(context, "Link: waiting for the receiver's status line", 19f))
-        col.addView(ShellUi.label(context, "Video: 1920x1080 @ 60 fps paced (H.264, hardware encoder)", 19f))
-        col.addView(ShellUi.label(context, "Input: mouse (real MotionEvents) + keyboard to the focused window", 19f))
-        col.addView(ShellUi.label(context, "About", 26f, bold = true))
-        col.addView(ShellUi.label(context, "unified-desktop (working codename) - Phase 6 shell", 19f))
-        col.addView(ShellUi.label(context, "Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT})", 19f))
-        col.addView(ShellUi.label(context, "Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}", 19f))
-        col.addView(ShellUi.label(context, "Shell build: phase6", 19f))
+        updateLive()
     }
 
-    /** Called by the link with the live numbers, so Settings shows the real profile. */
+    private fun appVersion(): String = try {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "-"
+    } catch (_: Throwable) {
+        "-"
+    }
+
+    private fun section(s: String): TextView = ShellUi.label(context, s, Theme.SMALL).apply {
+        setTextColor(Theme.TEXT_DIM)
+        setPadding(0, 18, 0, 6)
+    }
+
+    private fun infoRow(k: String, v: String): LinearLayout = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        setPadding(0, 3, 0, 3)
+        addView(ShellUi.label(context, k, Theme.BODY).apply {
+            setTextColor(Theme.TEXT_SECONDARY)
+            minWidth = 150
+        })
+        addView(ShellUi.label(context, v, Theme.BODY))
+    }
+
+    private fun updateSwatches() {
+        for (sw in swatches) sw.isChosen = sw.index == current
+    }
+
+    /** Called by the link/shell when the wallpaper changes elsewhere. */
+    fun wallpaperChanged(index: Int) {
+        current = index
+        updateSwatches()
+    }
+
+    private fun updateLive() {
+        val s = Phase5Dispatch.session()
+        connection.text = if (s == null) "Not connected" else "Connected to your PC"
+        val line = try { s?.statsLine().orEmpty() } catch (_: Throwable) { "" }
+        val sent = Regex("sent=(\\d+)").find(line)?.groupValues?.get(1)
+        val applied = Regex("inApplied=(\\d+)").find(line)?.groupValues?.get(1)
+        activity.text = if (line.isEmpty()) "" else
+            "Frames sent: ${sent ?: "0"}   ·   Input events applied: ${applied ?: "0"}"
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        postDelayed(ticker, 1000)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(ticker)
+        super.onDetachedFromWindow()
+    }
+
+    private val ticker = object : Runnable {
+        override fun run() {
+            updateLive()
+            postDelayed(this, 1000)
+        }
+    }
+
+    /** Kept for the Phase-8 harness/callers; the live block now owns the text. */
     fun setLinkStatus(s: String) {
-        (col.getChildAt(1) as? TextView)?.text = "Link: $s"
+        connection.text = s
     }
 
-    fun text(): String = (0 until col.childCount).joinToString("\n") { (col.getChildAt(it) as? TextView)?.text ?: "" }
+    fun text(): String = buildString {
+        for (i in 0 until col.childCount) {
+            val v = col.getChildAt(i)
+            if (v is TextView) append(v.text).append('\n')
+            else if (v is LinearLayout) {
+                for (j in 0 until v.childCount) {
+                    (v.getChildAt(j) as? TextView)?.let { append(it.text).append(' ') }
+                }
+                append('\n')
+            }
+        }
+    }
+}
+
+/** One of the six wallpaper choices (D1): a miniature of the real gradient. */
+class WallpaperSwatch(
+    context: Context,
+    val index: Int,
+    selected: Boolean,
+    private val onPick: (Int) -> Unit,
+) : View(context) {
+
+    var isChosen = selected
+        set(v) { field = v; invalidate() }
+
+    private val border = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+
+    init {
+        isClickable = true
+        setOnClickListener { onPick(index) }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val r = android.graphics.RectF(2f, 2f, width - 2f, height - 2f)
+        val p = android.graphics.Path().apply { addRoundRect(r, 8f, 8f, android.graphics.Path.Direction.CW) }
+        canvas.save()
+        canvas.clipPath(p)
+        Wallpaper.draw(canvas, width.toFloat(), height.toFloat(), index)
+        canvas.restore()
+        border.color = if (isChosen) Theme.ACCENT else Theme.BORDER
+        border.strokeWidth = if (isChosen) 2.5f else 1f
+        canvas.drawRoundRect(r, 8f, 8f, border)
+    }
 }
 
 /** Keeps the live Settings window reachable for the harness. */
 object SettingsDispatch {
     @Volatile private var view: SettingsView? = null
+    /** Set by the shell: a wallpaper pick from Settings. */
+    @Volatile var onWallpaperPick: ((Int) -> Unit)? = null
+
     fun bind(v: SettingsView?) { view = v }
     fun text(): String = view?.text() ?: "(no settings window)"
     fun setStatus(s: String) = view?.setLinkStatus(s) ?: Unit
+    fun wallpaperChanged(index: Int) = view?.wallpaperChanged(index) ?: Unit
 }
 

@@ -31,140 +31,280 @@ class AppCenterView(context: Context) : LinearLayout(context) {
         emptyList()
     }
 
-    private val search = EditText(context).apply {
-        hint = "Search apps (name or alias)"
-        setTextColor(Color.BLACK)
-        setBackgroundColor(0xFFE8E8E8.toInt())
-        textSize = 20f
-        setPadding(14, 8, 14, 8)
-        isSingleLine = true
-        isFocusable = true
-        isFocusableInTouchMode = true
-    }
+    private val search = shellField(context, "Search apps by name or alias")
     private val listCol = LinearLayout(context).apply { orientation = VERTICAL }
-    private val detail = TextView(context).apply {
-        setTextColor(Color.WHITE)
-        textSize = 17f
-        setPadding(10, 6, 10, 6)
-        setBackgroundColor(0xFF1E2430.toInt())
+    private val detailTitle = TextView(context).apply {
+        setTextColor(Theme.TEXT)
+        Theme.px(this, Theme.TITLE)
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+    }
+    private val detailBody = TextView(context).apply {
+        setTextColor(Theme.TEXT_SECONDARY)
+        Theme.px(this, Theme.SMALL)
+        maxLines = 4
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        setLineSpacing(2f, 1f)
     }
     private val status = TextView(context).apply {
-        setTextColor(0xFF9AE6B4.toInt())
-        textSize = 16f
-        setPadding(10, 4, 10, 4)
+        setTextColor(Theme.TEXT_DIM)
+        Theme.px(this, Theme.CAPTION)
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        setPadding(2, 2, 2, 2)
     }
-    private val exePath = EditText(context).apply {
-        hint = "/sdcard/Download/program.exe"
-        setTextColor(Color.BLACK)
-        setBackgroundColor(0xFFE8E8E8.toInt())
-        textSize = 18f
-        setPadding(12, 6, 12, 6)
-        isSingleLine = true
-    }
+    private val exePath = shellField(context, "Path to a .exe under /sdcard/Download")
 
     private var selected: CatalogApp? = null
     private var picked: CatalogVersion? = null
     private val engine by lazy { EngineBridge(context) }
-    private val installBtn = ShellUi.button(context, "Install") { installSelected() }
+    private val installBtn = shellButton(context, "Install", primary = true) { installSelected() }
+    private val openBtn = shellButton(context, "Open") { openSelected() }
+    private val uninstallBtn = shellButton(context, "Uninstall", danger = true) { uninstallSelected() }
+    private val catalogTab = shellChip(context, "Catalog", Theme.TEXT, Theme.alpha(Theme.ACCENT, 50))
+    private val installedTab = shellChip(context, "Installed", Theme.TEXT_DIM, Theme.SURFACE_SUNKEN)
+    private var tab = 0
 
     init {
         orientation = VERTICAL
-        setBackgroundColor(0xFF141821.toInt())
-        setPadding(16, 6, 16, 6)
+        setBackgroundColor(Theme.SURFACE)
+        setPadding(14, 8, 14, 8)
 
-        addView(ShellUi.label(context, "App Center", 24f, bold = true))
-        addView(search, LayoutParams(LayoutParams.MATCH_PARENT, 48))
-        addView(ScrollView(context).apply {
-            addView(listCol)
-        }, LayoutParams(LayoutParams.MATCH_PARENT, 200))
-        addView(detail, LayoutParams(LayoutParams.MATCH_PARENT, 118))
-        addView(actionRow(), LayoutParams(LayoutParams.MATCH_PARENT, 52))
+        addView(TextView(context).apply {
+            text = "App Center"
+            setTextColor(Theme.TEXT)
+            Theme.px(this, Theme.HEADING)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        })
+        addView(TextView(context).apply {
+            text = "Windows, Linux and Android apps"
+            setTextColor(Theme.TEXT_DIM)
+            Theme.px(this, Theme.CAPTION)
+        })
+        addView(search, LayoutParams(LayoutParams.MATCH_PARENT, 34).apply { topMargin = 6 })
         addView(LinearLayout(context).apply {
             orientation = HORIZONTAL
-            addView(exePath, LayoutParams(0, 46, 1f))
-            addView(ShellUi.button(context, "Open any .exe") { runExe(exePath.text.toString()) })
-        }, LayoutParams(LayoutParams.MATCH_PARENT, 48))
-        addView(status)
+            addView(catalogTab, LayoutParams(LayoutParams.WRAP_CONTENT, 24))
+            addView(installedTab, LayoutParams(LayoutParams.WRAP_CONTENT, 24).apply { marginStart = 6 })
+            catalogTab.setOnClickListener { setTab(0) }
+            installedTab.setOnClickListener { setTab(1) }
+        }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = 6 })
+        addView(ScrollView(context).apply {
+            isFillViewport = true
+            addView(listCol)
+        }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { topMargin = 6 })
+        addView(shellCard(context).apply {
+            addView(detailTitle)
+            addView(detailBody, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                topMargin = 2
+            })
+        }, LayoutParams(LayoutParams.MATCH_PARENT, 100).apply { topMargin = 6 })
+        addView(actionRow(), LayoutParams(LayoutParams.MATCH_PARENT, 34).apply { topMargin = 6 })
+        addView(LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(exePath, LayoutParams(0, 28, 1f))
+            addView(shellButton(context, "Open .exe") { runExe(exePath.text.toString()) }, LayoutParams(100, 28).apply {
+                marginStart = 6
+            })
+        }, LayoutParams(LayoutParams.MATCH_PARENT, 30).apply { topMargin = 6 })
+        addView(status, LayoutParams(LayoutParams.MATCH_PARENT, 18).apply { topMargin = 2 })
 
         search.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: Editable?) = refresh(s?.toString().orEmpty())
         })
+        styleTab()
         P7Log.say(context, "APPCTR loaded apps=${apps.size} catalog=${apps.joinToString(",") { it.id }}")
-        refresh("")
         selected = apps.firstOrNull()
+        refresh("")
         renderDetail()
+    }
+
+    private fun setTab(t: Int) {
+        tab = t
+        styleTab()
+        refresh(search.text.toString())
+    }
+
+    /** The two chips are the only "tabs"; the selected one is accent-tinted. */
+    private fun styleTab() {
+        catalogTab.setTextColor(if (tab == 0) Theme.TEXT else Theme.TEXT_DIM)
+        catalogTab.background = shellRounded(
+            if (tab == 0) Theme.alpha(Theme.ACCENT, 55) else Theme.SURFACE_SUNKEN, 0, 9f,
+        )
+        installedTab.setTextColor(if (tab == 1) Theme.TEXT else Theme.TEXT_DIM)
+        installedTab.background = shellRounded(
+            if (tab == 1) Theme.alpha(Theme.ACCENT, 55) else Theme.SURFACE_SUNKEN, 0, 9f,
+        )
     }
 
     private fun actionRow(): LinearLayout = LinearLayout(context).apply {
         orientation = HORIZONTAL
-        addView(installBtn)
-        addView(ShellUi.button(context, "Open") { openSelected() })
-        addView(ShellUi.button(context, "Uninstall") { uninstallSelected() })
-        gravity = Gravity.START
+        gravity = Gravity.CENTER_VERTICAL
+        addView(installBtn, LayoutParams(96, 32))
+        addView(openBtn, LayoutParams(70, 32).apply { marginStart = 6 })
+        addView(uninstallBtn, LayoutParams(96, 32).apply { marginStart = 6 })
     }
 
     // ------------------------------------------------------------------ list
 
     private fun refresh(query: String) {
         listCol.removeAllViews()
+        if (tab == 1) {
+            refreshInstalled()
+            return
+        }
         val rows = Catalog.search(apps, query)
         for (app in rows) {
-            val best = Catalog.pick(app)
-            val label = buildString {
-                append(app.name)
-                if (best != null) append("   ·  ${best.kind} ${best.version}  ·  ${best.rating}")
-                else append("   ·  no version")
-            }
-            val row = TextView(context).apply {
-                text = label
-                textSize = 18f
-                setPadding(12, 6, 12, 6)
-                isClickable = true
-                setTextColor(if (best != null && Catalog.isUsable(best)) Color.WHITE else 0xFF9AA0AA.toInt())
-                setOnClickListener {
-                    selected = app
-                    picked = best
-                    renderDetail()
-                    P7Log.say(context, "APPCTR select id=${app.id} picked=${best?.kind}/${best?.version}/${best?.rating}")
-                }
-            }
-            listCol.addView(row)
+            listCol.addView(appCard(app), LayoutParams(LayoutParams.MATCH_PARENT, 54).apply {
+                bottomMargin = 6
+            })
         }
-        if (rows.isEmpty()) listCol.addView(ShellUi.label(context, "no match", 18f))
-        if (selected != null && rows.none { it.id == selected?.id }) {
-            // keep the detail of the selected app even when the filter hides its row
-        }
+        if (rows.isEmpty()) listCol.addView(emptyLabel("No apps match \"$query\""))
         status.text = "${rows.size} of ${apps.size} apps"
         P7Log.say(context, "APPCTR search q=\"$query\" rows=${rows.size}")
     }
 
+    /** One catalog card: icon tile, name, kind/version, and the rating or installed badge. */
+    private fun appCard(app: CatalogApp): LinearLayout {
+        val best = Catalog.pick(app)
+        val have = Installed.version(context, app.id)
+        val card = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = if (selected?.id == app.id) {
+                shellRounded(Theme.alpha(Theme.ACCENT, 30), Theme.ACCENT, Theme.RADIUS_CARD)
+            } else {
+                shellRounded(Theme.SURFACE_RAISED, Theme.BORDER, Theme.RADIUS_CARD)
+            }
+            setPadding(10, 8, 10, 8)
+            isClickable = true
+            setOnClickListener {
+                selected = app
+                picked = Catalog.pick(app)
+                renderDetail()
+                refresh(search.text.toString())
+                P7Log.say(context, "APPCTR select id=${app.id} picked=${best?.kind}/${best?.version}/${best?.rating}")
+            }
+        }
+        val kind = when {
+            app.id == "vscode" -> DeskIcon.CODE
+            app.id == "files" || app.id == "browser" || app.id == "settings" || app.id == "appcenter" -> DeskIcon.WINDOW
+            app.versions.any { it.kind == "android" } -> DeskIcon.PHONE
+            app.versions.any { it.kind == "linux" } -> DeskIcon.TERMINAL
+            app.versions.any { it.kind == "windows" } -> DeskIcon.GRID
+            else -> DeskIcon.GLOBE
+        }
+        val tint = when (kind) {
+            DeskIcon.PHONE -> Theme.SUCCESS
+            DeskIcon.TERMINAL -> Theme.WARNING
+            DeskIcon.WINDOW -> Theme.ACCENT
+            else -> Theme.ACCENT
+        }
+        card.addView(AppIconView(context, kind, tint, true), LayoutParams(40, 40))
+        val text = LinearLayout(context).apply {
+            orientation = VERTICAL
+            addView(TextView(context).apply {
+                text = app.name
+                setTextColor(Theme.TEXT)
+                Theme.px(this, Theme.BODY_LARGE)
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            val meta = when {
+                have.isNotEmpty() -> "$have installed"
+                best == null -> "no version"
+                else -> "${best.kind} · ${best.version}"
+            }
+            addView(TextView(context).apply {
+                text = meta
+                setTextColor(Theme.TEXT_DIM)
+                Theme.px(this, Theme.CAPTION)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+        }
+        card.addView(text, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = 10 })
+        val chip = when {
+            have.isNotEmpty() -> shellChip(context, "Installed", Theme.SUCCESS, Theme.alpha(Theme.SUCCESS, 28))
+            best == null -> shellChip(context, "Not yet", Theme.WARNING, Theme.alpha(Theme.WARNING, 28))
+            Catalog.isUsable(best) -> shellChip(
+                context, best.rating,
+                if (best.rating == Catalog.SLOW) Theme.WARNING else Theme.SUCCESS,
+                Theme.alpha(if (best.rating == Catalog.SLOW) Theme.WARNING else Theme.SUCCESS, 24),
+            )
+            else -> shellChip(context, best.rating, Theme.DANGER, Theme.alpha(Theme.DANGER, 24))
+        }
+        card.addView(chip, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+            marginStart = 6
+        })
+        return card
+    }
+
+    /** The Installed tab: only apps this phone has a record for, newest catalog order. */
+    private fun refreshInstalled() {
+        val all = Installed.read(context)
+        val list = apps.filter { all.containsKey(it.id) }
+        for (app in list) {
+            listCol.addView(appCard(app), LayoutParams(LayoutParams.MATCH_PARENT, 54).apply {
+                bottomMargin = 6
+            })
+        }
+        if (list.isEmpty()) listCol.addView(emptyLabel("No apps installed yet — pick one from the Catalog tab"))
+        status.text = "${list.size} installed"
+        P7Log.say(context, "APPCTR installed tab rows=${list.size}")
+    }
+
+    private fun emptyLabel(s: String): TextView = TextView(context).apply {
+        text = s
+        setTextColor(Theme.TEXT_DIM)
+        Theme.px(this, Theme.SMALL)
+        setPadding(6, 18, 6, 18)
+    }
+
     private fun renderDetail() {
-        val app = selected ?: run { detail.text = "No app selected"; return }
+        val app = selected ?: run {
+            detailTitle.text = "No app selected"
+            detailBody.text = ""
+            return
+        }
         val v = picked ?: Catalog.pick(app)
         picked = v
         if (v == null) {
-            detail.text = "${app.name}\nno versions in the catalog"
+            detailTitle.text = app.name
+            detailBody.text = "No versions in the catalog"
+            installBtn.isEnabled = false
+            installBtn.alpha = 0.45f
+            openBtn.isEnabled = false
+            openBtn.alpha = 0.45f
+            uninstallBtn.visibility = View.GONE
             return
         }
         val usable = Catalog.isUsable(v)
         val installer = installerState(v)
         val have = Installed.version(context, app.id)
-        installBtn.text = if (v.kind == "windows" || v.kind == "linux") {
-            Winget.actionLabel(v.version, have)
-        } else {
-            "Install"
+        val installable = v.kind == "windows" || v.kind == "linux" || v.kind == "android"
+        installBtn.text = when {
+            v.kind == "windows" || v.kind == "linux" -> Winget.actionLabel(v.version, have)
+            v.kind == "android" -> if (have.isNotEmpty()) "Installed" else "Install"
+            else -> "Included"
         }
-        detail.text = buildString {
-            append(app.name).append('\n')
-            append("version ").append(v.version).append("  ·  ").append(v.kind)
-                .append("  ·  ").append(v.rating).append('\n')
-            append("installer: ").append(installer).append('\n')
-            if (have.isNotEmpty()) append("installed: ").append(have).append('\n')
-            if (!usable) append("Not yet: ").append(v.note.ifEmpty { v.rating }).append('\n')
-            else if (v.note.isNotEmpty()) append(v.note).append('\n')
-            append("fetch: ").append(v.fetch.ifEmpty { "-" })
+        installBtn.isEnabled = usable && installable && have.isEmpty()
+        installBtn.alpha = if (installBtn.isEnabled) 1f else 0.45f
+        openBtn.isEnabled = usable
+        openBtn.alpha = if (usable) 1f else 0.45f
+        uninstallBtn.visibility = if (have.isNotEmpty()) View.VISIBLE else View.GONE
+        detailTitle.text = app.name
+        detailBody.text = buildString {
+            append(v.version).append(" · ").append(v.kind).append(" · ").append(v.rating).append('\n')
+            append(installer)
+            if (have.isNotEmpty()) append("\nInstalled: ").append(have)
+            if (!usable) append("\nNot yet: ").append(v.note.ifEmpty { v.rating })
+            else if (v.note.isNotEmpty()) append('\n').append(v.note)
         }
     }
 

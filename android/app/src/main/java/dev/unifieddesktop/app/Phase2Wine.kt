@@ -903,6 +903,7 @@ object Phase2Wine {
     fun openExe(ctx: Context, path: String): Boolean {
         val exe = File(path)
         if (!exe.isFile) { say("APPCTR exe missing $path"); return false }
+        Phase12Preload.noteWindowsOpen(ctx)
         // B-088: the chosen program replaces whatever catalog app was showing.
         closeCatalogApps(ctx)
         val pid = startBin(ctx, loaderBin(ctx), waitForExit = false, exe.absolutePath)
@@ -921,6 +922,10 @@ object Phase2Wine {
         // otherwise lingers under the new title, and a second slow copy can block on the
         // same wineserver pipe. The X11 frame itself reconnects to the fresh server content.
         closeCatalogApps(ctx)
+        // D21: a real Windows open keeps the warm-up eligible for the next 7 days.
+        if (id == "notepadpp" || id == "sevenzip" || id == "minesweeper") {
+            Phase12Preload.noteWindowsOpen(ctx)
+        }
         when (id) {
             "notepadpp" -> {
                 ensureLivePrefix(ctx, "open notepadpp")

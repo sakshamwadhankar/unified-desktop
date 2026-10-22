@@ -222,12 +222,16 @@ phase's gate passes.
 - **Decided:** 2026-10-23 03:02, by the agent on the manager's Phase 12 round 2 direction
   ("Notepad++ start, 40 min: make the winners default").
 - **Decision:** `Phase12Preload` starts in WINE mode: when the desktop Presentation is shown,
-  a background thread runs `Phase2Wine.prewarm` (ensure Xvfb + a live Wine prefix). A live
-  prefix is reused without booting, so a reconnect never touches an open app. code-server
-  warm-up stays off. Every path that boots Wine (`ensureLivePrefix` for app opens and
-  installers, `bootAndWait` for MSI installs) now runs under one monitor, so a user click
-  during the warm-up waits for that boot and reuses its result instead of starting a second
-  boot that reaps the first.
+  a background thread runs `Phase2Wine.prewarm` (ensure Xvfb + a live Wine prefix). **Manager
+  change 03:12:** it runs only when at least one catalog Windows program is installed on disk
+  or a Windows program was opened in the last 7 days (`wineWarmWanted`, unit-tested), and it
+  starts **3 s after the desktop is shown**, so a user who never uses Windows apps pays
+  nothing and the connection/first frames are never competing with a boot. A live prefix is
+  reused without booting, so a reconnect never touches an open app. code-server warm-up stays
+  off. Every path that boots Wine (`ensureLivePrefix` for app opens and installers,
+  `bootAndWait` for MSI installs) now runs under one monitor, so a user click during the
+  warm-up waits for that boot and reuses its result instead of starting a second boot that
+  reaps the first.
 - **Why:** measured on `2c0f6edc`: first Notepad++ open **28.23 s cold with no warm-up** and
   **11.95 s with a warm prefix**; the boot is ~5.5 s and starts after the desktop is shown,
   so it does not extend connect (0.944 s visible) and is hidden while the user looks at the

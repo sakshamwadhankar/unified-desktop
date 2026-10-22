@@ -180,6 +180,13 @@ class Phase5Encoder(
         fmt.setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
         fmt.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL_S)
+        // A 1920x1200 desktop is 9000 macroblocks, above level 4.2's 8704, and at 60 fps it
+        // needs 540,000 MB/s: level 5.0 stops at 245,760, so 5.1 is the first level that can
+        // actually carry it. (1920x1080 = 8100 MBs fits 4.2 and is why 1080p worked.) The
+        // encoder otherwise picks a level that cannot hold the frame and start() fails (D8).
+        // Levels 4.0-4.2 are unchanged for normal 1080p.
+        val mbs = (width / 16) * (height / 16)
+        if (mbs > 8192) fmt.setInteger(MediaFormat.KEY_LEVEL, 0x2001) // H.264 level 5.1
         return fmt
     }
 
@@ -224,9 +231,19 @@ class Phase5Encoder(
             } catch (t: Throwable) {
                 Log.i(TAG, "encoder vendor params unavailable: $t")
             }
-            val s = c.createInputSurface()
+            val s = try {
+                c.createInputSurface()
+            } catch (t: Throwable) {
+                Log.e(TAG, "createInputSurface failed ${width}x$height", t)
+                throw t
+            }
             inputSurface = s
-            c.start()
+            try {
+                c.start()
+            } catch (t: Throwable) {
+                Log.e(TAG, "codec start failed ${width}x$height", t)
+                throw t
+            }
             Log.i(TAG, "encoder name=$codecName size=${width}x$height bitrate=$bitrate fps=$fps")
 
             glThread = HandlerThread("p5-gl").also { it.start() }
