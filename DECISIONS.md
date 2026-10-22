@@ -190,6 +190,19 @@ phase's gate passes.
   secret that only our WebView gets (password auto-login or cookie), or a Unix socket in our
   private files dir behind an in-app proxy. B-108, FIX NOW.
 
+### D19: Insert a polish phase (13) before Google Play readiness (now 14)
+- **Decided:** 2026-10-23 00:40, by the manager, on the owner's request.
+- **Decision:** after Phase 12, Phase 13 is "Polish: UI, UX, Chrome, bug sweep". Google Play
+  readiness moves to Phase 14.
+- **Why:** the owner judged the phone app, desktop and browser not good enough for users
+  ("so white and cheap", "illogical", "so greeny", laggy typing, use Chrome). Play readiness
+  needs the product name, which the owner picks later (D12). The store listing should show the
+  polished app, so polish comes first.
+- **Chrome:** first try the phone's own Chrome through the engine (B-003). If it cannot run in a
+  desktop window, the built-in browser becomes a full browser on Android System WebView (the
+  same Chromium engine as Chrome, 0 extra MB). It must not be called "Chrome" or use Chrome's
+  logo unless it really is Google's Chrome app (trademark; Play impersonation policy).
+
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never
   invent a name; `unified-desktop` is a codename.

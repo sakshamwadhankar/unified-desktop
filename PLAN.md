@@ -22,7 +22,8 @@ owner decide the new path before going on.
 | 10 | Phone stays free, keep-alive, continuity | A 2-hour session keeps executing; WhatsApp and a call work meanwhile; reconnect resumes where it was in <= 5 s |
 | 11 | Audio, clipboard, files, PC webcam/mic | Sound on the PC; copy/paste both ways; files between PC and desktop; PC webcam and mic usable by desktop apps |
 | 12 | Speed and lightness | PRD section 4 targets met on the test phone and an old PC, with a before/after table for every change |
-| 13 | Google Play readiness | Policy declarations done; internal-testing build accepted by Google Play (the owner uploads) |
+| 13 | Polish: UI, UX, Chrome, bug sweep | A first-time user connects, works and exits without help; one design on phone, desktop and PC receiver; the owner's UX list done with before/after pictures; user-facing bugs fixed or decided |
+| 14 | Google Play readiness | Policy declarations done; internal-testing build accepted by Google Play (the owner uploads) |
 
 ---
 
@@ -107,7 +108,21 @@ owner decide the new path before going on.
   table for every change; quality profiles (OPTIMIZATION.md) tuned; 3D path for Windows apps
   if the GPU allows.
 
-### Phase 13: Google Play readiness
+### Phase 13: Polish: UI, UX, Chrome, bug sweep
+- **Why (DECISIONS D19):** the owner (2026-10-23): the phone app is "so white and cheap", the UX is
+  "illogical", the desktop is "so greeny", typing feels laggy, a stray "Test" app shows a
+  ball, and the desktop must use Chrome rather than a basic browser. Play readiness waits for
+  the product name anyway.
+- **Build:** one design system (colours, type, spacing, icons) for the phone app, the desktop
+  shell and the PC receiver; a real phone home screen instead of the test harness; a PC
+  receiver window (find phone, pair, connect, Exit) instead of command lines; taskbar, start
+  menu and windows that behave like a desktop; Chrome (the phone's own, through the engine)
+  or, if it cannot run, a full browser on the system WebView; the open user-facing bugs.
+- **Prove:** a first-time walk-through on the phone and PC with pictures of every screen
+  before and after (docs/UX_AUDIT.md), typing latency measured inside the real apps, and
+  every UX_AUDIT item marked done, deferred (SKIPS) or decided.
+
+### Phase 14: Google Play readiness
 - **Build:** permissions declarations and their justifications, data-safety form, store
   listing draft (no name until the owner picks one), signed release build.
 - **Prove:** an internal-testing build accepted by Google Play. The owner uploads it with
