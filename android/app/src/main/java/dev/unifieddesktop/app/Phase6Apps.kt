@@ -206,8 +206,8 @@ object FilesDispatch {
  * route is a fact in logcat, not a guess.
  *
  * With [codeServer] = true this is the **VS Code window**: it loads the running
- * code-server over loopback (auth none, B-106) and opens a workspace through the
- * `?folder=` deep link.
+ * code-server over loopback (B-108: per-start password; the window is given the session
+ * cookie before its first load) and opens a workspace through the `?folder=` deep link.
  */
 class BrowserView(context: Context, private val codeServer: Boolean = false) :
     LinearLayout(context), ShellTextContent {
@@ -242,6 +242,8 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     /** code-server deep-link state (only used when [codeServer]). */
     private var serverPort = 0
     private var pendingFolder: String? = null
+    /** B-108: the `code-server-session` value for this window, from the app's own login. */
+    private var serverCookie: String? = null
 
     val web: WebView = @SuppressLint("SetJavaScriptEnabled") KeyWebView(context).apply {
         android.util.Log.i("Phase6", "BROWSER density ctx=" +
@@ -479,6 +481,7 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
                 post { status.text = "code-server did not start (see p3.log)" }
                 return@Thread
             }
+            serverCookie = r.cookie
             post { openCodeServer(folder) }
         }, "p7-cs-gate").start()
     }
@@ -507,9 +510,10 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     }
 
     /**
-     * Load the running code-server over loopback (auth none, B-106) and open [folder]
-     * through the `?folder=` deep link. B-106: the old POST to `/login` left the window on
-     * the login page with `Failed login attempt`; there is no login any more.
+     * Load the running code-server over loopback and open [folder] through the
+     * `?folder=` deep link. B-108: the per-start password is only used by the app's own
+     * POST /login; the resulting session cookie is put into the WebView's CookieManager
+     * before the first load, so the page never sees a password in a URL.
      */
     fun openCodeServer(folder: String): String {
         val f = Phase3Server.sessionFile(context)
@@ -524,10 +528,20 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         serverPort = port
         pendingFolder = null
         android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+        val cookie = serverCookie ?: Phase3Server.cookieFor(context, port)
+        if (cookie != null) {
+            // Host-scoped copy of the cookie the app got from POST /login. The value is
+            // not logged; only whether it was applied.
+            android.webkit.CookieManager.getInstance().setCookie(
+                "http://127.0.0.1:$port/",
+                "code-server-session=$cookie; Path=/; HttpOnly"
+            )
+            android.webkit.CookieManager.getInstance().flush()
+        }
         val deep = "http://127.0.0.1:$port/?folder=" + android.net.Uri.encode(folder, "/")
         status.text = "loading code-server :$port"
         web.loadUrl(deep)
-        android.util.Log.i("Phase6", "VSCODE load $deep")
+        android.util.Log.i("Phase6", "VSCODE load :$port folder=$folder cookie=${cookie != null}")
         return "load :$port folder=$folder"
     }
 

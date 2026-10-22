@@ -188,7 +188,7 @@ phase's gate passes.
   so `auth: none` lets any installed app run code inside our app. The manager's own 20:50 note
   asked for `--auth none`; that instruction was the mistake. Replace it: a per-start random
   secret that only our WebView gets (password auto-login or cookie), or a Unix socket in our
-  private files dir behind an in-app proxy. B-108, FIX NOW.
+  private files dir behind an in-app proxy. B-108, FIX NOW. **Replaced by D20 (2026-10-23).**
 
 ### D19: Insert a polish phase (13) before Google Play readiness (now 14)
 - **Decided:** 2026-10-23 00:40, by the manager, on the owner's request.
@@ -202,6 +202,21 @@ phase's gate passes.
   desktop window, the built-in browser becomes a full browser on Android System WebView (the
   same Chromium engine as Chrome, 0 extra MB). It must not be called "Chrome" or use Chrome's
   logo unless it really is Google's Chrome app (trademark; Play impersonation policy).
+
+### D20: code-server password auth with a per-start secret and an app-side login
+- **Decided:** 2026-10-23, by the agent (B-108 FIX NOW), replacing D18.
+- **Decision:** code-server runs `auth: password` on `127.0.0.1:<random free port>`. Every
+  start generates 32 random bytes (`SecureRandom`) and writes them only to the app-private
+  `files/phase3/config.yaml` and `files/phase3/session.txt`; the child process gets
+  `--config <path>` only, never the secret in argv or in its environment. The app itself POSTs
+  `/login` over loopback before any WebView load and hands the returned `code-server-session`
+  cookie to the WebView's CookieManager. No password in a URL, no log line, no cookie on disk.
+- **Why:** D18's premise (loopback is private to the app) is false on Android, and `auth: none`
+  therefore let any installed app use our code-server terminal and file APIs. A password is
+  the least invasive way to keep the proven WebView path. The cookie login is deterministic
+  because it happens before the first page load, which fixes B-106's race as a side effect.
+- **Revisit:** if code-server ever offers a per-process Unix-socket-only listener, that is
+  stronger (no TCP port at all); or if Android adds per-uid loopback isolation.
 
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never

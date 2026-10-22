@@ -260,8 +260,18 @@ return JSON.stringify({n:window.__udk.length,events:window.__udk});})()"""
             }
         }
         CookieManager.getInstance().setAcceptCookie(true)
+        // B-108: log in from the app and give the WebView the session cookie before the
+        // first load. Never a password in a URL; never the cookie in the log.
+        val cookie = Phase3Server.cookieFor(this, port) ?: Phase3Server.login(port, session.second)
+        if (cookie != null) {
+            CookieManager.getInstance().setCookie(
+                "http://127.0.0.1:$port/",
+                "code-server-session=$cookie; Path=/; HttpOnly"
+            )
+            CookieManager.getInstance().flush()
+        }
         t0 = System.currentTimeMillis()
-        Phase3Native.say("CS_WEB load http://127.0.0.1:$port/ (auth none, loopback)")
+        Phase3Native.say("CS_WEB load http://127.0.0.1:$port/ (password auth, cookie=${cookie != null})")
         v.loadUrl("http://127.0.0.1:$port/")
     }
 

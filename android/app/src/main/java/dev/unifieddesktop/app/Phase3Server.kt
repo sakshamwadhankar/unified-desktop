@@ -19,9 +19,15 @@ import java.security.SecureRandom
  * `<nativeLibraryDir>/libnode.so` (the only place Android lets us execute code from) with
  * our environment (Phase3Native.envFor). Security, all enforced here:
  *  - it binds to `127.0.0.1:<random free port>` only - never 0.0.0.0,
- *  - `auth: none` because the only client is the app's own WebView over loopback
- *    (B-106: the password login stopped on `/login`; the manager chose loopback-only
- *    no-login on 2026-10-22),
+ *  - `auth: password` with a **fresh 32-byte SecureRandom secret per start** (B-108:
+ *    Android does NOT isolate loopback per app, so `auth: none` let any installed app use
+ *    code-server's terminal and file APIs). The secret lives in our app-private config
+ *    file and session file only - never in a command line (the child only gets
+ *    `--config <path>`), never in a URL and never in a log line,
+ *  - the app logs in itself: `login()` POSTs the password over loopback and the returned
+ *    `code-server-session` cookie is handed to our WebView's CookieManager before the
+ *    first load (B-106's login-page failure was a race with the WebView's own form POST;
+ *    this login happens before any page load and is deterministic),
  *  - telemetry and update checks are off, workspace trust is off (the gate flow edits
  *    files; a trust prompt would block a WebView-only session),
  *  - the CA store, HOME, TMPDIR and SHELL are the stock-Android ones (Phase3Native).
@@ -33,7 +39,20 @@ object Phase3Server {
 
     private fun say(s: String) { Phase3Native.say(s) }
 
-    data class Session(val pid: Long, val port: Int, val password: String, val startMs: Long)
+    data class Session(
+        val pid: Long,
+        val port: Int,
+        val password: String,
+        val startMs: Long,
+        val cookie: String? = null,
+    )
+
+    /** The running session of this process (B-108: the cookie stays in memory). */
+    @Volatile
+    private var live: Session? = null
+
+    /** The session this process started, or null. Never contains anything from disk. */
+    fun current(): Session? = live
 
     /** The preload that logs every native-addon load with its resolved path (asset). */
     fun hookFile(ctx: Context): File {
@@ -48,21 +67,121 @@ object Phase3Server {
     fun userDataDir(ctx: Context): File = File(Phase3Native.dir(ctx), "cs-data").also { it.mkdirs() }
     fun extensionsDir(ctx: Context): File = File(Phase3Native.dir(ctx), "cs-ext").also { it.mkdirs() }
 
-    /** Pure config text (unit-tested): loopback only, no login, no telemetry. */
-    fun configYaml(port: Int): String = buildString {
+    /**
+     * Pure config text (unit-tested): loopback only, password auth with the per-start
+     * secret, no telemetry. The password is passed to code-server through this file in
+     * our private app directory, never on the child's command line (B-108).
+     */
+    fun configYaml(port: Int, password: String): String = buildString {
         append("bind-addr: 127.0.0.1:").append(port).append('\n')
-        append("auth: none\n")
+        append("auth: password\n")
+        append("password: ").append(password).append('\n')
         append("cert: false\n")
         append("disable-telemetry: true\n")
         append("disable-update-check: true\n")
         append("disable-workspace-trust: true\n")
     }
 
-    /** Pure: 32 lowercase hex chars from [rnd] (unit-tested for shape). */
+    /** Pure: 64 lowercase hex chars (32 random bytes) from [rnd]; unit-tested for shape. */
     fun newPassword(rnd: SecureRandom = SecureRandom()): String {
-        val b = ByteArray(16)
+        val b = ByteArray(32)
         rnd.nextBytes(b)
         return b.joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Pure: the `code-server-session` value out of the `Set-Cookie` headers of a login
+     * answer, or null. Separate from the HTTP call so it can be unit-tested with the
+     * exact header shapes code-server sends.
+     */
+    fun sessionCookie(setCookies: List<String>): String? {
+        for (raw in setCookies) {
+            // One header may carry several comma-separated cookies; each pair is
+            // `name=value; attrs`. The value is a URL-safe token code-server signs.
+            for (part in raw.split(',')) {
+                val pair = part.trim().substringBefore(';')
+                if (pair.startsWith("code-server-session=")) {
+                    val v = pair.substringAfter('=').trim()
+                    if (v.isNotEmpty()) return v
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * POST /login over loopback with [password] and return the session cookie value.
+     * B-108: the only caller is our own app. Nothing here is logged except the status
+     * code and whether a cookie came back - never the password or the cookie itself.
+     */
+    fun login(port: Int, password: String, attempts: Int = 3): String? {
+        if (port <= 0 || password.isEmpty()) return null
+        val body = "password=" + java.net.URLEncoder.encode(password, "UTF-8")
+        val bytes = body.toByteArray()
+        var last = ""
+        for (i in 1..attempts) {
+            try {
+                val c = URL("http://127.0.0.1:$port/login").openConnection() as HttpURLConnection
+                c.requestMethod = "POST"
+                c.doOutput = true
+                c.instanceFollowRedirects = false
+                c.connectTimeout = 4000
+                c.readTimeout = 8000
+                c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                c.setRequestProperty("Content-Length", bytes.size.toString())
+                c.outputStream.use { it.write(bytes) }
+                val code = c.responseCode
+                val headers = c.headerFields
+                val setCookies = ArrayList<String>()
+                for ((k, v) in headers) {
+                    if (k != null && k.equals("Set-Cookie", ignoreCase = true) && v != null) {
+                        setCookies.addAll(v)
+                    }
+                }
+                val cookie = sessionCookie(setCookies)
+                c.disconnect()
+                val detail = "CS_LOGIN attempt=$i code=$code cookies=${setCookies.size} cookie=${if (cookie != null) "yes" else "no"}"
+                say(detail)
+                if (cookie != null) return cookie
+                last = "code=$code"
+            } catch (t: Throwable) {
+                last = "${t.javaClass.simpleName}: ${t.message}"
+                say("CS_LOGIN attempt=$i error=$last")
+            }
+            try { Thread.sleep(400) } catch (_: InterruptedException) { }
+        }
+        say("CS_LOGIN FAIL $last")
+        return null
+    }
+
+    /** The password of the running session for [port]: memory first, then the private file. */
+    fun passwordFor(ctx: Context, port: Int): String? {
+        live?.let { if (it.port == port) return it.password }
+        val f = sessionFile(ctx)
+        if (!f.isFile) return null
+        var p = -1
+        var pw: String? = null
+        try {
+            f.useLines { lines ->
+                for (l in lines) {
+                    if (l.startsWith("port=")) p = l.substringAfter('=').trim().toIntOrNull() ?: -1
+                    if (l.startsWith("password=")) pw = l.substringAfter('=').trim()
+                }
+            }
+        } catch (_: Throwable) { return null }
+        return if (p == port) pw?.takeIf { it.isNotEmpty() } else null
+    }
+
+    /**
+     * A login cookie for the already-running session on [port]. Used when a window opens
+     * while the server was started earlier (CodeServerWarm reused a healthy session).
+     */
+    fun cookieFor(ctx: Context, port: Int): String? {
+        live?.let { s -> if (s.port == port && s.cookie != null) return s.cookie }
+        val pw = passwordFor(ctx, port) ?: return null
+        val cookie = login(port, pw) ?: return null
+        live?.let { if (it.port == port) live = it.copy(cookie = cookie) }
+        return cookie
     }
 
     /** A free loopback port: bind port 0, read what the kernel gave us, close it. */
@@ -118,10 +237,11 @@ object Phase3Server {
 
         val port = freePort()
         val password = newPassword()
-        val conf = configFile(ctx).also { it.writeText(configYaml(port)) }
+        val conf = configFile(ctx).also { it.writeText(configYaml(port, password)) }
         val hook = hookFile(ctx)
-        say("CS_START port=$port auth=none pw=unused(${password.length}hex) conf=${conf.absolutePath} " +
-                "node=${node.absolutePath} entry=${entry.absolutePath} hook=${hook.absolutePath}")
+        say("CS_START port=$port auth=password pw_len=${password.length} (value in the private config only) " +
+                "conf=${conf.absolutePath} node=${node.absolutePath} entry=${entry.absolutePath} " +
+                "hook=${hook.absolutePath}")
 
         val t0 = System.currentTimeMillis()
         val pb = ProcessBuilder(
@@ -192,9 +312,15 @@ object Phase3Server {
         }
         val pid = pidOf(p)
         if (healthMs > 0) {
+            // B-108: log in from the app itself, before any WebView loads. The cookie is
+            // kept in memory and written nowhere; the password stays in the app-private
+            // config and session files.
+            val cookie = login(port, password)
             say("CS_START OK pid=$pid port=$port healthz=200 body=${body.take(40)} " +
-                    "first_response_ms=$firstResponseMs health_ms=$healthMs wait_attempts=$attempt")
-            val session = Session(pid, port, password, healthMs)
+                    "first_response_ms=$firstResponseMs health_ms=$healthMs wait_attempts=$attempt " +
+                    "login=${if (cookie != null) "ok" else "FAIL"}")
+            val session = Session(pid, port, password, healthMs, cookie)
+            live = session
             try {
                 sessionFile(ctx).writeText("pid=$pid\nport=$port\npassword=$password\nhealthMs=$healthMs\n")
             } catch (t: Throwable) { say("CS_START session write failed: $t") }
@@ -216,6 +342,7 @@ object Phase3Server {
     }
 
     fun stop(ctx: Context): Boolean {
+        live = null
         val needle = Phase3Data.root(ctx).absolutePath
         val pids = pidsMatching(needle)
         if (pids.isEmpty()) { say("CS_STOP nothing running (no pid with $needle in cmdline)"); return true }

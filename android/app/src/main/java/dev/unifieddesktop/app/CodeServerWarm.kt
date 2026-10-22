@@ -7,9 +7,19 @@ import android.content.Context
  * optional desktop pre-warm. `@Synchronized` matters: a user can click VS Code while the
  * pre-warm thread is still starting the server, and two `Phase3Server.start` calls would race
  * for the same session file and port.
+ *
+ * B-108: the server now requires its per-start password. This returns the login cookie the
+ * WebView must have before its first load (fresh login for a reused server, the start's own
+ * login for a new one).
  */
 object CodeServerWarm {
-    data class Result(val started: Boolean, val ok: Boolean, val port: Int, val waitMs: Long)
+    data class Result(
+        val started: Boolean,
+        val ok: Boolean,
+        val port: Int,
+        val waitMs: Long,
+        val cookie: String? = null,
+    )
 
     @Synchronized
     fun ensureRunning(
@@ -32,7 +42,11 @@ object CodeServerWarm {
         }
         P7Log.say(context, "VSCODE gate session=${sf.isFile} port=$port healthz=$code")
         if (!CodeServerGate.needsStart(sf.isFile && port > 0, code)) {
-            return Result(false, true, port, android.os.SystemClock.elapsedRealtime() - t0)
+            // Healthy server from an earlier start: mint a fresh cookie for our WebView.
+            val cookie = Phase3Server.cookieFor(context, port)
+            P7Log.say(context, "VSCODE reuse port=$port login=${if (cookie != null) "ok" else "FAIL"}")
+            return Result(false, cookie != null, port,
+                android.os.SystemClock.elapsedRealtime() - t0, cookie)
         }
         P7Log.say(context, "VSCODE starting code-server (wait up to $timeoutMs ms)")
         val session = Phase3Server.start(context, timeoutMs)
@@ -40,7 +54,9 @@ object CodeServerWarm {
             P7Log.say(context, "VSCODE start FAILED")
             return Result(true, false, -1, android.os.SystemClock.elapsedRealtime() - t0)
         }
-        P7Log.say(context, "VSCODE start ok port=${session.port} health=${session.startMs} ms")
-        return Result(true, true, session.port, android.os.SystemClock.elapsedRealtime() - t0)
+        P7Log.say(context, "VSCODE start ok port=${session.port} health=${session.startMs} ms " +
+            "login=${if (session.cookie != null) "ok" else "FAIL"}")
+        return Result(true, session.cookie != null, session.port,
+            android.os.SystemClock.elapsedRealtime() - t0, session.cookie)
     }
 }
