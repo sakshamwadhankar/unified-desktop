@@ -3,16 +3,19 @@
 <head>
 <meta charset="utf-8">
 <title>1 kHz tone (phone audio test)</title>
-<style>body{background:#111;color:#ddd;font:16px sans-serif;margin:20px}</style>
+<style>body{background:#111;color:#ddd;font:16px sans-serif;margin:20px}button{font-size:18px;padding:8px 16px;margin:4px}</style>
 </head>
 <body>
-<h3>Phone sound to the PC: 3 s 1 kHz tone</h3>
-<p id="s">building the WAV...</p>
-<button id="b" style="font-size:18px;padding:8px 16px">Play 3 s tone</button>
+<h3>Phone sound to the PC: 1 kHz tones</h3>
+<p id="s">ready</p>
+<button id="b3">Play 3 s tone</button>
+<button id="b10">Play 10 s tone (B-101)</button>
+<button id="bc">Play 20 ms click</button>
 <script>
-  // A 3 s 1 kHz mono WAV at 48000 Hz, amplitude 0.05 (-26 dBFS), generated in the page.
+  // WAVs at 48000 Hz mono, low amplitude (0.05 = -26 dBFS); the 10 s tone is the B-101
+  // measurement tone and the 20 ms click is the delay marker. No file is saved.
   function makeWav(seconds, freq, amp) {
-    var rate = 48000, n = rate * seconds;
+    var rate = 48000, n = Math.round(rate * seconds);
     var buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf);
     function str(o, s) { for (var i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); }
     str(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); str(8, 'WAVE');
@@ -21,26 +24,31 @@
     dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
     str(36, 'data'); dv.setUint32(40, n * 2, true);
     for (var i = 0; i < n; i++) {
-      var v = Math.sin(2 * Math.PI * freq * i / rate) * amp * 32767;
+      // 2 ms cosine fade in/out so the click has a clean, short onset.
+      var fade = Math.min(1, i / (rate * 0.002), (n - 1 - i) / (rate * 0.002));
+      var v = Math.sin(2 * Math.PI * freq * i / rate) * amp * fade * 32767;
       dv.setInt16(44 + i * 2, v, true);
     }
     return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
   }
-  var url = makeWav(3, 1000, 0.05);
-  var a = new Audio(url);
-  a.volume = 0.6;
+  var tone3 = new Audio(makeWav(3, 1000, 0.05));
+  var tone10 = new Audio(makeWav(10, 1000, 0.05));
+  var click = new Audio(makeWav(0.02, 1000, 0.10));
+  tone3.volume = tone10.volume = click.volume = 0.6;
   function report(ev) {
     if (window.UdBridge && window.UdBridge.report) window.UdBridge.report(ev);
   }
-  function play() {
+  function play(a, name) {
     a.currentTime = 0;
-    a.play().then(function () { report('tone-start'); })
-      .catch(function (e) { document.getElementById('s').textContent = 'play failed: ' + e; });
+    report(name + '-start');
+    a.play().catch(function (e) { document.getElementById('s').textContent = 'play failed: ' + e; });
   }
-  a.onended = function () { report('tone-end'); document.getElementById('s').textContent = 'tone finished'; };
-  document.getElementById('b').onclick = play;
-  document.getElementById('s').textContent = 'ready; autoplay in 0.6 s';
-  setTimeout(play, 600);
+  tone3.onended = function () { report('tone3-end'); document.getElementById('s').textContent = '3 s tone finished'; };
+  tone10.onended = function () { report('tone10-end'); document.getElementById('s').textContent = '10 s tone finished'; };
+  click.onended = function () { report('click-end'); document.getElementById('s').textContent = 'click finished'; };
+  document.getElementById('b3').onclick = function () { play(tone3, 'tone3'); };
+  document.getElementById('b10').onclick = function () { play(tone10, 'tone10'); };
+  document.getElementById('bc').onclick = function () { play(click, 'click'); };
 </script>
 </body>
 </html>

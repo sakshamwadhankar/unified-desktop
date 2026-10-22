@@ -129,3 +129,40 @@ FILES: phone <-> PC pass (1 MB lock import SHA match this round; 20 MB + 1 MB ea
 WEBCAM+MIC: PC camera visible in an external page at 640x360 / 11 fps, mic RMS present,
        release on stop; B-102 keepalive verified.
 ```
+
+## Round 3 (2026-10-22 13:20-14:15): B-101 phone proof, webcam cover, Zoom
+
+All phone results are on `2c0f6edc` (Android 16) on the **dev path** (`adb forward tcp:47600 -> tcp:47600`); the phone's Wi-Fi address was still unreachable. The USB link dropped at ~14:13-14:15 (receiver `window closed`, `adb devices` empty, last phone camera frame 14:12:47), which ended the round before the Zoom slot.
+
+| Item | What I did | Files | Test | Verified on | Numbers |
+|---|---|---|---|---|---|
+| B-101 fix + real path | Root cause: the **1 s WASAPI device buffer** swallowed the whole 6-packet jitter queue on every pump, so `underruns` measured queue emptiness, not audible gaps. Fix: 100 ms render buffer, the pump tops the device up to 60 ms, the jitter target stays 6; audio packet timestamps use `System.nanoTime/1_000_000` like the clock-sync frame (deep sleep had made `age_ms` `n/a`); onset line `AUDIO onset ... play_age_ms`. The tone page is buttons only (3 s, 10 s, 20 ms click; no autoplay). | `audio.rs`, `view.rs`, `Phase11Audio.kt`, `tone.html` | phone: 10 s 1 kHz tone at low volume + 3 x 20 ms click | phone (dev path) | tone: **packets 1000 sent / 1000 received, late 0, dropped 0, underruns 2 (both at session start), depth 8-10, age_ms 13-15, devbuf_ms 60**; clicks: capture->PC play **109.4 / 128.2 / 131.3 ms, median 128.2 ms**, 0 underruns during the clicks; from the page's `play()` call 410 / 476 / 481 ms because the WebView Audio element takes ~300 ms to start. Evidence `p11c/tone10.log`, `p11c/clicks.log`, `p11c/logcat-clicks.txt`. |
+| Webcam cover | OWNER asked for a 5 s hand cover at 14:12; stream live (640x360, ~11 fps, receiver window open); sampler every ~0.5 s from 14:11:30 to 14:12:35. | `TODO.md`, `p11c/cam-cover.log` | P11CAMSTATS brightness/changed samples | phone (dev path) | frames 3619 -> 4100 during the window; baseline brightness 0.62-0.66; largest sustained 5 s drop **0.628 -> 0.600 (-0.028)** at 14:12:01-05; then flat 0.618 from 14:12:22-36 (`changed` 0.012) and 0.642 from 14:12:37. **No sample near 0 and no large frame change: no deliberate cover happened in the window.** Not the requested proof. |
+| Zoom page | Slot 14:15-14:25; no page opened. | - | - | blocked | The phone was gone from USB at 14:15: `adb devices` empty, receiver `window closed`, VSTAT fps 0.0. No phone input after the link died. SKIP row added with the exact demand. |
+| Android -> Notepad++ paste | No new work (manager 14:01); wrote **B-103** from the round-2 findings (no SelectionRequest from Wine after Ctrl+V; claim/serve side proven). | `BUGS.md`, `SKIPS.md` | - | code-only | B-103 OPEN, next round. |
+| Gates | Android unit tests + lint + assemble; PC tests + clippy; whitespace. | - | - | code-only | Android **169 tests / 0 fail / 3 skip**, lint + assemble `BUILD SUCCESSFUL` (1m12s); PC **76/0** `cargo test --release`; `cargo clippy --all-targets -- -D warnings` clean (only the pre-existing workspace-profile warning); `git diff --check` exit 0. No commit made. |
+
+### What failed or was skipped (round 3)
+
+- **The deliberate 5 s webcam cover did not happen** in the 14:11:30-14:12:35 window. The stream
+  and the numbers are good; the proof is not. SKIP row.
+- **zoom.us/test was not run**: the phone dropped off USB at ~14:15 before the slot. SKIP row.
+- **14:03 input incident**: before the last MediaProjection consent a notification shade was in
+  front and two blind taps landed there. After `am start` brought our activity to the front, every
+  tap targeted our own dialog (verified with `uiautomator dump` each step). No harm measured.
+- **Phone cleanup incomplete**: `stay_on_while_plugged_in` is still `2` and the app was not
+  force-stopped, because adb lost the device. Brightness was never changed (699). OWNER line added.
+
+### Bugs (round 3)
+
+- **B-101** moved to *Fixed* with the phone evidence above (the manager may re-open on review).
+- **B-103** opened: Android -> X11 paste (Wine issues no SelectionRequest); no new work this round
+  by manager instruction.
+
+```
+PHASE 11 GATE (phone): NOT FULLY PASSED - B-101 audio proven on the phone; webcam cover proof not obtained (no cover in the window); zoom.us/test not run (phone USB dropped at 14:15); Android->X11 paste remains open as B-103. Gates: Android 169/0/3 + lint + assemble, PC 76/0 + clippy clean.
+AUDIO (phone, dev path): packets 1000/1000/late 0/dropped 0, underruns 2 (priming), delay median 128 ms
+WEBCAM COVER: no cover detected in the 14:11:30-14:12:35 window (baseline 0.62-0.66, largest 5 s drop 0.028); stream live at 11 fps
+ZOOM PAGE: not tested - phone dropped off USB at ~14:15 (adb no devices); SKIP row added
+NOTEPAD++ PASTE: not done this round (manager 14:01) - B-103 OPEN with round-2 findings
+```

@@ -1,30 +1,29 @@
-# Phase 11 round 2: to-do
-Done 6 of 7 | Partial: item 3(c) no deliberate cover, item 4 Android->X11 paste | Updated 12:20 | DONE: docs, gates, cleanup (phone left clean, no commit); final report next
-OWNER line CLOSED (no more windows): the 11:40 window had no stream (view window closed at 11:39:32) and the 12:05 window had no stream either (the app process was gone at ~12:0x; the view window was closed again and the link service had stopped). Recorded brightness: baseline 0.51-0.85; dip 0.525 -> 0.285 at 11:36:46 (4 s), jump to 0.869 at 11:55:28; no deliberate 5 s cover in any of the six windows -> SKIP row.
+# Phase 11 round 3: to-do
+Done 3 of 6 | Failed or skipped 3 (item 3 no cover, item 4 phone USB lost, item 5 -> B-103 per manager 14:01) | Updated 14:23 | Now: done (report in chat; STATE.md current)
+OWNER: cover was requested for 14:12; the 14:11:30-14:12:35 sampler saw no cover (numbers below). If you covered later, tell the manager; the recorded window is closed.
+OWNER: the phone's USB link dropped at ~14:13-14:15 (adb: no devices; view: window closed; VSTAT fps 0). Zoom could not be opened. Reconnect USB if you want the phone left clean (stay_on=2 -> 0) and the Zoom check done.
 
-1. [x] Start: time, git status, adb, battery, RAM; build+install; stayon; link; view.
-   - Link started headlessly (`phase11x link-start`, no activity); PC view via `adb forward tcp:47600` + 127.0.0.1 (dev path; Wi-Fi 10.17.106.29:47600 times out from the laptop, ping "host unreachable").
-   - Video OK: 1920x1088 NV12, D3D11, presented/decoded advancing; 1 fps at idle desktop (change-driven), 4 fps on first frames.
-2. [x] Phone sound -> PC speakers end to end (consent, CH_AUDIO, PC player, counters, loopback).
-   - Consent: RECORD_AUDIO (While using) + MediaProjection (Entire screen -> Cast); FGS type mediaProjection; capture matches our uid only (`addMatchingUid`), 48 kHz stereo 10 ms packets.
-   - PC: Player 48000 Hz 2 ch f32; recv/played advancing, late=0 dropped=0, bad=0.
-   - Proof: 3 s 1 kHz tone page -> loopback mean_rms 0.00102 max 0.00208 (23/47 samples above 0.0005); silence control mean/max 0.00000.
-   - B-101 logged: underruns=29185 over 17389 packets (~6 empty render calls/packet, depth=1) and end-to-end delay unmeasured. ROUND 2: cause measured = packets arrive in bursts of ~5 every 50 ms (TCP coalescing); a 30 ms target drained empty between bursts and the 60 ms age window hid the age. FIX: target 6, one underrun per gap, age window -50..500 ms, `devbuf_ms` logged. PC-only 10 s tone: packets=1000 played=1000 late=0 dropped=0 underruns=1 (priming) depth_end=0. Real-path re-measure + click delay BLOCKED: phone password-locked, MediaProjection consent needs the unlock -> SKIP row.
-3. [x] PC webcam + mic -> desktop WebView (CH_CAM, shim in every page, numbers, release; 3(c) has numbers but no deliberate cover).
-   - PC webcam `USB2.0 HD UVC WebCam` 1280x720 RGB32 -> downscale 640x360 -> JPEG ~13 KB, ~10 fps sent (517 frames in ~50 s).
-   - Shim `ud:camtest` numbers 10:20 run: `{"w":640,"h":360,"fps":6-9,"brightness":0.404-0.406,"changed":0|0.002,"audioRms":0.012-0.024}`; PC `miclevel` 0.0208 -> BE decode fix matched (was ~0.57 with LE); Windows chime raised shim mic RMS to 0.046 (2 s, then 0.036 tail).
-   - Release: `p6:camstop` -> `CAM off ... frames=517 audio_packets=4824`, `MIC stream stopped`, `CAM stream stopped (camera and microphone released)`; phone fps/frames stop. Phone camera/mic never opened (no CAMERA permission; capture is PC-side, phone shows a WebView).
-   - (a) DONE: shim injection at document start into EVERY Browser page without androidx.webkit (not in the offline Gradle cache; dl.google.com unreachable): `WebViewClient.shouldInterceptRequest` re-serves main-frame HTML with the shim as the first <head> script (dependency-free; THIRD_PARTY row not needed). UdBridge interface added for every page; shim marks `window.__udCamShim` and auto-starts the stream on getUserMedia. External page https://webcamtests.com DONE: log `BROWSER shim injected ... bytes=31238`; clicked its own "Test my cam" button via the new harness `p6:jsb64`; page's Webcam Information table: `Webcam Name: PC camera (unified-desktop); Quality Rating: 8; Frame rate: 11 FPS; Stream Type: video; Image Mode: rgb; Webcam MegaPixels: 0.23 MP; Webcam Resolution: 640x360; Video Standard: nHD; Aspect Ratio: 1.78`; "Testing was completed successfully". zoom.us/test NOT tried yet (after brightness/B-101 if time).
-   - (b) DONE (measured): PC send rate is exactly 10.0 fps (frames 300->400 in 10 s), not the code's 15 fps target - the device itself is the cap (USB2 UVC at 1280x720 RGB32 uncompressed ~295 Mbit/s; MF negotiates 1280x720 even though the code asks 640x480). The phone was the fixable part: the shim did a `getImageData` readback and allocated a fresh Image on EVERY frame. Fix: one reused Image + brightness sampled every 5th frame. Same stream, same page: ud:camtest 6-9 fps -> 10-11 fps (frames advance 10/s = the full PC feed). PC side also converted+downscaled in one pass (929k-pixel two-pass -> 230k one-pass) so 15 fps pacing is no longer CPU-blocked; kept harmless.
-   - (c) NUMBERS: OWNER 10:38/10:52/11:08/11:22/11:40/12:05, sampler every 3 s. Baseline 0.51-0.85 `changed` 0-0.063; real dip 0.525 -> 0.285 at 11:36:46 (~4 s at 0.41-0.44), jump to 0.766-0.85 from 11:37:35, and 0.375 -> 0.869/0.544 at 11:55:28. No deliberate 5 s cover: 11:22 lost the stream to B-102, 11:40 to the view window closing at 11:39:32. SKIP row.
-4. [~] X11 clipboard bridge (both ways, loop guard, Notepad++ marker). PARTIAL:
-   - X11->Android VERIFIED: Wine owns CLIPBOARD (owner=8388610) after Ctrl+C in Notepad++; `Phase11X11Clip` read it (`notify target=238 prop=242`, `property bytes=133`, `x11->android len=133 sha=8d80920a`) and applied it to the Android clipboard (`P11CLIP <- X11 len=133 sha=8d80920a`).
-   - Key fix: Wine serves the selection with SendEvent, so the delivered event has bit 7 set (0x9F = 31|0x80); mask the packet type with 0x7f (both in convert and handleEvent). Also bounded GetSelectionOwner/GetProperty waits + a 5 s liveness tick (the old code blocked forever on a stray non-reply packet).
-   - Android->X11 (PARTIAL): claim + serve implemented (`android->x11 len=133 sha=8d80920a`, `selection owner=2097664`), but Notepad++ Ctrl+V issued no SelectionRequest to us (no `served request` log; the paste replaced the selected text with nothing) and the marker/type route needs a foreground app to read the Android clipboard (background clipboard reads are blocked while the owner uses WhatsApp). Timeboxed -> SKIP row added.
-5. [x] Lock-desktop import (--lock-max-seconds 180, Ctrl+O import 1 MB, SHA, Exit click).
-   - `view --lock-max-seconds 180` on the dev path: `LOCK engaged` switch_ms=19, first_frame_after_engage_ms=413.
-   - New harness `lock-inject --import <path>`: attaches to the lock desktop, verifies foreground hwnd pid == receiver pid (journal pid) before every synthetic keystroke; sends Ctrl+O, verifies dialog `#32770 pid=receiver`, types the path (Alt+N + Unicode SendInput) + Enter: `import queued (dialog)`.
-   - Phone saved `files/desktop/import-1mb.bin` 1048576 B, SHA-256 `1c59b8670027384143781a8a8bff2f3b44bd8818d0f53b13b064c2375a1afe38` == PC SHA.
-   - Exit via `lock-inject --click-exit`: `[lock] exited: switch_ms=21 total_ms=110`, desktop restored to Default, view process gone.
-6. [x] Gates: Android 169 tests / 0 fail / 3 skip + :app:lintDebug + :app:assembleDebug BUILD SUCCESSFUL (48 s); PC cargo test --release 75/0; clippy --all-targets clean; git diff --check exit 0.
-7. [~] Docs + cleanup + report (PHASE11_RESULT, ARCHITECTURE, BUGS, SKIPS, LESSONS done; cleanup + STATE + report in progress).
+1. [x] Start: build, install, stayon usb, link, view --no-lock on the dev path; receiver open.
+   - Android build OK, cargo 76/0; consent tapped (RECORD_AUDIO already granted; MediaProjection
+     "Entire screen" -> Cast) twice (the second after the reinstall).
+   - Audio real: `AUDIO recv/played` 100/s, depth 8-11, age_ms 12-22, devbuf_ms=60, underruns 0
+     during the measured events.
+   - Incident 14:03: before the last consent a notification shade was foreground; two blind taps
+     landed there. No phone input since without confirming our UI in front (`am start` used).
+2. [x] B-101 on the phone: 10 s 1 kHz tone: packets 1000 sent/1000 received, late=0, dropped=0,
+   underruns 2 total (both at start), depth 8-10, age_ms 13-15. Clicks: onset play_age
+   109.4 / 128.2 / 131.3 ms, median 128.2 ms (capture->PC play); page `play()`->PC play
+   410 / 476 / 481 ms (WebView Audio startup ~300 ms); 0 underruns during the clicks.
+3. [x] Webcam cover window 14:11:30-14:12:35: FAILED as proof. Stream live the whole time
+   (640x360, 11 fps, frames 3619->4100, PC window open); brightness baseline 0.62-0.66,
+   largest 5 s drop 0.628->0.600 (-0.028) at 14:12:01-05, then 0.618 flat 14:12:22-36,
+   recovery 0.642 at 14:12:37. No dip to black and no large frame change -> no deliberate
+   5 s cover happened in the window. Evidence `p11c/cam-cover.log`.
+4. [x] Zoom page: BLOCKED at 14:15 - the phone dropped off USB (`adb devices` empty, view
+   `window closed`, VSTAT fps 0.0 at 14:13-14:15). No page could be opened; no phone result.
+   SKIP row: needs the phone connected and `https://zoom.us/test` in our Browser.
+5. [x] Android -> Notepad++ paste: NO NEW WORK (manager 14:01); B-103 row written from round-2
+   findings (OPEN, next round).
+6. [ ] Close-out from 14:25: gates, docs, cleanup, STATE.md, report; end lines exact.
+
+Details (append-only):

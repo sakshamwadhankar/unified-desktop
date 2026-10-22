@@ -15,13 +15,28 @@ pub const PACKET_FRAMES: usize = 480;
 /// between bursts - that is what produced 16-29k "underruns" per run (B-101). The gate
 /// must sit above one burst so the queue never empties.
 pub const JITTER_TARGET_PACKETS: usize = 6;
+/// The pump keeps at most 60 ms in the shared-mode device; the 60 ms jitter buffer is the
+/// real cushion. A 1 s device buffer used to swallow the queue whole (B-101, round 3).
+pub const DEVICE_TOPUP_FRAMES: u32 = 2880;
 
-/// One wire packet's PCM plus its sequence number (the phone clock stamp is not needed by
-/// the player; the phone logs it for the delay measurement).
+/// One wire packet's PCM plus its sequence number and phone timestamp (ms,
+/// `SystemClock.elapsedRealtime`). The player converts the stamp with the session clock
+/// offset to log the capture-to-playback age at an onset (B-101 click delay).
 #[derive(Debug)]
 pub struct PcmPacket {
     pub seq: u32,
+    pub ts_ms: u64,
     pub samples: Vec<i16>,
+}
+
+/// A packet counts as an onset only when the three packets before it were quiet, so a
+/// steady tone logs once and a 20 ms click logs once. -48 dBFS is above the noise floor
+/// of a normal capture and below any audible click.
+pub const ONSET_RMS: f64 = 0.004;
+pub const ONSET_QUIET_PACKETS: u32 = 3;
+
+pub fn is_onset(quiet_run: u32, rms: f64) -> bool {
+    rms > ONSET_RMS && quiet_run >= ONSET_QUIET_PACKETS
 }
 
 #[derive(Debug, Default)]
@@ -79,7 +94,7 @@ impl JitterBuffer {
     /// packet per call (the caller writes it to the render buffer). A gap while playing
     /// re-arms the target gate (re-buffer) instead of dribbling out single packets, and
     /// counts one underrun for the whole gap, not one per pump call (B-101).
-    pub fn next(&mut self) -> Option<Vec<i16>> {
+    pub fn next(&mut self) -> Option<PcmPacket> {
         if !self.started {
             if self.q.len() < JITTER_TARGET_PACKETS {
                 return None;
@@ -89,7 +104,7 @@ impl JitterBuffer {
         match self.q.pop_front() {
             Some(p) => {
                 self.stats.played += 1;
-                Some(p.samples)
+                Some(p)
             }
             None => {
                 self.started = false;
@@ -124,7 +139,11 @@ pub fn tone_packets(seconds: f32, amplitude: f32, start_seq: u32) -> Vec<PcmPack
                 samples.push(v);
                 samples.push(v);
             }
-            PcmPacket { seq: start_seq + p as u32, samples }
+            PcmPacket {
+                seq: start_seq + p as u32,
+                ts_ms: (p * PACKET_FRAMES * 1000 / SAMPLE_RATE as usize) as u64,
+                samples,
+            }
         })
         .collect()
 }
@@ -139,22 +158,31 @@ pub fn rms_i16(samples: &[i16]) -> f64 {
     (sum / samples.len() as f64).sqrt() / 32768.0
 }
 
+/// The receiver's PC clock in microseconds, from a process-start base (the same base the
+/// view's clock sync uses). Not the epoch: the phone<->PC offset is built in this frame.
+pub fn pc_now_us() -> i64 {
+    static BASE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let base = *BASE.get_or_init(std::time::Instant::now);
+    std::time::Instant::now().duration_since(base).as_micros() as i64
+}
+
 /// One CH_AUDIO payload: u32 sequence, u64 phone timestamp (ms), then big-endian s16 stereo.
 pub fn parse_packet(payload: &[u8]) -> Option<PcmPacket> {
     if payload.len() < 12 || !(payload.len() - 12).is_multiple_of(4) {
         return None;
     }
     let seq = u32::from_be_bytes(payload[0..4].try_into().ok()?);
+    let ts_ms = u64::from_be_bytes(payload[4..12].try_into().ok()?);
     let n = (payload.len() - 12) / 2;
     let mut samples = Vec::with_capacity(n);
     for i in 0..n {
         let o = 12 + i * 2;
         samples.push(i16::from_be_bytes([payload[o], payload[o + 1]]));
     }
-    Some(PcmPacket { seq, samples })
+    Some(PcmPacket { seq, ts_ms, samples })
 }
 
-/// The phone timestamp of a CH_AUDIO payload (ms, phone elapsedRealtime clock).
+/// The phone timestamp of a CH_AUDIO payload (ms, phone nanoTime clock).
 pub fn packet_ts_ms(payload: &[u8]) -> Option<u64> {
     if payload.len() < 12 {
         return None;
@@ -211,7 +239,7 @@ mod wasapi {
         }
     }
 
-    fn open(render: bool, loopback: bool, seconds_buffer: i64) -> Result<Device, String> {
+    fn open(render: bool, loopback: bool, buffer_ms: i64) -> Result<Device, String> {
         let dev = endpoint(render)?;
         let client: IAudioClient = unsafe {
             dev.Activate(CLSCTX_ALL, None)
@@ -227,7 +255,7 @@ mod wasapi {
                 .Initialize(
                     AUDCLNT_SHAREMODE_SHARED,
                     flags,
-                    seconds_buffer * 10_000_000,
+                    buffer_ms * 10_000,
                     0,
                     format,
                     None,
@@ -246,7 +274,7 @@ mod wasapi {
 
     /// Render path: returns buffer size in frames and the render client.
     pub fn render() -> Result<(Device, IAudioRenderClient, ISimpleAudioVolume), String> {
-        let d = open(true, false, 1)?;
+        let d = open(true, false, 100)?;
         let rc: IAudioRenderClient = unsafe {
             d.client
                 .GetService()
@@ -264,7 +292,7 @@ mod wasapi {
     }
 
     pub fn loopback() -> Result<(Device, IAudioCaptureClient), String> {
-        let d = open(true, true, 1)?;
+        let d = open(true, true, 1000)?;
         let cc: IAudioCaptureClient = unsafe {
             d.client
                 .GetService()
@@ -274,7 +302,7 @@ mod wasapi {
     }
 
     pub fn microphone() -> Result<(Device, IAudioCaptureClient), String> {
-        let d = open(false, false, 1)?;
+        let d = open(false, false, 1000)?;
         let cc: IAudioCaptureClient = unsafe {
             d.client
                 .GetService()
@@ -448,8 +476,9 @@ mod wasapi {
         pub jb: super::JitterBuffer,
         pub written_frames: u64,
         pub max_depth: usize,
-        /// Frames the shared-mode device buffer holds; the render side of the end-to-end delay.
-        pub buffer_frames: u32,
+        /// phone -> PC clock offset (µs) from the session's ClockSync, for onset ages.
+        offset_us: Option<f64>,
+        quiet_run: u32,
     }
 
     impl Player {
@@ -459,8 +488,9 @@ mod wasapi {
             start(&dev)?;
             let buffer_frames = unsafe { dev.client.GetBufferSize().unwrap_or(0) };
             println!(
-                "AUDIO device buffer={buffer_frames} frames ({:.0} ms)",
-                buffer_frames as f32 * 1000.0 / dev.rate as f32
+                "AUDIO device buffer={buffer_frames} frames ({:.0} ms), top-up {:.0} ms",
+                buffer_frames as f32 * 1000.0 / dev.rate as f32,
+                super::DEVICE_TOPUP_FRAMES as f32 * 1000.0 / dev.rate as f32
             );
             Ok(Player {
                 dev,
@@ -468,13 +498,31 @@ mod wasapi {
                 jb: super::JitterBuffer::new(),
                 written_frames: 0,
                 max_depth: 0,
-                buffer_frames,
+                offset_us: None,
+                quiet_run: 0,
             })
         }
 
-        /// Render-side latency: what the shared-mode device buffer adds to the wire delay.
+        /// The session clock offset, refreshed by the view on every audio packet.
+        pub fn set_clock_offset(&mut self, offset_us: Option<f64>) {
+            self.offset_us = offset_us;
+        }
+
+        /// Capture-to-device age of the onset packet: phone capture stamp -> PC write.
+        fn log_onset(&self, seq: u32, ts_ms: u64, rms: f64) {
+            if let Some(off) = self.offset_us {
+                let now = super::pc_now_us() as f64;
+                let age_ms = (now - (ts_ms as f64 * 1000.0 - off)) / 1000.0;
+                println!(
+                    "AUDIO onset seq={seq} ts_ms={ts_ms} rms={rms:.3} play_age_ms={age_ms:.1} devbuf_ms={:.0}",
+                    self.buffer_ms()
+                );
+            }
+        }
+
+        /// Render-side latency: the 20 ms cushion the pump keeps in the device.
         pub fn buffer_ms(&self) -> f32 {
-            self.buffer_frames as f32 * 1000.0 / self.dev.rate as f32
+            super::DEVICE_TOPUP_FRAMES as f32 * 1000.0 / self.dev.rate as f32
         }
 
         pub fn feed(&mut self, payload: &[u8]) -> bool {
@@ -484,22 +532,36 @@ mod wasapi {
             }
         }
 
-        /// Write every whole 10 ms packet the device has room for.
+        /// Render-side cushion kept full: 20 ms. The jitter buffer is the real buffer; a
+        /// 1 s WASAPI buffer previously swallowed it whole and made the underrun counter
+        /// measure queue emptiness, not audible gaps (B-101, round 3).
+        /// Write whole 10 ms packets the device has room for, but only top the device up
+        /// to 20 ms; the jitter buffer keeps the 60 ms that covers the bursty link.
         pub fn pump(&mut self) -> Result<u32, String> {
             let mut total = 0u32;
             loop {
-                let free = buffer_frames(&self.dev).saturating_sub(padding(&self.dev));
+                let pad = padding(&self.dev);
+                if pad >= super::DEVICE_TOPUP_FRAMES {
+                    break;
+                }
+                let free = buffer_frames(&self.dev).saturating_sub(pad);
                 if free < super::PACKET_FRAMES as u32 {
                     break;
                 }
-                let Some(samples) = self.jb.next() else { break };
-                let n = write_i16(&self.dev, &self.rc, super::PACKET_FRAMES as u32, &samples)?;
+                let Some(p) = self.jb.next() else { break };
+                let n = write_i16(&self.dev, &self.rc, super::PACKET_FRAMES as u32, &p.samples)?;
                 if n == 0 {
                     break;
                 }
                 total += n;
                 self.written_frames += u64::from(n);
                 self.max_depth = self.max_depth.max(self.jb.depth());
+                // B-101 click delay: log once per quiet -> loud transition.
+                let rms = super::rms_i16(&p.samples);
+                if super::is_onset(self.quiet_run, rms) {
+                    self.log_onset(p.seq, p.ts_ms, rms);
+                }
+                self.quiet_run = if rms > super::ONSET_RMS { 0 } else { self.quiet_run.saturating_add(1) };
             }
             Ok(total)
         }
@@ -574,8 +636,8 @@ pub fn self_test(seconds: f32) -> Result<String, String> {
         // Fill whatever the device can take from the jitter buffer.
         let free = buffer_frames(&render).saturating_sub(padding(&render));
         if free >= PACKET_FRAMES as u32 {
-            if let Some(samples) = jb.next() {
-                written += u64::from(write_i16(&render, &rc, free, &samples)?);
+            if let Some(p) = jb.next() {
+                written += u64::from(write_i16(&render, &rc, free, &p.samples)?);
             }
         }
         max_pad = max_pad.max(padding(&render));
@@ -701,7 +763,15 @@ mod tests {
     use super::*;
 
     fn pkt(seq: u32, v: i16) -> PcmPacket {
-        PcmPacket { seq, samples: vec![v; PACKET_FRAMES * CHANNELS] }
+        PcmPacket { seq, ts_ms: u64::from(seq) * 10, samples: vec![v; PACKET_FRAMES * CHANNELS] }
+    }
+
+    #[test]
+    fn onset_needs_three_quiet_packets_and_a_loud_one() {
+        assert!(!is_onset(2, 0.02), "not enough silence before the burst");
+        assert!(!is_onset(3, 0.001), "quiet packet is not an onset");
+        assert!(is_onset(3, 0.02), "three quiet packets then a burst");
+        assert!(is_onset(9, 0.02), "long silence then a burst");
     }
 
     #[test]
@@ -783,6 +853,7 @@ mod tests {
         p.extend_from_slice(&(-1000i16).to_be_bytes());
         let pkt = parse_packet(&p).expect("valid packet");
         assert_eq!(pkt.seq, 7);
+        assert_eq!(pkt.ts_ms, 1234);
         assert_eq!(pkt.samples, vec![1000, -1000]);
         assert_eq!(packet_ts_ms(&p), Some(1234));
         assert!(parse_packet(&p[..10]).is_none(), "short packet refused");

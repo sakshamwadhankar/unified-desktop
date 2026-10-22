@@ -189,7 +189,9 @@ object Phase11Audio {
                     filled += n
                 }
                 if (filled < samples.size) break // stopped, or the record died
-                val msg = Phase11Media.encodePcm(seq, SystemClock.elapsedRealtime(), samples)
+                // Same clock frame as the PC clock sync (nanoTime), not elapsedRealtime:
+                // the two differ by deep-sleep time, which made every arrival age invalid.
+                val msg = Phase11Media.encodePcm(seq, System.nanoTime() / 1_000_000, samples)
                 if (!push(msg)) {
                     log("P11AUDIO link gone after $packets packets")
                     break

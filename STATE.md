@@ -6,30 +6,26 @@ corrects it after review.
 
 ## Now
 
-- **Phase 11 round 2 (2026-10-22 12:20, dev path): the manager's 10:27 list is answered;
-  two partials.** Item 3(a) DONE: the camera shim is injected into **every** shell Browser page
-  at document start (`WebViewClient.shouldInterceptRequest` re-serves main-frame HTML; no
-  androidx.webkit, no new dependency). External https://webcamtests.com with its own "Test my
-  cam": 640x360, Quality Rating 8, **11 FPS**, "Testing was completed successfully" (numbers
-  from the session record - the phone logcat rotated before a durable copy; the app process was
-  gone at 12:0x). 3(b) DONE: the PC sends exactly **10.0 fps** - the UVC device is the cap
-  (1280x720 RGB32, USB2); the phone fix (one reused Image, brightness every 5th frame) took
-  ud:camtest **6-9 -> 10-11 fps**. 3(c): brightness numbers only (baseline 0.51-0.85; real dip
-  0.525 -> 0.285 at 11:36:46, jump to 0.869 at 11:55:28); six OWNER windows, **no deliberate
-  5 s cover** -> SKIP. Item 4: X11->Android verified (`x11->android len=133 sha=8d80920a`);
-  Android->X11 unverified (Wine issued no SelectionRequest) -> SKIP. Item 5 phone-verified:
-  `LOCK engaged switch_ms=19, first_frame_after_engage_ms=413`, import SHA
-  `1c59b867...5a1afe38` == PC, Exit `switch_ms=21 total_ms=110`. **B-102** found + fixed +
-  verified: after a link reconnect the shim re-asserts `cam-on` when frames freeze (kill/restart
-  the view -> camera returns alone). **B-101**: cause measured (packets arrive in bursts of ~5
-  per 50 ms; a 30 ms target drained empty and the 60 ms age window hid the age). Fix: target 6,
-  one underrun per gap, age window -50..500 ms, device buffer logged. PC-only 10 s tone:
-  `packets=1000 played=1000 late=0 dropped=0 underruns=1 depth_end=0` (1 = priming), loopback
-  0.00057/0.00060/0.00056. Real-path re-measure + click delay **BLOCKED** (phone
-  password-locked; consent needs the unlock) -> SKIP row. Gates: Android **169/0/3** + lint +
-  assemble `BUILD SUCCESSFUL` (48 s); PC **75/0**; clippy clean; `git diff --check` 0.
-  Cleanup 12:18: app force-stopped (0 processes), forward removed, `stay_on=0`, brightness 699,
-  view stopped, no Xvfb/Wine/NPP, no commit.
+- **Phase 11 round 3 (2026-10-22 14:22, dev path): B-101 FIXED and phone-verified; cover proof
+  not obtained; Zoom blocked by the phone dropping off USB.** B-101 root cause: the 1 s WASAPI
+  device buffer swallowed the whole 6-packet jitter queue, so `underruns` measured queue
+  emptiness. Fix: 100 ms render buffer, the pump tops the device up to 60 ms, jitter target 6;
+  audio packet timestamps use `System.nanoTime/1_000_000` like the clock-sync frame (deep sleep
+  had made `age_ms` n/a); onset line `AUDIO onset ... play_age_ms`. Phone 10 s 1 kHz tone:
+  **packets 1000/1000, late 0, dropped 0, underruns 2 (both at start), depth 8-10, age_ms 13-15,
+  devbuf_ms 60**; three 20 ms clicks capture->PC play **109.4 / 128.2 / 131.3 ms, median 128.2**,
+  0 underruns during; page `play()`->PC 410/476/481 ms (WebView Audio startup ~300 ms). B-101 moved
+  to *Fixed* in BUGS.md (manager to confirm). **Webcam cover**: OWNER 14:12, sampler
+  14:11:30-14:12:35, stream live (640x360, 11 fps, frames 3619->4100), baseline 0.62-0.66, largest
+  5 s drop 0.628->0.600 (-0.028), no sample near 0 -> no deliberate cover, SKIP row. **Zoom**:
+  phone dropped off USB at ~14:15 (adb no devices, receiver `window closed`, VSTAT fps 0), no page
+  opened, SKIP row. **Notepad++ paste**: no new work (manager 14:01); B-103 OPEN with the round-2
+  findings. Gates: Android **169/0/3** + lint + assemble `BUILD SUCCESSFUL` (1m12s); PC **76/0**;
+  clippy clean; `git diff --check` 0. **Cleanup incomplete**: the view died with the USB drop;
+  adb forward dead; the app was not force-stopped and `stay_on_while_plugged_in=2` remains
+  (brightness 699 unchanged) - OWNER reconnect USB to restore. Incident 14:03: two blind taps
+  landed in the notification shade before our activity was confirmed front; afterwards every tap
+  followed a `uiautomator` check of our own dialog. No commit made.
 - **Phase 10: COMPLETE on the phone (manager verdict 2026-10-22 08:25).** The last gate, the
   owner's real call, passed at 08:20 (1 min 37 s; same app PID, CPU advancing, frames kept
   flowing, dropped=0; `p10/call-test-manager.txt`). Round 2 on the real Wi-Fi link (no adb forward),

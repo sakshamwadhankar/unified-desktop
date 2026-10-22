@@ -141,7 +141,8 @@ PC camera / microphone
   -> shell WebView shim: canvas captureStream / WebAudio destination -> page getUserMedia
 
 phone desktop sound (our uid only, AudioPlaybackCapture)
-  -> CH_AUDIO 10 ms packets -> receiver jitter buffer -> WASAPI shared playback
+  -> CH_AUDIO 10 ms packets -> receiver jitter buffer (6-packet target)
+  -> 100 ms WASAPI render buffer, the pump tops it up to 60 ms -> shared playback
 ```
 
 Phase 10 session lifetime is owned by `Phase4LinkService`, not by a resumed Activity:

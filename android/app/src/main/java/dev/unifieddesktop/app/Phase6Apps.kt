@@ -395,6 +395,9 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         @JavascriptInterface
         fun report(json: String) {
             android.util.Log.i("Phase11Cam", "P11CAMSTATS $json")
+            // Same report with the phone's monotonic clock (nanoTime, the clock frame of
+            // the PC clock sync), for the B-101 click delay.
+            android.util.Log.i("Phase11Audio", "P11REPORT t=${System.nanoTime() / 1_000_000} $json")
         }
     }
 

@@ -576,10 +576,9 @@ fn now_us() -> u32 {
 }
 
 /// The same clock at full width, for local bookkeeping (frame ring, latency stages).
+/// Shared with the audio player so an onset age is in the same frame as the sync offset.
 fn now_us64() -> i64 {
-    static BASE: OnceLock<Instant> = OnceLock::new();
-    let base = *BASE.get_or_init(Instant::now);
-    Instant::now().duration_since(base).as_micros() as i64
+    crate::audio::pc_now_us()
 }
 
 fn scaled(shared: &Shared, x: i32, y: i32) -> (i32, i32) {
@@ -1320,6 +1319,7 @@ impl MediaBridge {
         }
         self.audio_recv += 1;
         let Some(p) = self.audio.as_mut() else { return };
+        p.set_clock_offset(clock.offset_us());
         if !p.feed(payload) {
             self.audio_bad += 1;
         }

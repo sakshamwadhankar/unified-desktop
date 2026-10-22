@@ -299,3 +299,11 @@ these facts.** Re-verify anything critical: Android changes.
 - **A link reconnect releases the receiver's camera while the page still holds the stream**
   (B-102): no track event fires, so nothing re-sends `cam-on`. A shim keepalive that re-asserts
   `cam-on` after ~3 s of frozen frames restores it without a reload.
+- **"Underruns" can measure queue emptiness, not sound.** WASAPI shared mode gave a 1 s device
+  buffer; the pump emptied the whole jitter queue into it, so every arrival gap counted as an
+  underrun (29,185 over 17,389 packets in round 2). A 100 ms render buffer topped up to 60 ms per
+  pump, with the 6-packet jitter queue kept, measured 2 priming underruns in a 10 s phone tone.
+  Check the device buffer size first when the underrun count does not match what the ear hears.
+- **A WebView `<audio>` element takes ~300 ms from `play()` to the first captured sample.** A
+  click test timestamped at the page command showed 476 ms, while the same clicks' capture->play
+  was 128 ms; log the first packet's age (`play_age_ms`) and report that as the audio delay.
