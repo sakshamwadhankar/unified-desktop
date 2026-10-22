@@ -51,6 +51,10 @@ class Phase5Desktop(private val context: Context, private val fallbackContext: C
     private var vd: VirtualDisplay? = null
     private var pres: Presentation? = null
 
+    /** Current display size; starts at the fixed desktop size and drops with the governor. */
+    @Volatile private var displayW = W
+    @Volatile private var displayH = H
+
     fun start(surface: Surface): Boolean {
         if (running) return true
         if (!createDisplay(surface)) return false
@@ -131,6 +135,8 @@ class Phase5Desktop(private val context: Context, private val fallbackContext: C
                 pres = p
                 running = true
                 android.util.Log.i(TAG, "shell presentation shown on display ${d.display.displayId}")
+                // B3/Phase 12: optional background warm-up, off unless `p12warm` enabled it.
+                Phase12Preload.start(context)
                 return true
             } catch (t: Throwable) {
                 last = t
@@ -152,12 +158,15 @@ class Phase5Desktop(private val context: Context, private val fallbackContext: C
     }
 
     /** Replace only the encoder surface; the Presentation and its shell remain intact. */
-    fun rebindSurface(surface: Surface): Boolean = try {
-        vd?.surface = surface
-        true
-    } catch (t: Throwable) {
-        android.util.Log.e(TAG, "virtual display surface rebind failed", t)
-        false
+    fun rebindSurface(surface: Surface): Boolean {
+        val d = vd ?: return false
+        return try {
+            d.surface = surface
+            true
+        } catch (t: Throwable) {
+            android.util.Log.e(TAG, "virtual display surface rebind failed", t)
+            false
+        }
     }
 
     /** Detach an encoder before its Surface is released during a link loss. */
@@ -165,15 +174,39 @@ class Phase5Desktop(private val context: Context, private val fallbackContext: C
         try { vd?.surface = null } catch (_: Throwable) {}
     }
 
+    /**
+     * Phase 12: really move the virtual display to a lower size. The Presentation and every
+     * shell window stay alive; Android relayouts them into the smaller display.
+     */
+    fun resizeDisplay(w: Int, h: Int): Boolean {
+        val d = vd ?: return false
+        return try {
+            d.resize(w, h, DPI)
+            displayW = w
+            displayH = h
+            android.util.Log.i(TAG, "virtual display resized to ${w}x$h")
+            true
+        } catch (t: Throwable) {
+            android.util.Log.e(TAG, "virtual display resize failed", t)
+            false
+        }
+    }
+
     // ------------------------------------------------------------------ input ops
-    // All of these are called on the UI thread by the session.
+    // All of these are called on the UI thread by the session. The link's coordinate space
+    // stays 1920x1080 even after a governor resize, so scale here.
+    // ------------------------------------------------------------------ input ops
+
+    private fun sx(x: Int) = (x.toLong() * displayW / W).toInt()
+    private fun sy(y: Int) = (y.toLong() * displayH / H).toInt()
 
     /** Hover move (no button held) or drag (button held): the shell decides from its state. */
-    fun setCursor(x: Int, y: Int) = desktop?.moveTo(x, y) ?: Unit
+    fun setCursor(x: Int, y: Int) = desktop?.moveTo(sx(x), sy(y)) ?: Unit
 
-    fun pointerButton(button: Int, down: Boolean, x: Int, y: Int) = desktop?.mouseButton(button, down, x, y) ?: Unit
+    fun pointerButton(button: Int, down: Boolean, x: Int, y: Int) =
+        desktop?.mouseButton(button, down, sx(x), sy(y)) ?: Unit
 
-    fun wheel(delta: Int, x: Int, y: Int) = desktop?.wheel(delta, x, y) ?: Unit
+    fun wheel(delta: Int, x: Int, y: Int) = desktop?.wheel(delta, sx(x), sy(y)) ?: Unit
 
     fun key(down: Boolean, keyCode: Int, scan: Int, meta: Int) = desktop?.key(down, keyCode, scan, meta) ?: false
 

@@ -307,3 +307,32 @@ these facts.** Re-verify anything critical: Android changes.
 - **A WebView `<audio>` element takes ~300 ms from `play()` to the first captured sample.** A
   click test timestamped at the page command showed 476 ms, while the same clicks' capture->play
   was 128 ms; log the first packet's age (`play_age_ms`) and report that as the audio delay.
+
+## Phase 12 (2026-10-22): speed and lightness
+
+- **`[profile.release]` is only read from the workspace root** (`pc/Cargo.toml`). In the package
+  manifest Cargo prints "profiles for the non root package will be ignored" and ships an
+  unstripped binary; moving it cut the receiver 2,569,216 -> 2,217,472 B.
+- **DPI-aware tools are mandatory on the 125 % laptop.** An unaware capture sees 1536x960 and
+  an unaware click sends scaled coordinates. Set `SetProcessDpiAwarenessContext(-4)` in the
+  test tool itself; with the receiver aware, the client is 1920x1200 and a physical click at
+  `(40,1135)` opens Start. `(40,1145)` is already below the 1080 video and does nothing.
+- **APK splits change the dev install:** after adding ABI splits, `adb install` the matching
+  `app-<abi>-debug.apk`; the universal APK is still built for `adb install` convenience and for
+  exports. The phone artifact is `app-arm64-v8a-debug.apk` (55.0 MB vs 92.4 MB universal).
+- **Encoder optional keys fail in cascade on the emulator.** Its `c2.android.avc.encoder`
+  rejects the QTI slice key and then also the base optional set; retry once without only the
+  new keys, then without all optional keys. Never let one new knob cost the low-latency set.
+- **Software H.264 MFT returns a null sample** (`0x80070057`) on every `ProcessOutput` in
+  `--soft`; the view stays black and every frame is dropped (B-104). Hardware D3D11 is the
+  only proven receiver path.
+- **The governor's lower resolution is a rebuild, not a flag:** prepare the 960x540 encoder
+  first, resize and rebind the VirtualDisplay, then stop the old encoder; keep input in the
+  1920x1080 link space and scale on the phone. A Settings window and the desktop survived on
+  the emulator.
+- **Zoom:** `zoom.us/test`'s Join is a `zoommtg://` link in our WebView. The meeting web client
+  at `app.zoom.us/wc/<id>/join?pwd=...` loads without sign-in and asks about audio/video, but
+  coordinate clicks on a moving page hit the wrong control ("Learn more"). Use DOM/element
+  clicks or a page whose A/V UI is stable; never sign in.
+- **Laptop RAM:** Gradle/Kotlin daemons held ~2.4 GB and the emulator ~1.9 GB. Run
+  `gradlew --stop` when no build is due in ~10 minutes (B-041).

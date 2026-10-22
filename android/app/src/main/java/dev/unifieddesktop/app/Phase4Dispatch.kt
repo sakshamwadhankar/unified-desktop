@@ -85,6 +85,18 @@ object Phase4Dispatch {
                         "P5TEXT ${Phase5Dispatch.lastText()}"
                     )
                     "p6" -> Phase4Log.say(ctx, "P6 ${Phase6Dispatch.run(ctx, arg)}")
+                    "p12lowres" -> Phase4Log.say(
+                        ctx,
+                        "P12LOWRES ${Phase5Dispatch.session()?.governorLowerResolution() ?: "no session"}"
+                    )
+                    "p12lat" -> {
+                        if (Phase12Tuning.configure(arg)) {
+                            Phase4Log.say(ctx, Phase12Tuning.describe())
+                        } else {
+                            Phase4Log.say(ctx, "P12TUNING unknown profile [$arg]; keep ${Phase12Tuning.describe()}")
+                        }
+                    }
+                    "p12warm" -> Phase4Log.say(ctx, Phase12Preload.configure(arg))
                     else -> Phase4Log.say(ctx, "PHASE4X unknown [$what]")
                 }
             } catch (t: Throwable) {

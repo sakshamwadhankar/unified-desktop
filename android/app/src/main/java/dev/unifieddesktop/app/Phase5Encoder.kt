@@ -34,7 +34,14 @@ import java.util.concurrent.atomic.AtomicInteger
  * The encoder runs as `video/avc` with low-latency/no-B-frames/long I-frame interval and
  * keyframes on demand; the output thread hands whole Annex-B access units to [listener].
  */
-class Phase5Encoder(private val width: Int, private val height: Int, private val listener: Listener) {
+class Phase5Encoder(
+    private val width: Int,
+    private val height: Int,
+    private val listener: Listener,
+    private val bitrate: Int = BITRATE,
+    private val fps: Int = FPS,
+    initialSeq: Int = 0,
+) {
 
     interface Listener {
         /** One encoded access unit, ready for CH_VIDEO (header packing happens in the session). */
@@ -86,7 +93,7 @@ class Phase5Encoder(private val width: Int, private val height: Int, private val
 
     private val running = AtomicBoolean(false)
     private val ready = CountDownLatch(1)
-    private val seq = AtomicInteger(0)
+    private val seq = AtomicInteger(initialSeq)
     private val keyframeRequests = AtomicInteger(0)
     private val droppedFrames = AtomicInteger(0)
 
@@ -133,36 +140,51 @@ class Phase5Encoder(private val width: Int, private val height: Int, private val
         MediaFormat.KEY_PREPEND_HEADER_TO_SYNC_FRAMES to 1,
     )
 
+    /** Phase 12 A8/B2 only; dropped first if the codec rejects it (keeps the base set). */
+    private fun p12Keys(): Map<String, Int> {
+        val rows = Phase12Tuning.sliceRows
+        return if (rows <= 0) emptyMap() else mapOf("vendor.qti-ext-enc-slice.spacing" to rows)
+    }
+
     /** The keys every encoder must take; nothing here is optional. */
     private fun baseFormat(): MediaFormat {
         val fmt = MediaFormat.createVideoFormat(MIME, width, height)
         fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-        fmt.setInteger(MediaFormat.KEY_BIT_RATE, BITRATE)
-        fmt.setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
+        fmt.setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+        fmt.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         fmt.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL_S)
         return fmt
     }
 
     fun prepare(timeoutMs: Long = 4000): Boolean {
         try {
-            var droppedOptional = false
+            // 0 = all keys, 1 = p12 extras dropped, 2 = all optional keys dropped.
+            var dropLevel = 0
             while (true) {
                 val fmt = baseFormat()
-                if (!droppedOptional) {
+                if (dropLevel < 2) {
                     for ((k, v) in optionalKeys) setIntIfSupported(fmt, k, v)
+                }
+                if (dropLevel == 0 && Phase12Tuning.lowLatencyEncoder) {
+                    for ((k, v) in p12Keys()) setIntIfSupported(fmt, k, v)
                 }
                 val c = MediaCodec.createEncoderByType(MIME)
                 try {
                     c.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                     codec = c
                     codecName = c.name
-                    Log.i(TAG, "encoder configured optionalKeys=${if (droppedOptional) "DROPPED" else "applied"}")
+                    Log.i(TAG, "encoder configured optionalKeys=${if (dropLevel == 2) "DROPPED" else if (dropLevel == 1) "p12-dropped" else "applied"}")
                     break
                 } catch (e: IllegalArgumentException) {
                     try { c.release() } catch (_: Throwable) {}
-                    if (droppedOptional) throw e
-                    droppedOptional = true
-                    Log.w(TAG, "encoder rejected the optional keys, retrying without them: $e")
+                    if (dropLevel == 2) throw e
+                    if (dropLevel == 0 && Phase12Tuning.lowLatencyEncoder) {
+                        dropLevel = 1
+                        Log.w(TAG, "encoder rejected the p12 keys, retrying with the base low-latency set: $e")
+                    } else {
+                        dropLevel = 2
+                        Log.w(TAG, "encoder rejected the optional keys, retrying without them: $e")
+                    }
                 }
             }
             val c = codec!!
@@ -178,7 +200,7 @@ class Phase5Encoder(private val width: Int, private val height: Int, private val
             val s = c.createInputSurface()
             inputSurface = s
             c.start()
-            Log.i(TAG, "encoder name=$codecName size=${width}x$height bitrate=$BITRATE fps=$FPS")
+            Log.i(TAG, "encoder name=$codecName size=${width}x$height bitrate=$bitrate fps=$fps")
 
             glThread = HandlerThread("p5-gl").also { it.start() }
             glHandler = Handler(glThread!!.looper)
@@ -216,7 +238,7 @@ class Phase5Encoder(private val width: Int, private val height: Int, private val
 
     /** Governor pacing hook. MediaCodec stays configured for 60 fps; submission is reduced first. */
     fun setTargetFps(fps: Int) {
-        targetFrameNs = 1_000_000_000L / fps.coerceIn(1, FPS)
+        targetFrameNs = 1_000_000_000L / fps.coerceIn(1, this.fps)
         Log.i(TAG, "target fps=$fps interval_ns=$targetFrameNs")
     }
 

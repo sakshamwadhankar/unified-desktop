@@ -24,7 +24,44 @@ use std::process::ExitCode;
 
 use crypto::TrustedPhoneStore;
 
+/// B-096: without this, Windows virtualises the 125 % panel and the view renders its
+/// 1920x1080 (or 1280x720) stream into a 1536x960 client that Windows then bitmap-stretches.
+/// Per-monitor v2 makes the client area physical pixels and keeps the DPI correct when the
+/// window moves to a monitor with another scale factor.
+#[cfg(windows)]
+fn enable_dpi_awareness() {
+    use windows::Win32::UI::HiDpi::{
+        SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    };
+    unsafe {
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_err() {
+            let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn dpi_label() -> &'static str {
+    use windows::Win32::UI::HiDpi::{
+        GetAwarenessFromDpiAwarenessContext, GetThreadDpiAwarenessContext,
+        DPI_AWARENESS_PER_MONITOR_AWARE, DPI_AWARENESS_SYSTEM_AWARE,
+    };
+    unsafe {
+        let a = GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
+        if a == DPI_AWARENESS_PER_MONITOR_AWARE {
+            "per-monitor"
+        } else if a == DPI_AWARENESS_SYSTEM_AWARE {
+            "system"
+        } else {
+            "unaware"
+        }
+    }
+}
+
 fn main() -> ExitCode {
+    #[cfg(windows)]
+    enable_dpi_awareness();
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         print_usage();
@@ -101,6 +138,15 @@ fn main() -> ExitCode {
             let secs: u64 = flag(&args[2..], "--seconds", "10").parse().unwrap_or(10);
             code(lock::cmd_selftest(secs))
         }
+        #[cfg(windows)]
+        "dpi-probe" => {
+            use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+            let (w, h) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+            println!("DPI awareness={} screen={w}x{h}", dpi_label());
+            ExitCode::SUCCESS
+        }
+        #[cfg(windows)]
+        "lock-crash-test" => code(lock::cmd_crash_test()),
         "lock-inject" => {
             let rest = &args[2..];
             let keys = rest.iter().any(|a| a == "--keys");
@@ -367,6 +413,8 @@ fn cmd_view(rest: &[String]) -> ExitCode {
     };
     let seconds: u64 = flag(rest, "--seconds", "0").parse().unwrap_or(0);
     let soft = rest.iter().any(|a| a == "--soft");
+    // B2: presentation variant for the typing-latency A/B runs. Default keeps vsync.
+    let no_vsync = rest.iter().any(|a| a == "--no-vsync");
     let x: i32 = flag(rest, "--x", "0").parse().unwrap_or(0);
     let y: i32 = flag(rest, "--y", "0").parse().unwrap_or(0);
     let w: i32 = flag(rest, "--w", "0").parse().unwrap_or(0);
@@ -397,6 +445,7 @@ fn cmd_view(rest: &[String]) -> ExitCode {
         lock_max_seconds,
         freeze_video_after,
         policies,
+        no_vsync,
     };
     match view::run(&addr, &opts, &id, &store) {
         Ok(()) => ExitCode::SUCCESS,

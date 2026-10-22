@@ -10,10 +10,9 @@ import java.io.File
 
 /**
  * Item 7: the Phase-3 gate surface - a WebView that shows code-server's browser
- * workbench. The server (Phase3Server) binds 127.0.0.1 only with password auth; this
- * activity reads port and password from the app-private session file (never an Intent
- * extra, so nothing secret crosses a process boundary), POSTs them once to /login
- * (auto-login; the WebView keeps the session cookie) and then lets the workbench load.
+ * workbench. The server (Phase3Server) binds 127.0.0.1 only with `auth: none` (B-106);
+ * this activity reads the port from the app-private session file and loads the
+ * workbench directly. Nothing opens the listener to the network.
  *
  * Deliberately minimal: this is the Phase-3 gate, Phase 4 embeds it in the PC session
  * host (one Exit button, locked). No menus, no file pickers, no back-history handling.
@@ -217,7 +216,7 @@ return JSON.stringify({n:window.__udk.length,events:window.__udk});})()"""
             finish()
             return
         }
-        val (port, password) = session
+        val (port, _) = session
         sessionPort = port
 
         val v = WebView(this)
@@ -262,10 +261,8 @@ return JSON.stringify({n:window.__udk.length,events:window.__udk});})()"""
         }
         CookieManager.getInstance().setAcceptCookie(true)
         t0 = System.currentTimeMillis()
-        Phase3Native.say("CS_WEB postUrl http://127.0.0.1:$port/login (password not logged)")
-        // code-server's login page takes a form field `password`; the 303 then redirects
-        // to / and the session cookie authenticates every further GET in this WebView.
-        v.postUrl("http://127.0.0.1:$port/login", "password=$password".toByteArray())
+        Phase3Native.say("CS_WEB load http://127.0.0.1:$port/ (auth none, loopback)")
+        v.loadUrl("http://127.0.0.1:$port/")
     }
 
     override fun onDestroy() {

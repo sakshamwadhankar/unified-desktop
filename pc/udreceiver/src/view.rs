@@ -47,7 +47,8 @@ use windows::Win32::Graphics::Dxgi::Common::{
 use windows::Win32::Graphics::Dxgi::{
     IDXGIDevice, IDXGIFactory2, IDXGISwapChain1, IDXGISwapChain2, DXGI_MWA_NO_ALT_ENTER,
     DXGI_SCALING_STRETCH,
-    DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_DISCARD,
+    DXGI_PRESENT, DXGI_PRESENT_ALLOW_TEARING, DXGI_SWAP_CHAIN_DESC1,
+    DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING, DXGI_SWAP_EFFECT_FLIP_DISCARD,
     DXGI_USAGE_RENDER_TARGET_OUTPUT,
 };
 use windows::Win32::Media::MediaFoundation::{
@@ -239,6 +240,8 @@ pub struct ViewOptions {
     /// 0 = never. Stop presenting after this many seconds of lock (frozen-frame test).
     pub freeze_video_after: u64,
     pub policies: bool,
+    /// Phase 12 B2: present without vsync (tearing allowed). Off by default.
+    pub no_vsync: bool,
 }
 
 pub fn run(
@@ -311,6 +314,7 @@ pub fn run(
 
     let sh = shared.clone();
     let (soft, secs, freeze) = (opts.soft, opts.seconds, opts.freeze_video_after);
+    let no_vsync = opts.no_vsync;
     let reconnect_addr = addr.to_string();
     let reconnect_identity = identity.clone();
     let pipeline = std::thread::Builder::new()
@@ -318,7 +322,7 @@ pub fn run(
         .spawn(move || {
             let mut current = session;
             let r = loop {
-                let result = pipeline_loop(&mut current, &sh, soft, secs, freeze);
+                let result = pipeline_loop(&mut current, &sh, soft, secs, freeze, no_vsync);
                 if !sh.running.load(Ordering::SeqCst) || secs > 0 {
                     break result;
                 }
@@ -758,6 +762,10 @@ struct Pipeline {
     swap: IDXGISwapChain1,
     dec: Decoder,
     vp: Option<VideoProc>,
+    /// B2 present variant: (SyncInterval, Present flags). (1, 0) is vsync on; (0,
+    /// DXGI_PRESENT_ALLOW_TEARING) is the `--no-vsync` run.
+    present_sync: u32,
+    present_flags: u32,
     awaiting_keyframe: bool,
     logged_frames: u64,
     /// B-047: every access unit the phone sent, decoded or not (the video-on pacer stops on
@@ -836,6 +844,7 @@ fn pipeline_loop(
     force_soft: bool,
     seconds: u64,
     freeze_video_after: u64,
+    no_vsync: bool,
 ) -> Result<(), String> {
     let read_socket = session
         .tls
@@ -859,7 +868,12 @@ fn pipeline_loop(
     let video_ctx: ID3D11VideoContext =
         d3d_ctx.cast().map_err(|e| format!("ID3D11VideoContext: {e}"))?;
     describe_adapter(&device);
-    let swap = create_swap_chain(&device, hwnd)?;
+    let swap = create_swap_chain(&device, hwnd, no_vsync)?;
+    println!(
+        "[{TAG}] swap chain {}",
+        if no_vsync { "vsync=off tearing=allowed (B2)" } else { "vsync=on" }
+    );
+    let (present_sync, present_flags) = present_args(no_vsync);
     let dec = create_decoder(&device, force_soft)?;
     shared.d3d11.store(u32::from(dec.d3d11), Ordering::SeqCst);
     println!(
@@ -877,6 +891,8 @@ fn pipeline_loop(
         swap,
         dec,
         vp: None,
+        present_sync,
+        present_flags,
         awaiting_keyframe: false,
         logged_frames: 0,
         frames_in: 0,
@@ -1647,7 +1663,9 @@ impl Pipeline {
         }
         if produced > 0 {
             unsafe {
-                let _ = self.swap.Present(1, DXGI_PRESENT(0));
+                let _ = self
+                    .swap
+                    .Present(self.present_sync, DXGI_PRESENT(self.present_flags));
             }
             self.shared.presented.fetch_add(produced as u64, Ordering::Relaxed);
             self.shared.decoded.fetch_add(produced as u64, Ordering::Relaxed);
@@ -1679,9 +1697,40 @@ impl Pipeline {
         loop {
             let mut db = [MFT_OUTPUT_DATA_BUFFER::default()];
             db[0].dwStreamID = 0;
+            // B-104: the software decoder does not provide output samples
+            // (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES is clear), so it refuses ProcessOutput with
+            // E_INVALIDARG ("Null output sample") unless the caller supplies the sample and
+            // buffer. The hardware decoder does provide them; allocating there would be wasted
+            // memory. Keep our own handle so the sample is released on success and on error.
+            let allocated = if output_sample_needed(self.dec.provides_samples) {
+                let sample = unsafe {
+                    MFCreateSample().map_err(|e| format!("MFCreateSample(output): {e}"))?
+                };
+                let buffer = unsafe {
+                    MFCreateMemoryBuffer(self.dec.out_cb_size.max(1))
+                        .map_err(|e| format!("MFCreateMemoryBuffer(output): {e}"))?
+                };
+                unsafe {
+                    sample
+                        .AddBuffer(&buffer)
+                        .map_err(|e| format!("AddBuffer(output): {e}"))?;
+                }
+                Some(sample)
+            } else {
+                None
+            };
+            db[0].pSample = std::mem::ManuallyDrop::new(allocated.clone());
             let mut status = 0u32;
             let hr = unsafe { self.dec.mft.ProcessOutput(0, &mut db, &mut status) };
             if let Err(e) = hr {
+                // Release whatever pointer is in the buffer (ours, or one the MFT replaced it
+                // with) before leaving this iteration.
+                unsafe {
+                    let _ = std::mem::ManuallyDrop::take(&mut db[0].pSample);
+                    if db[0].pEvents.is_some() {
+                        std::mem::ManuallyDrop::drop(&mut db[0].pEvents);
+                    }
+                }
                 match classify_output_code(e.code().0) {
                     OutputOutcome::NeedInput => break,
                     OutputOutcome::StreamChange => {
@@ -1735,6 +1784,10 @@ struct Decoder {
     out_w: i32,
     out_h: i32,
     d3d11: bool,
+    /// B-104: true when the MFT allocates its own output sample. The software H.264 MFT
+    /// reports false, so the caller must hand it a sample and a buffer of `out_cb_size`.
+    provides_samples: bool,
+    out_cb_size: u32,
     latest: Option<ID3D11Texture2D>,
     latest_sub: u32,
     soft_nv12: Vec<u8>,
@@ -1756,11 +1809,32 @@ impl Decoder {
         let (w, h) = choose_and_set_output(&self.mft)?;
         self.out_w = w;
         self.out_h = h;
+        self.refresh_output_info()?;
         self.soft_tex = None;
         self.soft_w = 0;
         self.soft_h = 0;
         Ok(())
     }
+
+    /// B-104: a stream change can change the required output buffer size. Re-read the flags so
+    /// the software path always allocates a sample big enough for the current NV12 surface.
+    fn refresh_output_info(&mut self) -> Result<(), String> {
+        let info = unsafe {
+            self.mft
+                .GetOutputStreamInfo(0)
+                .map_err(|e| format!("GetOutputStreamInfo: {e}"))?
+        };
+        self.provides_samples = info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32 != 0;
+        self.out_cb_size = info.cbSize;
+        Ok(())
+    }
+}
+
+/// B-104: the MS H.264 MFT in software mode has MFT_OUTPUT_STREAM_PROVIDES_SAMPLES clear and
+/// returns E_INVALIDARG ("Null output sample") when ProcessOutput gets a null pSample. The
+/// hardware path provides samples itself. Split out so the rule is unit-testable.
+fn output_sample_needed(provides_samples: bool) -> bool {
+    !provides_samples
 }
 
 /// The three ProcessOutput outcomes we distinguish. Split out so the B-057 rule - a stream change
@@ -1840,7 +1914,30 @@ fn create_d3d11() -> Result<(ID3D11Device, ID3D11DeviceContext), String> {
     }
 }
 
-fn create_swap_chain(device: &ID3D11Device, hwnd: HWND) -> Result<IDXGISwapChain1, String> {
+/// B2: `DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING` is only legal together with `Present(0, ...)`.
+/// Kept as a pure function so the flag pair is testable without a window.
+fn swap_chain_flags(allow_tearing: bool) -> u32 {
+    if allow_tearing {
+        DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING.0 as u32
+    } else {
+        0
+    }
+}
+
+/// B2: `(SyncInterval, Present flags)` for the two presentation variants.
+fn present_args(no_vsync: bool) -> (u32, u32) {
+    if no_vsync {
+        (0, DXGI_PRESENT_ALLOW_TEARING.0)
+    } else {
+        (1, 0)
+    }
+}
+
+fn create_swap_chain(
+    device: &ID3D11Device,
+    hwnd: HWND,
+    allow_tearing: bool,
+) -> Result<IDXGISwapChain1, String> {
     unsafe {
         let dxgi: IDXGIDevice = device.cast().map_err(|e| format!("IDXGIDevice: {e}"))?;
         let adapter = dxgi.GetAdapter().map_err(|e| format!("GetAdapter: {e}"))?;
@@ -1856,7 +1953,7 @@ fn create_swap_chain(device: &ID3D11Device, hwnd: HWND) -> Result<IDXGISwapChain
             Scaling: DXGI_SCALING_STRETCH,
             SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
             AlphaMode: DXGI_ALPHA_MODE_IGNORE,
-            Flags: 0,
+            Flags: swap_chain_flags(allow_tearing),
         };
         let swap = factory
             .CreateSwapChainForHwnd(device, hwnd, &desc, None, None)
@@ -1944,6 +2041,8 @@ fn create_decoder(device: &ID3D11Device, force_soft: bool) -> Result<Decoder, St
             out_w: ow,
             out_h: oh,
             d3d11,
+            provides_samples: provides,
+            out_cb_size: info.cbSize,
             latest: None,
             latest_sub: 0,
             soft_nv12: Vec::new(),
@@ -2041,6 +2140,7 @@ fn recover(dec: &mut Decoder) -> Result<(), String> {
     let (w, h) = choose_and_set_output(&dec.mft)?;
     dec.out_w = w;
     dec.out_h = h;
+    dec.refresh_output_info()?;
     dec.soft_tex = None;
     dec.soft_w = 0;
     dec.soft_h = 0;
@@ -2350,6 +2450,14 @@ mod tests {
         assert_eq!(classify_output_code(0x8000_4005u32 as i32), OutputOutcome::Fatal);
     }
 
+    /// B-104: the software H.264 MFT does not provide output samples, so the caller must
+    /// allocate one. The hardware MFT provides its own, and allocating there would waste memory.
+    #[test]
+    fn output_sample_is_allocated_only_when_the_mft_does_not_provide_it() {
+        assert!(output_sample_needed(false));
+        assert!(!output_sample_needed(true));
+    }
+
     /// B-085: the decoder reports macroblock-padded dimensions (1920x1088 for a 1920x1080
     /// desktop). Only the declared desktop area is picture; the padding must be cropped.
     #[test]
@@ -2436,5 +2544,15 @@ mod tests {
         let now = span + 40;
         let old_wire = 15_i64;
         assert_eq!(nearest_epoch(old_wire, now), span + 15);
+    }
+
+    /// B2: the no-vsync variant must use SyncInterval 0 *and* allow tearing; vsync stays
+    /// exactly the Phase 5 pair.
+    #[test]
+    fn present_variants_are_paired() {
+        assert_eq!(present_args(false), (1, 0));
+        assert_eq!(present_args(true), (0, 512));
+        assert_eq!(swap_chain_flags(false), 0);
+        assert_eq!(swap_chain_flags(true), 2048);
     }
 }

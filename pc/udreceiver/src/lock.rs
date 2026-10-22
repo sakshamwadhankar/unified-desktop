@@ -2139,6 +2139,33 @@ fn create_selftest_window() -> Result<HWND, String> {
     }
 }
 
+/// Test harness for B-050: prove that a process killed while it owns the lock session and a
+/// dirty journal still leaves both recoverable. It takes the real single-session mutex,
+/// writes a real dirty journal, then `abort()`s exactly like `panic=abort` would. The next
+/// `lock-recover` (or `view`) must find the mutex free and the journal restorable.
+pub fn cmd_crash_test() -> i32 {
+    let _session = match Session::acquire() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("CRASH TEST could not take the session: {e}");
+            return 1;
+        }
+    };
+    let path = journal_path();
+    match Journal::start_at(path.clone(), "udreceiver-lock-crash-test") {
+        Ok(j) => println!(
+            "CRASH TEST armed journal={} pid={} (aborting now, no cleanup)",
+            j.path.display(),
+            j.pid
+        ),
+        Err(e) => {
+            eprintln!("CRASH TEST could not start the journal: {e}");
+            return 1;
+        }
+    }
+    std::process::abort();
+}
+
 /// `lock-selftest --seconds N`: switch, inject every blocked combination from inside the
 /// lock desktop, print the counters, then restore. It always tries to restore, even when
 /// a step failed; if the message loop ever cannot, the watchdog force-switches.

@@ -6,7 +6,57 @@ corrects it after review.
 
 ## Now
 
-- **Phase 11: PASS with known limits (manager verdict 2026-10-22 16:40).** Every PLAN gate part has
+- **Phase 12 round 1 (2026-10-22 16:59-21:42): NOT PASSED (manager verdict 21:58).** Phone results:
+  connect 0.94 s PASS; VS Code opens 13.48 s PASS (B-106); window drag 42 fps PASS; old-PC 2-core
+  proxy ~36 fps, 0 dropped PASS (B-104 software decode fixed); governor's real 1080p -> 540p drop
+  PASS; receiver 2.57 -> 2.22 MB (B-050); per-ABI APK 93 -> 55 MB; sharp picture at 125 % (B-096).
+  **Misses:** typing USB p50 90.8 ms (target 80); Notepad++ 11.95 s warm / 15.88 s cold (target
+  10); Wi-Fi typing not measured (the phone's Wi-Fi was off). **Security, FIX NOW: B-108** - the
+  B-106 fix runs code-server with `auth: none` on loopback, reachable by any app on the phone
+  (the manager's own instruction; D18 withdrawn). Next round: B-108 first, then the encoder stage
+  (drawn>encoded 46-67 ms) for typing, Notepad++ start, the Wi-Fi measurement, B-103.
+  Gates (manager re-run): Android 184/0/3 + lint + assemble; PC 78/0 + lock_crash 1/0, clippy clean.
+- **Phase 12: GATE FAILED, close-out complete (2026-10-22 21:40, agent).** Working tree
+  uncommitted; nothing was committed. Two honest misses: typing p50 **90.8 ms** (target 80)
+  and Notepad++ **15.88 s cold / 11.95 s warm** (target 10). VS Code is FIXED at **13.48 s**
+  (target 15). **A1:** receiver idle 0.38 % of one core / 127 MB / 0 dropped, window up 303 ms,
+  first frame <= 1.31 s. **A2/B-050:** release profile at `pc/Cargo.toml`, receiver
+  **2,569,216 -> 2,219,008 B (-13.6 %)**; abort/recover test proves the mutex and dirty journal
+  survive `panic=abort`. **A3/B-096:** per-monitor DPI v2, client 1536x960 -> **1920x1200**,
+  text-crop sharpness 1284.9 -> **3465.0**; physical Start click maps 1:1. **A5:** per-ABI
+  splits; arm64 phone app **55,906,460 B** vs 93,158,519 B universal baseline (-40.0 %);
+  universal 93,294,347 B and x86_64 49,708,307 B kept. **A4/B-104:** software decode fixed,
+  hardware proxy **35.65 fps / dropped 0 / CPU 34.9 % of 2 cores / WS 131 MB**, software
+  **36.68 fps / 1070 presented / dropped 0 / 33.3 % / ~96 MB**. **A6:** LowerResolution is real.
+  **A8/B-051:** QTI slices, post-key redraw and phone `TCP_NODELAY` are behind `p12lat:1`,
+  default OFF. **A7 Zoom SKIPPED** (no camera/mic UI in the box); **B6 investigated only**.
+  **B1 phone `2c0f6edc` (final arm64 APK + final receiver):** connect **0.919 -> 0.944 s**;
+  typing USB adb **196.3 -> 90.8 ms p50** (p90 295.4 -> 115.3), USB-tether dev path
+  **129.7 -> 91.2 ms**; drag **33.5 fps at 1080p -> 42.0 fps at 960x540**, dropped 0; idle
+  baseline 0.62 % / 123.9 MB / 0 dropped. Wi-Fi OFF by owner: no Wi-Fi number (SKIPS.md).
+  **B2:** keep **profile 0** (best p50 90.8 / p90 115.3, n=25); fresh no-vsync p1 91.2,
+  p3 104.9, p2 118.4; 50-key attempts worse (p0 184.2 n=10, p1 238.9 n=6). Stage
+  `drawn>encoded` 46-67 ms dominates; next lever is canvas->encoder, not transport.
+  **B3:** same-thermal baseline **18.46 s**, final settled **15.88 s** (no cold regression;
+  the old 28.23 s / repeat 26.44 s is app cold-start contention, not Wine); warm **11.95 s**
+  with `p12warm:wine` (prewarm 5.54 s), later cold-app prewarm 20.61 s; still >10 s.
+  **B-106 FIXED:** code-server `auth: none` on loopback only, direct `/?folder=`, workspace
+  `mkdirs()`; CDP `.monaco-workbench` **13.48 s cold**, `README.md` open; DECISIONS D18.
+  **B4:** governor automatically went 1920x1080 -> 960x540 in 0.2 s at thermal=3, desktop and
+  windows kept, PC dropped 0. **B5/B-103 OPEN** on the final build (Android marker set, Ctrl+V
+  reached NPP, no SelectionRequest, screenshot unchanged). **B-105 OPEN** (stale Settings
+  text). **B-107 NEW** (lock test flaked once under parallel load; clean repeat passed).
+  Android gate **184/0/3**, lint **0 errors / 98 warnings**, assemble **BUILD SUCCESSFUL**;
+  PC **78/0 + lock_crash 1/0**, clippy `-D warnings` exit 0; `git diff --check` 0. Evidence
+  `C:\Users\Asus\AppData\Local\Temp\opencode\p12`; record `docs/PHASE12_RESULT.md`.
+  Cleanup verified: final no-hold APK installed, app force-stopped (0 processes, 0 services),
+  receiver stopped, no adb forwards, stay_on=0, brightness=699, Wi-Fi OFF, tethering OFF,
+  no rndis, battery 37 %, thermal 3, Gradle daemon stopped.
+- **Last updated:** 2026-10-22 21:40, agent (Phase 12 close-out).
+- **Next action:** manager decides B-103/B-105/B-107 fixes and the B2/B3 follow-up (cooled
+  phone; canvas->encoder stage for typing; app cold-start/prewarm for Notepad++), then commits.
+  Nothing here was committed.
+- **Phase 11 (2026-10-22 16:40): PASS with known limits.** Every PLAN gate part has
   phone proof (adb dev path; the day's Wi-Fi blocked phone<->laptop): phone sound plays on the PC
   (1000/1000 packets, 128 ms delay, B-101 fixed); copy/paste both ways (WebView/VS Code;
   Notepad++ -> phone); files both ways with SHA-256 plus the lock-desktop import; a desktop web
@@ -29,8 +79,6 @@ corrects it after review.
   while the live receiver held the single-session mutex. Receiver, link, app and adb forward
   were then stopped; phone `stay_on_while_plugged_in=0`, brightness `699`, no app PID and no
   service record were verified. Evidence is in `C:\Users\Asus\AppData\Local\Temp\opencode\p11d`.
-- **Last updated:** 2026-10-22 16:20, agent (Phase 11 round 4 close-out).
-- **Next action:** manager review of Round 4 evidence and the open B-103/Zoom/webcam skips.
 - **Phase 10: COMPLETE on the phone (manager verdict 2026-10-22 08:25).** The last gate, the
   owner's real call, passed at 08:20 (1 min 37 s; same app PID, CPU advancing, frames kept
   flowing, dropped=0; `p10/call-test-manager.txt`). Round 2 on the real Wi-Fi link (no adb forward),

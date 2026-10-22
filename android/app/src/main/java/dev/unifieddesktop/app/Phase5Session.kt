@@ -84,6 +84,7 @@ class Phase5Session(
     private val videoGate = AtomicBoolean(false)
     private val keyframeWatchdog = KeyframeWatchdog()
     private val encoderRestarts = AtomicInteger(0)
+    private val displayScale = AtomicInteger(100)
 
     /** Latency probe for the current key-down (all µs on the PHONE clock). */
     private class Probe(val tPcUs: Long, val tRecvUs: Long) {
@@ -116,11 +117,7 @@ class Phase5Session(
             say("P5 video-on already on ($why)")
             return true
         }
-        val enc = Phase5Encoder(Phase5Desktop.W, Phase5Desktop.H, object : Phase5Encoder.Listener {
-            override fun onAccessUnit(flags: Byte, seq: Int, ptsUs: Long, encodeDoneNs: Long, annexB: ByteArray) =
-                onVideo(flags, seq, ptsUs, encodeDoneNs, annexB)
-            override fun onQueuePressure() = requestKeyframe("queue pressure")
-        })
+        val enc = Phase5Encoder(Phase5Desktop.W, Phase5Desktop.H, encoderListener())
         encoder = enc
         if (!enc.prepare()) {
             say("P5 encoder prepare FAILED")
@@ -230,10 +227,76 @@ class Phase5Session(
         say("P5 governor fps=$fps")
     }
 
-    fun governorLowerResolution() {
-        // A resolution rebuild would destroy the service-owned display. Keep the state intact and
-        // report the requested next step; the Phase-12 profile work owns the actual renegotiation.
-        say("P5 governor resolution request deferred (desktop state preserved)")
+    fun governorLowerResolution(): String {
+        val old = encoder ?: return "no live encoder"
+        val d = desktop ?: return "no live desktop"
+        if (displayScale.get() <= 50) {
+            say("P5 governor lower-resolution already applied at ${Phase5Desktop.W / 2}x${Phase5Desktop.H / 2}")
+            return "already low"
+        }
+        val nw = Phase5Desktop.W / 2
+        val nh = Phase5Desktop.H / 2
+        say("P5 governor lower-resolution begin ${Phase5Desktop.W}x${Phase5Desktop.H} -> ${nw}x${nh}")
+        val startSeq = old.stats().substringAfter("frames=").substringBefore(' ').toIntOrNull() ?: 0
+        val next = Phase5Encoder(
+            nw, nh, encoderListener(),
+            bitrate = Phase5Encoder.BITRATE / 2,
+            fps = Phase5Encoder.FPS,
+            initialSeq = startSeq,
+        )
+        if (!next.prepare()) {
+            say("P5 governor lower-resolution FAILED: encoder prepare")
+            next.stop()
+            return "encoder prepare failed"
+        }
+        val st = next.surfaceTexture
+        if (st == null) {
+            say("P5 governor lower-resolution FAILED: no input surface")
+            next.stop()
+            return "no input surface"
+        }
+        // Swap the display onto the new encoder surface first, then shrink the display. The
+        // old encoder sees no more buffers, so the two never interleave on the wire.
+        val oldSt = old.surfaceTexture
+        val latch = java.util.concurrent.CountDownLatch(1)
+        val ok = AtomicBoolean(false)
+        main.post {
+            try {
+                val bound = d.rebindSurface(android.view.Surface(st))
+                val resized = bound && d.resizeDisplay(nw, nh)
+                if (bound && !resized) {
+                    // put the display back on the old encoder and geometry; the old encoder
+                    // has not been stopped yet and is still healthy
+                    d.resizeDisplay(Phase5Desktop.W, Phase5Desktop.H)
+                    if (oldSt != null) d.rebindSurface(android.view.Surface(oldSt))
+                }
+                ok.set(bound && resized)
+            } catch (t: Throwable) {
+                say("P5 governor lower-resolution swap threw ${t.javaClass.simpleName}: ${t.message}")
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
+        if (!ok.get()) {
+            say("P5 governor lower-resolution FAILED: display swap")
+            next.stop()
+            return "display swap failed"
+        }
+        encoder = next
+        displayScale.set(50)
+        old.stop()
+        Phase5Dispatch.bind(this)
+        main.postDelayed({ next.redrawNow(); next.requestKeyframe() }, 300)
+        say("P5 governor lower-resolution applied ${nw}x${nh} (desktop and windows kept)")
+        return "applied ${nw}x${nh}"
+    }
+
+    /** Shared by the initial encoder and the governor's lower-resolution rebuild. */
+    private fun encoderListener() = object : Phase5Encoder.Listener {
+        override fun onAccessUnit(flags: Byte, seq: Int, ptsUs: Long, encodeDoneNs: Long, annexB: ByteArray) =
+            onVideo(flags, seq, ptsUs, encodeDoneNs, annexB)
+        override fun onQueuePressure() = requestKeyframe("queue pressure")
     }
 
     fun governorWarnPc(trigger: String) {
@@ -327,6 +390,7 @@ class Phase5Session(
         }
         try { latch.await(2, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Throwable) {}
         try { Thread.sleep(150) } catch (_: InterruptedException) {}
+        displayScale.set(100)
         enableVideo("encoder restart")
     }
 
@@ -367,6 +431,13 @@ class Phase5Session(
                             val handled = desktop?.key(true, Phase5Protocol.vkToKeycode(e.vk), e.scan, Phase5Protocol.modsToMetaState(e.mods)) ?: false
                             if (!handled && Phase5Protocol.vkToKeycode(e.vk) != 0) {
                                 say("P5 key vk=${e.vk} code=${Phase5Protocol.vkToKeycode(e.vk)} NOT handled by the view")
+                            }
+                        }
+                        if (Phase12Tuning.inputTriggeredFrame) {
+                            // Profile 1 lets the view draw the flash first; profiles 2/3 may
+                            // queue an immediate and/or a second redraw.
+                            for (delay in Phase12Tuning.redrawDelaysMs()) {
+                                main.postDelayed({ encoder?.redrawNow() }, delay.toLong())
                             }
                         }
                     } else {

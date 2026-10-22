@@ -19,8 +19,9 @@ import java.security.SecureRandom
  * `<nativeLibraryDir>/libnode.so` (the only place Android lets us execute code from) with
  * our environment (Phase3Native.envFor). Security, all enforced here:
  *  - it binds to `127.0.0.1:<random free port>` only - never 0.0.0.0,
- *  - `auth: password` with a fresh random password per start (`PASSWORD` env + config),
- *  - never `--auth none`,
+ *  - `auth: none` because the only client is the app's own WebView over loopback
+ *    (B-106: the password login stopped on `/login`; the manager chose loopback-only
+ *    no-login on 2026-10-22),
  *  - telemetry and update checks are off, workspace trust is off (the gate flow edits
  *    files; a trust prompt would block a WebView-only session),
  *  - the CA store, HOME, TMPDIR and SHELL are the stock-Android ones (Phase3Native).
@@ -47,11 +48,10 @@ object Phase3Server {
     fun userDataDir(ctx: Context): File = File(Phase3Native.dir(ctx), "cs-data").also { it.mkdirs() }
     fun extensionsDir(ctx: Context): File = File(Phase3Native.dir(ctx), "cs-ext").also { it.mkdirs() }
 
-    /** Pure config text (unit-tested): loopback only, password auth, no telemetry. */
-    fun configYaml(port: Int, password: String): String = buildString {
+    /** Pure config text (unit-tested): loopback only, no login, no telemetry. */
+    fun configYaml(port: Int): String = buildString {
         append("bind-addr: 127.0.0.1:").append(port).append('\n')
-        append("auth: password\n")
-        append("password: ").append(password).append('\n')
+        append("auth: none\n")
         append("cert: false\n")
         append("disable-telemetry: true\n")
         append("disable-update-check: true\n")
@@ -118,9 +118,9 @@ object Phase3Server {
 
         val port = freePort()
         val password = newPassword()
-        val conf = configFile(ctx).also { it.writeText(configYaml(port, password)) }
+        val conf = configFile(ctx).also { it.writeText(configYaml(port)) }
         val hook = hookFile(ctx)
-        say("CS_START port=$port pw=random(${password.length}hex) conf=${conf.absolutePath} " +
+        say("CS_START port=$port auth=none pw=unused(${password.length}hex) conf=${conf.absolutePath} " +
                 "node=${node.absolutePath} entry=${entry.absolutePath} hook=${hook.absolutePath}")
 
         val t0 = System.currentTimeMillis()
@@ -148,9 +148,6 @@ object Phase3Server {
         env.putAll(
             linkedMapOf(
                 "UD_LIB_DIR" to ctx.applicationInfo.nativeLibraryDir,
-                // code-server's own switches (the config file carries the same values, the
-                // env is what the docs call the supported way to pass the password).
-                "PASSWORD" to password,
                 "NO_PROXY" to "127.0.0.1,localhost",
                 "XDG_DATA_HOME" to Phase3Native.dir(ctx).absolutePath,
                 "XDG_CONFIG_HOME" to Phase3Native.dir(ctx).absolutePath,

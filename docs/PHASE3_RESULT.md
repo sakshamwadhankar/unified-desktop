@@ -204,12 +204,12 @@ info    - Not serving HTTPS
 | Property | Measured (3 starts, emulator 13:34-14:0x) |
 |---|---|
 | Bound to | `127.0.0.1:<random port>` (40393, 41901, 36313/36473) - never 0.0.0.0 |
-| Auth | `auth: password`, `PASSWORD` env, fresh 32-hex password every start |
+| Auth | `auth: password`, `PASSWORD` env, fresh 32-hex password every start (historical Phase-3 measurement; Phase 12 B-106 changed this to loopback-only `auth: none` and removed the env) |
 | Cleartext policy | `cleartext_127=true cleartext_localhost=true cleartext_example=false` (network_security_config) |
 | /healthz | HTTP 200 `{"status":"expired","lastHeartbeat":0}` - first_response_ms 2,045 / 4,960 / 6,403 (cold-ish variance on a loaded emulator) |
 | Process | single process, e.g. pid 16928: `state=S threads=11 rss_kb=69872 pss_kb=49343` at ~7 s |
 | /proc/pid/exe | under `nativeLibraryDir` (`underNativeLibDir=true`) |
-| Env | `UD_LIB_DIR`, `PASSWORD`, `NO_PROXY=127.0.0.1,localhost`, XDG dirs into `files/phase3` |
+| Env | `UD_LIB_DIR`, `PASSWORD`, `NO_PROXY=127.0.0.1,localhost`, XDG dirs into `files/phase3` (historical; Phase 12 removed `PASSWORD`) |
 | User data | user-data-dir and the IPC socket stay inside `files/phase3/code-server` |
 
 Two start bugs were found and fixed on the way (details in BUGS.md B-037/B-038):

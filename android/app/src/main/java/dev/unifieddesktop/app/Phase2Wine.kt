@@ -1081,6 +1081,25 @@ object Phase2Wine {
         return true
     }
 
+    /**
+     * Phase 12 B3: warm Xvfb + the Wine prefix on a background thread when the desktop opens,
+     * so the first Notepad++ click does not pay for the whole boot. Reuses a live prefix; a
+     * cold prefix goes through the normal [ensureLivePrefix] boot (the same boot the first app
+     * open would trigger). Behind `p12warm`, off by default.
+     */
+    fun prewarm(ctx: Context): Boolean {
+        val t0 = System.currentTimeMillis()
+        return try {
+            val ok = ensureLivePrefix(ctx, "phase12 prewarm")
+            say("P12PREWARM wine ok=$ok ms=${System.currentTimeMillis() - t0}")
+            writeLog(ctx)
+            ok
+        } catch (t: Throwable) {
+            say("P12PREWARM wine fail ${t.javaClass.simpleName}: ${t.message}")
+            false
+        }
+    }
+
     /** Run one Windows tool under box64 + the shipped loader, returning its exit and output. */
     private fun runCaptured(
         ctx: Context,

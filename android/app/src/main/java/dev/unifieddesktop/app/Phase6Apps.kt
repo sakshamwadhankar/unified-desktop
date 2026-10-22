@@ -205,9 +205,9 @@ object FilesDispatch {
  * and a status line. The B-039 probe logs what each keyboard route does, so the working
  * route is a fact in logcat, not a guess.
  *
- * With [codeServer] = true this is the **VS Code window**: it logs in to the running
- * code-server by POSTing the session password (the same flow Phase3CodeActivity used to
- * render the workbench) and opens a workspace through the `?folder=` deep link.
+ * With [codeServer] = true this is the **VS Code window**: it loads the running
+ * code-server over loopback (auth none, B-106) and opens a workspace through the
+ * `?folder=` deep link.
  */
 class BrowserView(context: Context, private val codeServer: Boolean = false) :
     LinearLayout(context), ShellTextContent {
@@ -239,7 +239,7 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     /** True once a page carrying the injected shim has been served on this WebView. */
     @Volatile private var shimServed = false
 
-    /** code-server login state (only used when [codeServer]). */
+    /** code-server deep-link state (only used when [codeServer]). */
     private var serverPort = 0
     private var pendingFolder: String? = null
 
@@ -287,8 +287,8 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
                         "document.addEventListener('keydown',function(e){window.__udKeys.push(e.key);});" +
                         "return 'probe-installed';})()", null
                 )
-                // B-065: finish the login, then open the workspace with the documented deep
-                // link. Only once: pendingFolder is cleared before the navigation.
+                // B-065: if a caller only set a pending folder, open it with the documented
+                // deep link. Only once: pendingFolder is cleared before the navigation.
                 val folder = pendingFolder
                 if (codeServer && folder != null && serverPort > 0 && url?.contains("folder=") != true) {
                     pendingFolder = null
@@ -456,11 +456,15 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     }
 
     /** The Phase-3 workspace code-server serves; the window opens this when nothing is given. */
-    fun defaultCodeFolder(): String =
-        java.io.File(Phase3Native.dir(context), "workspace").absolutePath
+    fun defaultCodeFolder(): String {
+        val f = java.io.File(Phase3Native.dir(context), "workspace")
+        // B-106: code-server shows "Workspace does not exist" if the folder is missing.
+        f.mkdirs()
+        return f.absolutePath
+    }
 
     /**
-     * B-075: make sure code-server is running, then log in and load the page. A healthy
+     * B-075: make sure code-server is running, then load the page. A healthy
      * session is reused; otherwise the server is started on a worker thread (the window stays
      * responsive and says "Starting VS Code..."). Waits at most [CodeServerGate.MAX_MS];
      * logs every step.
@@ -468,27 +472,12 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     fun ensureCodeServer(folder: String = defaultCodeFolder()) {
         status.text = "Starting VS Code..."
         Thread({
-            val sf = Phase3Server.sessionFile(context)
-            var code = 0
-            var port = -1
-            if (sf.isFile) {
-                sf.useLines { ls ->
-                    for (l in ls) if (l.startsWith("port=")) {
-                        port = l.substringAfter('=').trim().toIntOrNull() ?: -1
-                    }
-                }
-                if (port > 0) code = Phase3Server.healthz(port).first
-            }
-            P7Log.say(context, "VSCODE gate session=${sf.isFile} port=$port healthz=$code")
-            if (CodeServerGate.needsStart(sf.isFile && port > 0, code)) {
-                P7Log.say(context, "VSCODE starting code-server (wait up to ${CodeServerGate.MAX_MS} ms)")
-                val s = Phase3Server.start(context, CodeServerGate.MAX_MS)
-                if (s == null) {
-                    post { status.text = "code-server did not start (see p3.log)" }
-                    P7Log.say(context, "VSCODE start FAILED")
-                    return@Thread
-                }
-                P7Log.say(context, "VSCODE start ok port=${s.port} health=${s.startMs} ms")
+            // B3/Phase 12: the same guarded start is used by the optional desktop pre-warm,
+            // so a click here cannot race a pre-warm into two code-server processes.
+            val r = CodeServerWarm.ensureRunning(context)
+            if (!r.ok) {
+                post { status.text = "code-server did not start (see p3.log)" }
+                return@Thread
             }
             post { openCodeServer(folder) }
         }, "p7-cs-gate").start()
@@ -518,33 +507,28 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     }
 
     /**
-     * Log in to the running code-server exactly like Phase3CodeActivity did (a POST to
-     * `/login` sets the session cookie) and open [folder] through the `?folder=` deep link.
-     * B-065: the shell Browser used to navigate with `?password=` in the URL, which never
-     * logs a code-server session in.
+     * Load the running code-server over loopback (auth none, B-106) and open [folder]
+     * through the `?folder=` deep link. B-106: the old POST to `/login` left the window on
+     * the login page with `Failed login attempt`; there is no login any more.
      */
     fun openCodeServer(folder: String): String {
         val f = Phase3Server.sessionFile(context)
         if (!f.isFile) return "code-server not started (no session file)"
         var port = -1
-        var pw = ""
         f.useLines { ls ->
             for (l in ls) {
-                when {
-                    l.startsWith("port=") -> port = l.substringAfter('=').trim().toIntOrNull() ?: -1
-                    l.startsWith("password=") -> pw = l.substringAfter('=').trim()
-                }
+                if (l.startsWith("port=")) port = l.substringAfter('=').trim().toIntOrNull() ?: -1
             }
         }
-        if (port <= 0 || pw.isEmpty()) return "bad session file"
+        if (port <= 0) return "bad session file"
         serverPort = port
-        pendingFolder = folder
+        pendingFolder = null
         android.webkit.CookieManager.getInstance().setAcceptCookie(true)
-        val login = "http://127.0.0.1:$port/login"
-        status.text = "logging in to code-server :$port"
-        web.postUrl(login, "password=$pw".toByteArray())
-        android.util.Log.i("Phase6", "VSCODE postUrl $login folder=$folder")
-        return "login :$port folder=$folder"
+        val deep = "http://127.0.0.1:$port/?folder=" + android.net.Uri.encode(folder, "/")
+        status.text = "loading code-server :$port"
+        web.loadUrl(deep)
+        android.util.Log.i("Phase6", "VSCODE load $deep")
+        return "load :$port folder=$folder"
     }
 
     fun addressText(): String = address.text.toString()

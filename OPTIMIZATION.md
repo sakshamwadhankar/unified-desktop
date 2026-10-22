@@ -17,16 +17,41 @@ before (LESSONS.md).
 | **Right-sized windows** | One virtual display per Android window, sized to the window; hidden windows do not render. | Fewer pixels to draw and encode. |
 | **Best version per app** | App Center prefers full-speed, then Android, then web, then translated versions. | Users get the fastest working version automatically. |
 
-## 2. Quality profiles (provisional; tuned in Phase 12)
+## 2. Quality profiles (implemented and tuned in Phase 12)
 
 | Profile | When | Desktop | Video |
 |---|---|---|---|
-| **Light** | low-end phone, old PC, or weak Wi-Fi | 1280x720, up to 30 fps | H.264, 4-8 Mbps |
-| **Standard** | mid phone, USB or good 5 GHz Wi-Fi | 1920x1080, up to 30 fps | H.264, 10-20 Mbps |
-| **Smooth** | strong phone, USB | 1920x1080, up to 60 fps | H.264/HEVC, 20-40 Mbps |
+| **Light** | software encoder, weak phone, thermal status >= 3, or Wi-Fi that is not 5 GHz | 1280x720, up to 30 fps | H.264, 6 Mbps |
+| **Standard** | mid phone, USB or good 5 GHz Wi-Fi, thermal status 2 | 1920x1080, up to 30 fps | H.264, 14 Mbps |
+| **Smooth** | strong phone on USB, thermal status <= 1 | 1920x1080, up to 60 fps | H.264, 24 Mbps |
 
-The phone picks a profile automatically from its hardware, the link and its temperature;
-the user can override it in Settings.
+`Phase12Profiles.choose()` is a pure function with JVM tests (`Phase12ProfilesTest`): a
+software encoder, a non-strong phone or thermal status 3+ picks Light; thermal status 2 picks
+Standard; a non-USB, non-5 GHz link picks Light; USB on a strong phone picks Smooth. The
+session still starts from the existing 1080p/60 defaults and the governor's real
+`LowerResolution` step rebuilds it at 960x540 when the thermal policy asks; applying a profile
+at session start is follow-up work (the function is ready and tested).
+
+Measured basis (phone rows are labelled; the rest are `emulator`, `proxy` or `PC-only`):
+
+- 1080p hardware stream on the 2-core proxy: **35.65 fps average / 45.9 max**, `dropped=0`,
+  decode **21.29 ms**, CPU **34.9 % of two cores**, working set **131 MB** (`p12/a4-hw-after.log`).
+- Real 1920x1080 -> 960x540 governor rebuild on the emulator: desktop and the Settings
+  window stay, input stays in the 1920x1080 link space, PC `dropped=0`
+  (`p12/view-lowres.log`, `p12/lowres-after.png`).
+- Idle 1080p receiver: **0.38 % of one core, 127 MB, 0 dropped** over 60 s
+  (`p12/a1-after.log`).
+- Software H.264 fallback after the B-104 fix: **36.68 fps average / 40.9 max**, 1070/1070
+  frames presented, `dropped=0`, decode **16.75 ms**, CPU **33.3 % of two cores**, working set
+  **~96 MB** (`p12/a4-sw-after3.log`). The fix allocates the output sample the software MFT
+  asks for; the hardware path is unchanged.
+- **Phone `2c0f6edc`, final app/receiver:** connect 0.944 s visible; typing p50 90.8 ms on the
+  USB adb path (baseline 196.3 ms) and 91.2 ms on the USB-tether dev path (baseline 129.7 ms);
+  drag 42.0 fps average / 55.9 max, `dropped=0` at the governor's 960x540; idle baseline
+  0.62 % of one core / 123.9 MB / 0 dropped. The governor dropped to 960x540 automatically at
+  thermal status 3 in 0.2 s with the desktop and windows kept; the Settings text stayed stale
+  (B-105). Notepad++ 15.95 s baseline -> 11.95 s with `p12warm:wine` (28.23 s cold without it).
+  Wi-Fi was OFF by owner request, so no Wi-Fi latency number exists (SKIPS.md).
 
 ## 3. Phone side
 

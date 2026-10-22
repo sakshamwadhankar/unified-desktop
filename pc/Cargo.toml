@@ -2,3 +2,9 @@
 resolver = "2"
 members = ["udreceiver"]
 
+# B-050: cargo only reads profiles from the workspace root. Keeping this here (not in
+# udreceiver/Cargo.toml) is what actually applies strip/LTO/panic=abort to the shipped exe.
+[profile.release]
+panic = "abort"
+strip = true
+lto = "thin"

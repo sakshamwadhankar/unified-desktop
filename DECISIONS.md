@@ -173,6 +173,23 @@ phase's gate passes.
 - **Revisit:** after the AOA round. If AOA works, it becomes the default USB link; if it needs
   more than one signed, installer-shippable driver, drop AOA and keep tethering.
 
+### D18: code-server runs loopback-only with `auth: none` (B-106) - **WITHDRAWN 2026-10-22 by the manager, see B-108**
+- **Decided:** 2026-10-22, by the manager, during Phase 12.
+- **Decision:** the code-server child listens on `127.0.0.1:<random port>` only, with
+  `auth: none`; the app's WebView loads `/?folder=...` directly. No password, no `/login`
+  POST, no `0.0.0.0`, no `--bind-addr 0.0.0.0`.
+- **Why:** the Phase-3 password flow worked, but in the shell the WebView stopped on
+  `/login` and code-server logged `Failed login attempt` (B-106). The only client is our own
+  WebView in the same app over loopback; the phone's app sandbox is the boundary.
+- **Revisit:** if a browser or another app on the phone must reach code-server, or if Android
+  changes loopback isolation. Then bind to a Unix socket or restore a per-start token.
+- **Withdrawn (manager, 2026-10-22 21:55):** the premise is wrong. Android does NOT isolate loopback
+  per app: any app on the phone can connect to `127.0.0.1:<port>`, and code-server has a terminal,
+  so `auth: none` lets any installed app run code inside our app. The manager's own 20:50 note
+  asked for `--auth none`; that instruction was the mistake. Replace it: a per-start random
+  secret that only our WebView gets (password auto-login or cookie), or a Unix socket in our
+  private files dir behind an in-app proxy. B-108, FIX NOW.
+
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never
   invent a name; `unified-desktop` is a codename.

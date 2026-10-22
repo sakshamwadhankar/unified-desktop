@@ -565,6 +565,9 @@ class Phase4LinkService : Service() {
 
     private fun sessionThread(sock: SSLSocket) {
         sock.startHandshake()
+        if (Phase12Tuning.tcpNoDelay) {
+            try { sock.tcpNoDelay = true } catch (t: Throwable) { say("TUNING nodelay failed ${t.message}") }
+        }
         sock.soTimeout = Phase4Protocol.DEAD_TIMEOUT_MS.toInt() // link-dead timeout (docs/PHASE4_PROTOCOL.md)
         val session = sock.session
         val client = session.peerCertificates.filterIsInstance<X509Certificate>().firstOrNull()
