@@ -80,6 +80,8 @@ class Phase4LinkService : Service() {
         private val pendingPairing = AtomicReference<Pairing?>(null)
         private val liveSessions = java.util.concurrent.ConcurrentHashMap.newKeySet<LiveSession>()
         private val sessionIds = AtomicLong(0)
+        /** elapsedRealtime when the current PC became paired; 0 while not connected. */
+        private val connectedSince = AtomicLong(0)
 
         /** The live service, for the in-app consent hand-off (Phase 11 D-b). */
         @Volatile private var instance: Phase4LinkService? = null
@@ -116,6 +118,40 @@ class Phase4LinkService : Service() {
 
         /** True while an AOA accessory FD is held (USB attach user path). */
         fun accessoryOpen(): Boolean = accessoryPfd != null
+
+        /** The 6-digit code the user must compare, or null when no PC is pairing. */
+        fun pairingCode(): String? = pendingPairing.get()?.codeShown
+
+        /** When the current PC connected (elapsedRealtime), or 0 when none is connected. */
+        fun connectedSinceMs(): Long = connectedSince.get()
+
+        /**
+         * What the live PC link runs over: the socket's local interface. adb-forwarded
+         * loopback is USB; rndis/usb/eth is USB tethering; wlan is Wi-Fi.
+         */
+        fun linkLabel(): String? = liveSessions.firstOrNull()?.let { live ->
+            try {
+                val a = live.sock.localAddress ?: return@let null
+                if (a.isLoopbackAddress) return@let "USB"
+                val name = java.net.NetworkInterface.getByInetAddress(a)?.name?.lowercase().orEmpty()
+                when {
+                    name.contains("wlan") -> "Wi-Fi"
+                    name.contains("usb") || name.contains("rndis") || name.startsWith("eth") ->
+                        "USB tethering"
+                    a.isSiteLocalAddress -> "Local network"
+                    else -> "Network"
+                }
+            } catch (_: Throwable) {
+                null
+            }
+        }
+
+        /** A plain, user-safe failure line for the home screen, or null. */
+        fun lastFailure(): String? = lastState.get().let { s ->
+            if (s.contains("FAIL", ignoreCase = true) || s.contains("refused", ignoreCase = true)) {
+                "The connection stopped unexpectedly. Try again."
+            } else null
+        }
     }
 
     /**
@@ -350,6 +386,7 @@ class Phase4LinkService : Service() {
         }
         stopping = false
         governorStage = Phase10GovernorStage.NORMAL
+        connectedSince.set(0)
         channels()
         // Phase 11 D-c: the Android clipboard is the desktop clipboard; CH_CLIP carries it.
         Phase11Clip.start(this) { bytes ->
@@ -360,8 +397,8 @@ class Phase4LinkService : Service() {
         startGovernor()
         registerNsd()
         val n = buildNotification(
-            "Desktop link running",
-            "unified-desktop link service serving on port $PORT",
+            "Looking for your PC",
+            "Open the PC app, or connect a USB cable.",
             false
         )
         startForegroundCompat(n)
@@ -384,6 +421,7 @@ class Phase4LinkService : Service() {
         stopForeground(STOP_FOREGROUND_REMOVE)
         currentPhase5 = null
         currentLive = null
+        connectedSince.set(0)
         Phase11Clip.stop(this)
         Phase11Audio.unbindSink("service stop")
         desktopRuntime.stop()
@@ -613,6 +651,7 @@ class Phase4LinkService : Service() {
             sessionIds.incrementAndGet(),
         )
         live.armed = paired
+        if (paired) markConnected()
         synchronized(sessionGuard) {
             val old = currentLive
             if (old != null && old.fingerprintHex != clientFpr) {
@@ -672,6 +711,7 @@ class Phase4LinkService : Service() {
                                 )
                                 paired = true // same session: data channels now pass the gate
                                 live.armed = true // dead-link watchdog applies from now on
+                                markConnected()
                                 decisionPending = null
                                 pendingPairing.compareAndSet(p, null)
                                 cancelPairingNotification()
@@ -782,6 +822,10 @@ class Phase4LinkService : Service() {
             }
             releaseSessionWakeLockIfIdle("session ${live.id} ended")
             say("SESSION_END peer=${clientFpr.take(16)}")
+            if (liveSessions.isEmpty()) {
+                connectedSince.set(0)
+                if (running.get() && !stopping) notifyLooking()
+            }
             val p = decisionPending
             if (p != null) {
                 // session died before the user decided: clear the slot and the prompt
@@ -794,7 +838,12 @@ class Phase4LinkService : Service() {
 
     // ------------------------------------------------------------ notifications
 
-    private fun buildNotification(title: String, text: String, withActions: Boolean): Notification {
+    private fun buildNotification(
+        title: String,
+        text: String,
+        withActions: Boolean,
+        withStop: Boolean = false,
+    ): Notification {
         val b = Notification.Builder(
             this,
             if (withActions) "ud_p4_pairing" else "ud_p4_session"
@@ -802,6 +851,14 @@ class Phase4LinkService : Service() {
             .setSmallIcon(android.R.drawable.sym_def_app_icon)
             .setContentTitle(title)
             .setContentText(text)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this, 0,
+                    Intent(this, HomeActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            )
         if (withActions) {
             val yes = PendingIntent.getService(
                 this, 1,
@@ -816,7 +873,54 @@ class Phase4LinkService : Service() {
             b.addAction(Notification.Action.Builder(android.R.drawable.ic_input_add, "Yes", yes).build())
             b.addAction(Notification.Action.Builder(android.R.drawable.ic_delete, "No", no).build())
         }
+        if (withStop) {
+            val stop = PendingIntent.getService(
+                this, 3,
+                Intent(this, Phase4LinkService::class.java).setAction(ACTION_STOP),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            b.addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stop).build())
+        }
         return b.build()
+    }
+
+    /** P5: the running notification names the PC and carries a Stop action. */
+    private fun markConnected() {
+        connectedSince.compareAndSet(0L, SystemClock.elapsedRealtime())
+        notifyRunning()
+    }
+
+    private fun notifyRunning() {
+        if (!running.get()) return
+        try {
+            getSystemService(NotificationManager::class.java).notify(
+                47600,
+                buildNotification(
+                    "Desktop running on Your PC",
+                    "Tap Stop to end the session.",
+                    false,
+                    withStop = true,
+                ),
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "notify running failed ${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun notifyLooking() {
+        if (!running.get()) return
+        try {
+            getSystemService(NotificationManager::class.java).notify(
+                47600,
+                buildNotification(
+                    "Looking for your PC",
+                    "Open the PC app, or connect a USB cable.",
+                    false,
+                ),
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "notify looking failed ${t.javaClass.simpleName}")
+        }
     }
 
     private fun showPairingNotification(code: String) {

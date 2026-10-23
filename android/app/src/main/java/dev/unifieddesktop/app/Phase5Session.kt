@@ -78,6 +78,11 @@ class Phase5Session(
     private val keyframeRequests = AtomicInteger(0)
     private val inputApplied = AtomicInteger(0)
     private val inputDropped = AtomicInteger(0)
+    /** RTT of the PC link, measured by the phone's `ping`/PC's `pong`; -1 before the first. */
+    private val lastRttMs = AtomicLong(-1)
+    /** The encoder plan in use; the governor halves these instead of the build constants. */
+    @Volatile private var activeBitrate = QualityPlan.DEFAULT_BITRATE
+    @Volatile private var activeFps = QualityPlan.DEFAULT_FPS
 
     @Volatile private var dropping = false
     @Volatile private var lastKeyframeRequestMs = 0L
@@ -120,7 +125,15 @@ class Phase5Session(
             say("P5 video-on already on ($why)")
             return true
         }
-        val enc = Phase5Encoder(wantedW, wantedH, encoderListener())
+        val plan = QualityPref.plan(service)
+        activeBitrate = plan.bitrate
+        activeFps = plan.fps
+        say("P5 quality=${plan.label} ${plan.bitrate / 1_000_000}Mbps ${plan.fps}fps (desktop ${wantedW}x$wantedH)")
+        val enc = Phase5Encoder(
+            wantedW, wantedH, encoderListener(),
+            bitrate = plan.bitrate,
+            fps = plan.fps,
+        )
         encoder = enc
         if (!enc.prepare()) {
             say("P5 encoder prepare FAILED")
@@ -251,16 +264,19 @@ class Phase5Session(
         }
         val (dw, dh) = d.size()
         // D8/B-110: the encoded size must never change during a session. A smaller encoder
-        // surface makes the composer crop the 1728x1080 desktop into the top-left of the
+        // surface made the composer crop the 1728x1080 desktop into the top-left of the
         // 864x540 frame (seen at 04:32: windows at 2.2x, taskbar gone), and resizing the
         // display is worse still (the fixed shell relaid out at half size). Lower the
         // bitrate and frame rate instead: real power savings, identical geometry.
-        say("P5 governor low-power begin ${dw}x$dh (size fixed, half bitrate, ${Phase5Encoder.FPS / 2} fps)")
+        // D22 schedules encoder-surface-only scaling after step 9; it is not implemented yet.
+        val lowBitrate = (activeBitrate / 2).coerceAtLeast(2_000_000)
+        val lowFps = (activeFps / 2).coerceAtLeast(15)
+        say("P5 governor low-power begin ${dw}x$dh (size fixed, ${lowBitrate / 1_000_000}Mbps, $lowFps fps)")
         val startSeq = old.stats().substringAfter("frames=").substringBefore(' ').toIntOrNull() ?: 0
         val next = Phase5Encoder(
             dw, dh, encoderListener(),
-            bitrate = Phase5Encoder.BITRATE / 2,
-            fps = Phase5Encoder.FPS / 2,
+            bitrate = lowBitrate,
+            fps = lowFps,
             initialSeq = startSeq,
         )
         if (!next.prepare()) {
@@ -298,11 +314,13 @@ class Phase5Session(
         }
         encoder = next
         displayScale.set(50)
+        activeBitrate = lowBitrate
+        activeFps = lowFps
         old.stop()
         Phase5Dispatch.bind(this)
         main.postDelayed({ next.redrawNow(); next.requestKeyframe() }, 300)
-        say("P5 governor low-power applied ${dw}x$dh at ${Phase5Encoder.FPS / 2} fps (size kept)")
-        return "applied low-power ${dw}x$dh at ${Phase5Encoder.FPS / 2} fps"
+        say("P5 governor low-power applied ${dw}x$dh at $lowFps fps (size kept)")
+        return "applied low-power ${dw}x$dh at $lowFps fps"
     }
 
     /** Shared by the initial encoder and the governor's lower-resolution rebuild. */
@@ -497,6 +515,15 @@ class Phase5Session(
     }
 
     fun onControlMessage(text: String, gateOpen: Boolean = true) {
+        val trimmed = text.trim()
+        if (trimmed.startsWith("pong ")) {
+            val stamp = trimmed.removePrefix("pong ").trim().toLongOrNull()
+            if (stamp != null) {
+                val rtt = ((System.nanoTime() / 1000) - stamp) / 1000
+                if (rtt in 0..60_000) lastRttMs.set(rtt)
+            }
+            return
+        }
         when (val c = Phase5Protocol.parseControl(text)) {
             Phase5Protocol.Control.NeedKeyframe -> {
                 say("P5 PC asked for a keyframe (link loss)")
@@ -562,6 +589,17 @@ class Phase5Session(
         while (running.get()) {
             try { Thread.sleep(STATS_INTERVAL_MS) } catch (_: InterruptedException) { break }
             if (!running.get()) break
+            // Link RTT for Settings: the PC echoes this stamp in a `pong` control line.
+            try {
+                val stamp = System.nanoTime() / 1000
+                writer.push(
+                    Phase4Protocol.Message.create(
+                        Phase4Protocol.CH_CONTROL, "ping $stamp".toByteArray(),
+                    ),
+                )
+            } catch (t: Throwable) {
+                say("P5 ping push failed ${t.javaClass.simpleName}")
+            }
             val now = SystemClock.elapsedRealtime()
             if (now - lastVstat >= STATS_INTERVAL_MS) {
                 lastVstat = now
@@ -581,6 +619,9 @@ class Phase5Session(
             "keyreqSent=${encoder?.stats() ?: ""} " +
             "inApplied=${inputApplied.get()} inDropped=${inputDropped.get()} $stats"
     }
+
+    /** RTT of the PC link in whole milliseconds; -1 until the first pong arrives. */
+    fun rttMs(): Long = lastRttMs.get()
 
     /** The live shell, for the Phase-6 harness bridge. */
     fun shell(): ShellRoot? = desktop?.shell()

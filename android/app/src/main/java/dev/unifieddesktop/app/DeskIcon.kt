@@ -87,13 +87,15 @@ object DeskIcon {
                 c.drawPath(p, stroke)
             }
             GEAR -> {
-                c.drawCircle(12f, 12f, 3.2f, stroke)
+                // Ring + eight short teeth, so it reads as a cog and not a sun.
+                c.drawCircle(12f, 12f, 6.8f, stroke)
+                c.drawCircle(12f, 12f, 2.7f, stroke)
                 for (i in 0 until 8) {
                     val a = Math.toRadians((i * 45).toDouble())
-                    val x0 = 12f + 5.6f * Math.cos(a).toFloat()
-                    val y0 = 12f + 5.6f * Math.sin(a).toFloat()
-                    val x1 = 12f + 8.6f * Math.cos(a).toFloat()
-                    val y1 = 12f + 8.6f * Math.sin(a).toFloat()
+                    val x0 = 12f + 6.8f * Math.cos(a).toFloat()
+                    val y0 = 12f + 6.8f * Math.sin(a).toFloat()
+                    val x1 = 12f + 9.1f * Math.cos(a).toFloat()
+                    val y1 = 12f + 9.1f * Math.sin(a).toFloat()
                     c.drawLine(x0, y0, x1, y1, stroke)
                 }
             }

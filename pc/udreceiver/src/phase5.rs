@@ -41,6 +41,21 @@ pub const CTRL_VIDEO_ON: &str = "video-on";
 /// activity yet, or the message may have raced the pairing gate).
 pub const VIDEO_ON_RETRY_MS: u64 = 2000;
 
+/// Reply to the phone's `ping <stamp_us>` link-RTT probe. The phone times the round trip
+/// itself; the PC only echoes the stamp (the control channel is tiny, one probe a second).
+/// Returns None for anything that is not a well-formed probe.
+pub fn pong_for(control: &[u8]) -> Option<Vec<u8>> {
+    let t = std::str::from_utf8(control).ok()?.trim();
+    let stamp = t.strip_prefix("ping ")?;
+    if stamp.is_empty()
+        || stamp.len() > 24
+        || !stamp.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(format!("pong {stamp}").into_bytes())
+}
+
 /// Decides when the receiver sends `video-on`: never once a frame arrived, and repeated no
 /// faster than [VIDEO_ON_RETRY_MS] until then (the phone may have had no resumed activity
 /// when the first ask arrived, B-048; this way video starts as soon as it does). Pure
@@ -647,6 +662,16 @@ mod tests {
         sync.offer(ClockSample { t1: 0, t2: 9000, t3: 9000, t4: 40_000 });
         assert_eq!(sync.best_rtt_us().unwrap(), 4_000);
         assert_eq!(sync.samples(), 1);
+    }
+
+    #[test]
+    fn rtt_probe_is_echoed_verbatim_and_junk_is_ignored() {
+        assert_eq!(pong_for(b"ping 123456").as_deref(), Some(b"pong 123456".as_slice()));
+        assert_eq!(pong_for(b"  ping 42  ").as_deref(), Some(b"pong 42".as_slice()));
+        assert!(pong_for(b"ping ").is_none());
+        assert!(pong_for(b"ping 12x").is_none());
+        assert!(pong_for(b"pong 12").is_none());
+        assert!(pong_for(b"ping -1").is_none());
     }
 
     #[test]

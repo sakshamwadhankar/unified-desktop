@@ -1120,6 +1120,13 @@ fn pipeline_loop(
                             "cam-on" => media.cam_on(),
                             "cam-off" => media.cam_off("phone asked"),
                             _ if whole.starts_with(b"lat ") => p.handle_lat(&whole, &clock),
+                            _ if whole.starts_with(b"ping ") => {
+                                if let Some(out) = phase5::pong_for(&whole) {
+                                    let mut w = PriorityWriter::new(&mut session.tls);
+                                    let _ = w.push(Message::new(CH_CONTROL, out)?);
+                                    let _ = w.emit_all();
+                                }
+                            }
                             _ => handle_control(&whole, &mut clock),
                         }
                     }

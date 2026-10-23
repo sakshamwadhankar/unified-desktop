@@ -66,6 +66,9 @@ object Phase11Audio {
 
     fun hasConsent(): Boolean = pendingData != null && pendingCode == android.app.Activity.RESULT_OK
 
+    /** True while phone sound is really being captured for the PC. */
+    fun isActive(): Boolean = capture != null
+
     /** Called by the link service once its foreground type includes mediaProjection. */
     fun startWithStoredConsent() {
         val data = pendingData ?: run { log("P11AUDIO no consent"); return }

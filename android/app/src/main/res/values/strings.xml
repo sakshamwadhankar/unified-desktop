@@ -1,0 +1,4 @@
+<resources>
+    <!-- D12: the only place the app name appears. The owner's final name replaces this. -->
+    <string name="app_name">Unified Desktop</string>
+</resources>

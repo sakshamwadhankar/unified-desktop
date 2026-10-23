@@ -902,6 +902,13 @@ class SettingsView(
         setPadding(20, 16, 20, 20)
     }
     private val wallpaperRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+    private val qualityRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+    private val qualityDetail = ShellUi.label(context, "", Theme.SMALL).apply {
+        setTextColor(Theme.TEXT_DIM)
+        setPadding(0, 2, 0, 4)
+    }
+    private val qualityChips = LinkedHashMap<QualityChoice, TextView>()
+    private var quality = QualityPref.get(context)
     private val connection = ShellUi.label(context, "Checking...", Theme.BODY)
     private val activity = ShellUi.label(context, "", Theme.BODY)
     private var current = Wallpaper.load(context)
@@ -929,7 +936,23 @@ class SettingsView(
 
         col.addView(section("Display"))
         col.addView(infoRow("Desktop", "$deskW x $deskH"))
-        col.addView(infoRow("Quality", "Automatic (light / standard / smooth)"))
+        col.addView(ShellUi.label(context, "Quality", Theme.BODY_LARGE))
+        for (q in QualityChoice.values()) {
+            val chip = TextView(context).apply {
+                text = q.label
+                Theme.px(this, Theme.BODY)
+                setPadding(16, 6, 16, 6)
+                isClickable = true
+                setOnClickListener { pickQuality(q) }
+            }
+            qualityChips[q] = chip
+            qualityRow.addView(chip, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { rightMargin = 8; topMargin = 4; bottomMargin = 2 })
+        }
+        col.addView(qualityRow)
+        col.addView(qualityDetail)
+        updateQuality()
         col.addView(infoRow("Text size", "Desktop scale, 100 %"))
 
         col.addView(section("Connection"))
@@ -970,6 +993,25 @@ class SettingsView(
         for (sw in swatches) sw.isChosen = sw.index == current
     }
 
+    private fun pickQuality(q: QualityChoice) {
+        quality = q
+        QualityPref.set(context, q)
+        updateQuality()
+    }
+
+    private fun updateQuality() {
+        for ((q, chip) in qualityChips) {
+            val selected = q == quality
+            chip.setTextColor(if (selected) Theme.TEXT else Theme.TEXT_SECONDARY)
+            chip.background = shellRounded(
+                if (selected) Theme.alpha(Theme.ACCENT, 0x33) else Theme.SURFACE_SUNKEN,
+                if (selected) Theme.ACCENT else 0,
+                9f,
+            )
+        }
+        qualityDetail.text = quality.detail + " Used when the desktop starts."
+    }
+
     /** Called by the link/shell when the wallpaper changes elsewhere. */
     fun wallpaperChanged(index: Int) {
         current = index
@@ -979,11 +1021,17 @@ class SettingsView(
     private fun updateLive() {
         val s = Phase5Dispatch.session()
         connection.text = if (s == null) "Not connected" else "Connected to your PC"
-        val line = try { s?.statsLine().orEmpty() } catch (_: Throwable) { "" }
-        val sent = Regex("sent=(\\d+)").find(line)?.groupValues?.get(1)
-        val applied = Regex("inApplied=(\\d+)").find(line)?.groupValues?.get(1)
-        activity.text = if (line.isEmpty()) "" else
-            "Frames sent: ${sent ?: "0"}   ·   Input events applied: ${applied ?: "0"}"
+        if (s == null) {
+            activity.text = ""
+            return
+        }
+        val kind = LinkInfo.kind(context)
+        val rtt = s.rttMs()
+        activity.text = if (rtt < 0) {
+            "Link: $kind   ·   Delay: measuring..."
+        } else {
+            "Link: $kind   ·   Delay: $rtt ms"
+        }
     }
 
     override fun onAttachedToWindow() {

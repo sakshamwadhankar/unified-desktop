@@ -242,19 +242,28 @@ phase's gate passes.
 - **Revisit:** if the owner wants instant first-open, pre-launch the app process itself
   (Notepad++), which costs more RAM and is a separate decision.
 
-### D22: One desktop size per session; the governor never resizes it
-- **Decided:** 2026-10-23, by the manager (UX_AUDIT D8; night-run steps 7-8).
-- **Decision:** the desktop and encoder size are chosen once, before `video-on`, from the
-  receiver's `CH_CONTROL display WxH`: height 1080, width from the client aspect clamped
+### D22: One desktop size per session; thermal scaling happens in the encoder path only
+- **Decided:** 2026-10-23, by the agent (night run step 7); accepted by the manager with a
+  change at 05:33.
+- **Decision:** the desktop and VirtualDisplay size are chosen once, before `video-on`, from
+  the receiver's `CH_CONTROL display WxH`: height 1080, width from the client aspect clamped
   1280-1920 and even (16:10 -> 1728x1080, 16:9 -> 1920x1080). The shell lays out against that
-  runtime size and input maps from it. The governor may lower fps (30/15) and bitrate, never
-  the VirtualDisplay or encoder size, for the rest of the session.
-- **Why:** on 2026-10-23 a governor size change made the composer crop the new 1728x1080
-  desktop into the top-left of the old 1920x1200 surface: windows at 2.2x and the taskbar
-  off-screen. A reconnect is a new session and may pick a new size.
-- **Revisit:** if the encoder can guarantee a same-size surface swap, or the receiver handles
-  a stream-size change with a full swap-chain rebuild; then an emergency lower resolution can
-  return behind a measured test.
+  runtime size and input maps from it; a mid-session desktop resize is forbidden.
+  The Phase 12 thermal step returns in the **encoder path only**: when the governor says hot,
+  the GL `drawFrame` scales the fixed desktop into a smaller encoder surface (e.g. 1296x810
+  or 864x540); the PC scales the stream back up, and input mapping is unchanged because the
+  desktop size did not change. The encoder rebuild should be tied to a keyframe so the
+  receiver gets a clean new sequence. This encoder-only step is scheduled after step 9
+  (45-minute box) and must be measured on a thermal-3 run (fps, dropped frames, encoder ms)
+  before D22 is considered finished.
+- **Why:** on 2026-10-23 a governor change to the VirtualDisplay size made the composer crop
+  the new 1728x1080 desktop into the top-left of the old 1920x1200 surface: windows at 2.2x
+  and the taskbar off-screen. Keeping the desktop fixed preserves window rectangles; letting
+  only the encoder surface shrink keeps most of the Phase 12 thermal saving. A reconnect is
+  a new session and may pick a new size.
+- **Status:** the fixed desktop size is implemented and verified. The encoder-only thermal
+  step is **not implemented yet** (2026-10-23); the current governor lowers fps (30/15) and
+  bitrate only, at the same surface size.
 
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never

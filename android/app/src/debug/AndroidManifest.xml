@@ -7,5 +7,13 @@
       android:name=".HarnessReceiver"
       android:exported="true"
       android:permission="android.permission.DUMP"/>
+  <!-- Debug builds keep the harness one tap away; release builds have only HomeActivity
+       with the LAUNCHER category (UX_AUDIT P6). -->
+  <activity android:name=".HarnessActivity" android:exported="true">
+   <intent-filter>
+    <action android:name="android.intent.action.MAIN"/>
+    <category android:name="android.intent.category.LAUNCHER"/>
+   </intent-filter>
+  </activity>
  </application>
 </manifest>

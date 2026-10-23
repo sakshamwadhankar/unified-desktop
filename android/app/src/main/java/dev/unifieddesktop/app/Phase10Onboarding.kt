@@ -29,7 +29,7 @@ object Phase10Onboarding {
         val message = family + "Allow background activity so the desktop can keep running " +
             "when the screen is off.\n\n" +
             "Open app settings, then go to:\n" +
-            "Apps > Unified Desktop > Battery usage > Allow background activity\n\n" +
+            "Apps > ${activity.getString(R.string.app_name)} > Battery usage > Allow background activity\n\n" +
             "This app cannot read whether the setting is enabled. Tap the confirmation only " +
             "after you have checked it."
         AlertDialog.Builder(activity)
