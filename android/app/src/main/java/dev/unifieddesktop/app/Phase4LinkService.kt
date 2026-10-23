@@ -194,11 +194,14 @@ class Phase4LinkService : Service() {
             ACTION_STOP -> stopAll()
             ACTION_STATUS -> say("status running=${running.get()} live=${liveSessions.size} last=$lastState pair=${pendingPairing.get() != null} acc=${accessoryPfd != null}")
             ACTION_PAIR_YES -> {
-                // B-044: make the delivery path visible in p4.log
+                // B-044: make the delivery path visible in p4.log. Cancel first: the answer
+                // is in, so the heads-up must not linger.
+                cancelPairingNotification()
                 say("PAIR_YES action received (pending=${pendingPairing.get() != null})")
                 pendingPairing.get()?.resolve(true)
             }
             ACTION_PAIR_NO -> {
+                cancelPairingNotification()
                 say("PAIR_NO action received (pending=${pendingPairing.get() != null})")
                 pendingPairing.get()?.resolve(false)
             }
@@ -848,7 +851,7 @@ class Phase4LinkService : Service() {
             this,
             if (withActions) "ud_p4_pairing" else "ud_p4_session"
         )
-            .setSmallIcon(android.R.drawable.sym_def_app_icon)
+            .setSmallIcon(R.drawable.ic_stat_desktop)
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(
@@ -924,9 +927,16 @@ class Phase4LinkService : Service() {
     }
 
     private fun showPairingNotification(code: String) {
+        // Step 10: the home screen already shows the code and Yes/No. A heads-up on top of
+        // that covers the buttons the owner is about to tap, so only post it when our app
+        // is in the background.
+        if (AppForeground.isForeground) {
+            say("PAIRING notification skipped: app in front")
+            return
+        }
         val n = buildNotification(
             "Pair this PC?",
-            "PC code: $code  --  matches the PC screen?",
+            "Does your PC show $code?",
             true
         )
         val nm = getSystemService(NotificationManager::class.java)

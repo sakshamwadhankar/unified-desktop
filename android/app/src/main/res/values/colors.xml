@@ -1,0 +1,4 @@
+<resources>
+    <!-- Step 10: launcher icon background. Same shell background as the phone home. -->
+    <color name="ic_launcher_background">#0B0E14</color>
+</resources>

@@ -202,6 +202,11 @@ phase's gate passes.
   desktop window, the built-in browser becomes a full browser on Android System WebView (the
   same Chromium engine as Chrome, 0 extra MB). It must not be called "Chrome" or use Chrome's
   logo unless it really is Google's Chrome app (trademark; Play impersonation policy).
+- **Browser start page (2026-10-23 11:10, after manager review):** the local start page is a
+  neutral dark page with one search box and the plain words "Search with Google"; it has no
+  Google logo or Google colour marks. The real `https://www.google.com` is used only when the
+  user navigates there, so Google renders its own page and marks. This keeps our own UI clear
+  of Google branding (Play impersonation/trademark risk).
 
 ### D20: code-server password auth with a per-start secret and an app-side login
 - **Decided:** 2026-10-23, by the agent (B-108 FIX NOW), replacing D18.
@@ -261,9 +266,16 @@ phase's gate passes.
   and the taskbar off-screen. Keeping the desktop fixed preserves window rectangles; letting
   only the encoder surface shrink keeps most of the Phase 12 thermal saving. A reconnect is
   a new session and may pick a new size.
-- **Status:** the fixed desktop size is implemented and verified. The encoder-only thermal
-  step is **not implemented yet** (2026-10-23); the current governor lowers fps (30/15) and
-  bitrate only, at the same surface size.
+- **Status (2026-10-23 11:15):** the fixed desktop size is implemented and verified. The
+  encoder-only thermal step is **implemented and emulator-verified**: `Phase5Encoder` captures
+  the full 1728x1080 desktop into its SurfaceTexture while its MediaCodec input surface and GL
+  viewport are 1296x810 (3/4 per axis, even dimensions), and the PC scales the decoded stream
+  back up. The governor rebuild follows a keyframe. Measured on the emulator with Android's
+  thermal status overridden to 3: encoder 1728x1080 -> **1296x810**, 6 Mbps, 30 fps; **28.6
+  encoded fps** (172 frames / 6.006 s), PC **29.0 fps**, decode **1.11-1.20 ms**, **dropped 0**,
+  rx ~0.4-0.7 Mbps; the full desktop and taskbar were visible on the PC and the phone, no crop.
+  This is an emulator thermal-3 simulation, not a real phone thermal run (the phone was absent
+  this session); the phone label remains open until the same run is repeated on hardware.
 
 ### D12: No product name yet
 - **Decided:** 2026-10-13, by the owner. The owner chooses after checking domains. Never

@@ -34,4 +34,12 @@ class Phase5EncoderTest {
         assertTrue("extended past the first window", u.due(t0 + 200_000_000L))
         assertFalse("still expires", u.due(t0 + 250_000_000L))
     }
+
+    @Test
+    fun thermal_size_keeps_the_aspect_and_even_dimensions() {
+        assertEquals(1296 to 810, Phase5Encoder.lowPowerSize(1728, 1080))
+        assertEquals(1440 to 810, Phase5Encoder.lowPowerSize(1920, 1080))
+        assertEquals(960 to 540, Phase5Encoder.lowPowerSize(1280, 720))
+        assertEquals(1296 to 810, Phase5Encoder.lowPowerSize(1729, 1081))
+    }
 }

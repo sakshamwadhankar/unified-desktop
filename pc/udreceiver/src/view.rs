@@ -322,7 +322,7 @@ pub fn run(
     let (cw, ch) = shared.client();
     focus_window(hwnd);
     println!(
-        "[{TAG}] window up: hwnd={:?} client={cw}x{ch} foreground={} (Esc quits, F11 windowed)",
+        "[{TAG}] window up: hwnd={:?} client={cw}x{ch} foreground={} (Esc goes to the desktop, F11 windowed)",
         hwnd.0,
         foreground_is(hwnd)
     );
@@ -728,16 +728,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 // Hop 1 of the B-062 trace: what the PC window actually received and sent.
                 eprintln!("p5pc key vk=0x{vk:02x} scan=0x{scan:02x} mods=0x{:02x}", mods());
             }
-            if vk == 0x1B && down {
-                shared.running.store(false, Ordering::SeqCst);
-                shared.release_all.store(1, Ordering::SeqCst);
-                if crate::lock::is_locked() {
-                    crate::lock::request_exit();
-                } else {
-                    PostQuitMessage(0);
-                }
-                return LRESULT(0);
-            }
+            // Esc belongs to the desktop: the shell uses it to close the Start menu and
+            // other menus (Phase 13 step 8). Leaving is the Exit button (locked desktop) or
+            // closing this window; a bare Esc must not throw the user out of a menu.
             // Phase 11 D-d: "Import from this PC" - the lock desktop has no drag target,
             // so Ctrl+O opens the standard file dialog on whichever desktop we are on.
             if vk == 0x4F && down {

@@ -94,6 +94,7 @@ class EngineBridge(private val context: Context) {
 
     fun uninstallGuest(packageName: String, userId: Int = 0): EngineResult {
         return try {
+            EngineDaemon.starting(context)
             core.uninstallPackageAsUser(packageName, userId)
             EngineResult(true, "uninstalled")
         } catch (t: Throwable) {
@@ -206,7 +207,6 @@ class EngineBridge(private val context: Context) {
             null
         }
         val candidates = linkedSetOf<ComponentName>()
-        candidates += component
         hostInfo?.targetActivity?.let { target ->
             val targetName = when {
                 target.startsWith(".") -> packageName + target
@@ -216,6 +216,7 @@ class EngineBridge(private val context: Context) {
             candidates += ComponentName(packageName, targetName)
             Log.i("Phase1-Launch", "HOST_LAUNCH_ALIAS package=$packageName alias=$component target=${candidates.last()}")
         }
+        candidates += component
         for (candidate in candidates) {
             val virtualInfo: ActivityInfo? = try {
                 BlackBoxCore.getBPackageManager().getActivityInfo(candidate, 0, 0)

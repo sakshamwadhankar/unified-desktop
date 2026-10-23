@@ -155,11 +155,15 @@ VirtualDisplay mid-session (DECISIONS D22):** the desktop size is agreed once, b
 `video-on`, from the receiver's `CH_CONTROL display WxH` (height 1080, width from the client
 aspect clamped 1280-1920 and even; 16:10 -> 1728x1080), and the shell lays out against that
 runtime size. A mid-session desktop resize made the composer crop the 1728x1080 desktop into
-the top-left of the old 1920x1200 surface (windows 2.2x, taskbar gone). The accepted thermal
-change is encoder-path only and is **pending**: the GL `drawFrame` will scale the fixed
-desktop into a smaller encoder surface (e.g. 1296x810 or 864x540), the PC scales it back up,
-and input mapping stays unchanged; the rebuild should follow a keyframe. Until it lands the
-governor lowers fps/bitrate only. Input is scaled from the same runtime size.
+the top-left of the old 1920x1200 surface (windows 2.2x, taskbar gone). The thermal change is
+encoder-path only and is **implemented**: `Phase5Encoder` keeps its SurfaceTexture at the fixed
+desktop size (1728x1080) and configures MediaCodec plus the GL viewport at 3/4 per axis
+(1296x810, even dimensions), so `drawFrame` scales the whole desktop into the smaller input
+surface; the PC scales the decoded stream back up and input mapping stays unchanged. The
+governor rebuild requests a keyframe. Emulator thermal-3 simulation (2026-10-23 11:15):
+28.6 encoded fps, PC 29.0 fps, decode 1.11-1.20 ms, dropped 0, rx ~0.4-0.7 Mbps, full desktop
+and taskbar visible with no crop. A real-phone thermal-3 run is still open. Input is scaled
+from the same runtime size.
 `Phase12Profiles.choose()` is the unit-tested automatic profile choice
 (Light/Standard/Smooth); wiring the user's Quality choice into session start is follow-up work.
 

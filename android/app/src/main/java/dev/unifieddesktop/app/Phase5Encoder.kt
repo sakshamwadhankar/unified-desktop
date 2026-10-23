@@ -35,12 +35,20 @@ import java.util.concurrent.atomic.AtomicInteger
  * keyframes on demand; the output thread hands whole Annex-B access units to [listener].
  */
 class Phase5Encoder(
+    /** Encoded picture size (MediaCodec input surface and GL viewport). */
     private val width: Int,
     private val height: Int,
     private val listener: Listener,
     private val bitrate: Int = BITRATE,
     private val fps: Int = FPS,
     initialSeq: Int = 0,
+    /**
+     * Desktop capture size. The VirtualDisplay renders at this size; [width]x[height] may be
+     * smaller, in which case the GL pass scales the whole desktop into the encoder surface
+     * (D22 thermal scaling). Defaults to the encoded size for the normal path.
+     */
+    private val captureWidth: Int = width,
+    private val captureHeight: Int = height,
 ) {
 
     /**
@@ -84,6 +92,15 @@ class Phase5Encoder(
         const val KEEPALIVE_MS = 1000L
         /** Submission cap: never feed the encoder faster than it drains (60 fps). */
         const val MIN_FRAME_NS = 16_600_000L
+
+        /**
+         * D22: thermal step keeps the desktop at [w]x[h] and encodes 3/4 of each axis
+         * (1728x1080 -> 1296x810), even dimensions for every H.264 encoder.
+         */
+        fun lowPowerSize(w: Int, h: Int): Pair<Int, Int> {
+            fun even(v: Int): Int = (v / 2) * 2
+            return even(w * 3 / 4).coerceAtLeast(2) to even(h * 3 / 4).coerceAtLeast(2)
+        }
         const val VERTEX_SHADER = """
             uniform mat4 uSTMatrix;
             attribute vec4 aPosition;
@@ -146,6 +163,11 @@ class Phase5Encoder(
     private val urgent = UrgentFrames()
     /** A paced (deferred) draw is already posted; GL thread only. */
     private var drawScheduled = false
+
+    init {
+        // A governor-built encoder must start paced at its own fps, not at the 60 fps default.
+        targetFrameNs = 1_000_000_000L / fps.coerceIn(1, FPS)
+    }
 
     /** Build everything and wait until the GL surface texture exists. */
     /**
@@ -360,7 +382,9 @@ class Phase5Encoder(
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
             val st = SurfaceTexture(texId)
-            st.setDefaultBufferSize(width, height)
+            // The display always renders at the capture size. When the encoder is smaller,
+            // drawFrame's viewport scales this whole texture down (D22).
+            st.setDefaultBufferSize(captureWidth, captureHeight)
             st.setOnFrameAvailableListener({
                 framesPending.incrementAndGet()
                 glHandler?.post {

@@ -41,8 +41,8 @@ class EngineApplication : Application() {
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityCreated(a: Activity, b: Bundle?) = Unit
             override fun onActivityStarted(a: Activity) = Unit
-            override fun onActivityResumed(a: Activity) = Unit
-            override fun onActivityPaused(a: Activity) = Unit
+            override fun onActivityResumed(a: Activity) = AppForeground.resumed()
+            override fun onActivityPaused(a: Activity) = AppForeground.paused()
             override fun onActivityStopped(a: Activity) = Unit
             override fun onActivitySaveInstanceState(a: Activity, b: Bundle) = Unit
             override fun onActivityDestroyed(a: Activity) = Unit

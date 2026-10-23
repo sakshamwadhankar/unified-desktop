@@ -13,6 +13,8 @@ mod files;
 mod aoa;
 mod clip;
 mod crypto;
+#[cfg(windows)]
+mod gui;
 mod lock;
 mod mdns;
 mod phase5;
@@ -64,8 +66,24 @@ fn main() -> ExitCode {
     enable_dpi_awareness();
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        print_usage();
-        return ExitCode::from(2);
+        #[cfg(windows)]
+        {
+            return ExitCode::from(gui::run() as u8);
+        }
+        #[cfg(not(windows))]
+        {
+            print_usage();
+            return ExitCode::from(2);
+        }
+    }
+    #[cfg(windows)]
+    if args[1] == "--window" {
+        // Test entry: the normal no-arg launch still uses mDNS discovery. This lets a
+        // harness point the same window at an emulator forwarded to 127.0.0.1.
+        let addr = flag(&args[2..], "--addr", "");
+        return ExitCode::from(
+            gui::run_with_addr(if addr.is_empty() { None } else { Some(addr) }) as u8,
+        );
     }
     match args[1].as_str() {
         "discover" => cmd_discover(&args[2..]),
@@ -217,7 +235,7 @@ fn print_usage() {
          udreceiver view --addr <ip:port|auto> [--seconds <s>] [--soft] [--lock|--no-lock]\n  \
          \x20        [--lock-max-seconds <s>] [--freeze-video-after <s>] [--policies]   \
          full-screen desktop\n  \
-         \x20        (Esc quits, F11 windowed; the PC locks by default, --no-lock keeps the desktop)\n  \
+         \x20        (Exit button on the locked desktop; Esc closes desktop menus, F11 windowed)\n  \
          udreceiver lock-status                          input desktop, lock state, journal, hook counters\n  \
          udreceiver lock-exit                            signal a running lock to exit (named event)\n  \
          udreceiver lock-recover                         restore a dirty journal / return input to Default\n  \

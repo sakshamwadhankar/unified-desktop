@@ -226,7 +226,7 @@ class HomeActivity : Activity() {
             visibility = View.GONE
             setPadding(0, ui.dp(14), 0, 0)
         }
-        pairRow.addView(primaryButton("Yes, same code") {
+        pairRow.addView(primaryButton("Yes") {
             startService(Intent(this@HomeActivity, Phase4LinkService::class.java)
                 .setAction(Phase4LinkService.ACTION_PAIR_YES))
         }, LinearLayout.LayoutParams(0, ui.dp(52), 1f).apply { marginEnd = ui.dp(10) })

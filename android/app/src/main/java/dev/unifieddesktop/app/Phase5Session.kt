@@ -258,26 +258,27 @@ class Phase5Session(
     fun governorLowerResolution(): String {
         val old = encoder ?: return "no live encoder"
         val d = desktop ?: return "no live desktop"
-        if (displayScale.get() <= 50) {
+        if (displayScale.get() <= 75) {
             say("P5 governor lower-resolution already applied")
             return "already low"
         }
         val (dw, dh) = d.size()
-        // D8/B-110: the encoded size must never change during a session. A smaller encoder
-        // surface made the composer crop the 1728x1080 desktop into the top-left of the
-        // 864x540 frame (seen at 04:32: windows at 2.2x, taskbar gone), and resizing the
-        // display is worse still (the fixed shell relaid out at half size). Lower the
-        // bitrate and frame rate instead: real power savings, identical geometry.
-        // D22 schedules encoder-surface-only scaling after step 9; it is not implemented yet.
+        // D22: keep the VirtualDisplay and every window at dw x dh; only the encoder
+        // surface shrinks. Phase5Encoder's SurfaceTexture still captures dw x dh, and its
+        // GL viewport draws that whole texture into the smaller input surface, so the PC
+        // gets a scaled-down frame with unchanged geometry and input mapping.
+        val (lowW, lowH) = Phase5Encoder.lowPowerSize(dw, dh)
         val lowBitrate = (activeBitrate / 2).coerceAtLeast(2_000_000)
         val lowFps = (activeFps / 2).coerceAtLeast(15)
-        say("P5 governor low-power begin ${dw}x$dh (size fixed, ${lowBitrate / 1_000_000}Mbps, $lowFps fps)")
+        say("P5 governor low-power begin ${dw}x$dh -> ${lowW}x$lowH (${lowBitrate / 1_000_000}Mbps, $lowFps fps)")
         val startSeq = old.stats().substringAfter("frames=").substringBefore(' ').toIntOrNull() ?: 0
         val next = Phase5Encoder(
-            dw, dh, encoderListener(),
+            lowW, lowH, encoderListener(),
             bitrate = lowBitrate,
             fps = lowFps,
             initialSeq = startSeq,
+            captureWidth = dw,
+            captureHeight = dh,
         )
         if (!next.prepare()) {
             say("P5 governor low-power FAILED: encoder prepare")
@@ -290,8 +291,8 @@ class Phase5Session(
             next.stop()
             return "no input surface"
         }
-        // Swap the display onto the new encoder surface. The old encoder sees no more
-        // buffers, so the two never interleave on the wire; the size stays identical.
+        // Swap the display onto the new capture surface. The old encoder sees no more
+        // buffers, so the two never interleave on the wire; the desktop size is unchanged.
         val oldSt = old.surfaceTexture
         val latch = java.util.concurrent.CountDownLatch(1)
         val ok = AtomicBoolean(false)
@@ -313,14 +314,14 @@ class Phase5Session(
             return "surface swap failed"
         }
         encoder = next
-        displayScale.set(50)
+        displayScale.set(75)
         activeBitrate = lowBitrate
         activeFps = lowFps
         old.stop()
         Phase5Dispatch.bind(this)
         main.postDelayed({ next.redrawNow(); next.requestKeyframe() }, 300)
-        say("P5 governor low-power applied ${dw}x$dh at $lowFps fps (size kept)")
-        return "applied low-power ${dw}x$dh at $lowFps fps"
+        say("P5 governor low-power applied ${dw}x$dh -> ${lowW}x$lowH at $lowFps fps (desktop kept)")
+        return "applied low-power ${lowW}x${lowH} at $lowFps fps (desktop ${dw}x$dh kept)"
     }
 
     /** Shared by the initial encoder and the governor's lower-resolution rebuild. */

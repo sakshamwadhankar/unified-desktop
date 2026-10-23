@@ -667,6 +667,8 @@ class ShellRoot(
             return true
         }
         val frame = model.focusedId?.let { frames[it] } ?: return false
+        val browser = frame.content as? BrowserView
+        if (browser != null && browser.handleShortcut(down, keyCode, meta)) return true
         keyAtFocused++
         if (down) {
             keyFlashes++

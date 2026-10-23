@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference
  *   p6:vscode[:folder]         VS Code window: log in to code-server, open the folder
  *   p6:probe:<text>            B-039 keyboard-route probe into the live page
  *   p6:keys                    the page's recorded keydown list (DOM probe)
+ *   p6:key:<code>[:<meta>]     one PC key through the real shell key path (browser shortcuts)
  *   p6:settings                the Settings window's text
  *   p6:shot[:name]             draw the live desktop surface to filesDir/p6-<name>.png
  */
@@ -93,6 +94,25 @@ object Phase6Dispatch {
             // B-083: fixed + real installed-app rows, and the shared launch route by id.
             "menurows" -> s.menuRows()
             "openid" -> s.openCatalogApp(arg.trim())
+            // Step 9(a): import and open any Android package in a desktop window, including
+            // packages that are not in the catalog (Chrome, B-003).
+            "guest" -> {
+                val pkg = arg.trim()
+                if (pkg.isEmpty()) "guest wants a package name"
+                else {
+                    s.openApp(ShellRoot.App.ANDROID, pkg)
+                    P7Log.say(ctx, "P6DISPATCH guest requested pkg=$pkg")
+                    "opening Android $pkg"
+                }
+            }
+            // Step 9(a) diagnostics: inspect the virtual/host component tables and force a
+            // re-import after an engine parser change, without clearing the whole app.
+            "describe" -> EngineBridge(ctx).describePackage(arg.trim())
+            "uninstallguest" -> {
+                val pkg = arg.trim()
+                val res = EngineBridge(ctx).uninstallGuest(pkg)
+                "uninstall guest=$pkg ok=${res.ok} ${res.message ?: ""}"
+            }
             // Phase 11 D-e: our in-APK camera shim test page and its numbers.
             "camopen" -> {
                 val w = s.openApp(ShellRoot.App.BROWSER)
@@ -187,6 +207,14 @@ object Phase6Dispatch {
                 val b = browser(s)
                 val route = b.probeKeyboard(arg)
                 "probe route=$route payload=\"$arg\""
+            }
+            "key" -> {
+                val bits = arg.split(":").mapNotNull { it.trim().toIntOrNull() }
+                val code = bits.getOrElse(0) { 0 }
+                val meta = bits.getOrElse(1) { 0 }
+                val handled = s.key(true, code, 0, meta)
+                s.key(false, code, 0, meta)
+                "key code=$code meta=$meta handled=$handled"
             }
             "keys" -> {
                 val b = browser(s)

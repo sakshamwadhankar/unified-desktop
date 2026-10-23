@@ -172,3 +172,16 @@ New findings not in the audit table (A rows):
 Every row above (D1-D16, P1-P6, R1-R4, plus the agent's own rows) gets one status: **DONE**
 (with before/after pictures), **SKIPS** (row in SKIPS.md) or **DECIDED** (by the manager, with
 the reason).
+
+Status at 2026-10-23 11:20 (details and pictures: [PHASE13_RESULT.md](PHASE13_RESULT.md)):
+
+- **D1-D11, D13, D15: DONE** (emulator). **D12: SKIP** (desktop toasts not implemented).
+  **D14: SKIP** (welcome card/shortcuts not implemented). **D16: DONE with caveat** (Phase 12
+  phone numbers for Browser/Notepad++/VS Code; Test shell still 87.0 ms; VS Code final-build
+  re-run blocked by B-110).
+- **P1-P6: DONE** (phone; P5 proof was text-only to protect the owner's other notifications).
+- **R1-R3: DONE** (PC-only). **R4: DONE with caveat** (GUI no-lock Exit/Reconnect proven;
+  forced-kill lock restart is B-112).
+- **A1-A6: DONE** (A1-A4/A6 emulator, A5 phone).
+- Browser start page follows the manager's 11:08 note (neutral, no Google logo; D19).
+- D22 is implemented and emulator-thermal-3-verified; a real-phone run is SKIPS.md.

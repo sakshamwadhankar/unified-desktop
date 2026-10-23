@@ -303,6 +303,22 @@ pub fn connect_and_pair(
     store: &crate::crypto::TrustedPhoneStore,
     label: &str,
 ) -> Result<(Session, String), String> {
+    connect_and_pair_with(addr, identity, store, label, |_| {})
+}
+
+/// Same as [`connect_and_pair`], but hands the fresh pairing code to `on_code` as soon as
+/// it exists so a GUI can show it while the phone waits for Yes. The command line passes a
+/// no-op and keeps its printed code.
+pub fn connect_and_pair_with<F>(
+    addr: &str,
+    identity: &ReceiverIdentity,
+    store: &crate::crypto::TrustedPhoneStore,
+    label: &str,
+    on_code: F,
+) -> Result<(Session, String), String>
+where
+    F: FnOnce(&str),
+{
     let mut tls = tls_connect(addr, identity)?;
 
     // complete the TLS handshake explicitly so we can read the peer cert out
@@ -340,6 +356,7 @@ pub fn connect_and_pair(
         // first connect: show the 6-digit code and wait for the phone's Yes
         let my_fp = identity.fingerprint();
         let code = pairing_code(&fp, &my_fp);
+        on_code(&code);
         println!("PC code:  {code}  <-- MUST match the code on the phone");
         println!("Waiting for Yes on the phone (up to {PAIR_CONFIRM_TIMEOUT:?}) ...");
         let ok = wait_pair_confirm(&mut tls)?;

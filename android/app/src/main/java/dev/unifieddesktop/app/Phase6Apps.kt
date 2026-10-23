@@ -26,6 +26,8 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLDecoder
+import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Shared styling for the shell's app windows (desktop pixels: the display is 240 dpi). */
@@ -342,6 +344,26 @@ object FilesDispatch {
 class BrowserView(context: Context, private val codeServer: Boolean = false) :
     LinearLayout(context), ShellTextContent {
 
+    /** One tab keeps its own address history; the visible WebView is reused when tabs switch. */
+    private data class Tab(
+        var url: String = "",
+        var history: ArrayList<String> = ArrayList(),
+        var pos: Int = -1,
+        var title: String = "New tab",
+    )
+
+    private val tabs = arrayListOf(Tab())
+    private var activeTab = 0
+    private var pendingTab = 0
+    private var pendingStartPage = true
+
+    private val tabStrip = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        setPadding(4, 2, 4, 2)
+        setBackgroundColor(0xFF141A26.toInt())
+    }
+
     val address: EditText = shellField(context, "Enter a web address").apply {
         setText("")
         // B-060: a desktop address bar selects its text when it gets the focus, so typing a
@@ -410,9 +432,35 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
             }
 
             override fun onPageFinished(v: WebView?, url: String?) {
+                if (!codeServer && pendingStartPage) {
+                    // loadDataWithBaseURL reports an about:blank finish before the data page;
+                    // only the real start page consumes the pending flag.
+                    if (url == "about:blank") return
+                    pendingStartPage = false
+                    if (pendingTab == activeTab) {
+                        address.setText("")
+                        status.text = ""
+                        tabs[activeTab].title = "New tab"
+                        refreshTabs()
+                    }
+                    return
+                }
+                if (!codeServer && url == "https://www.google.com/" &&
+                    tabs[activeTab].url.isBlank()
+                ) return
                 status.text = when {
                     url.isNullOrBlank() || url == "about:blank" || url.startsWith("data:") -> ""
                     else -> "loaded $url"
+                }
+                if (!codeServer && !url.isNullOrBlank() && url != "about:blank" &&
+                    !url.startsWith("data:") && pendingTab == activeTab
+                ) {
+                    val tab = tabs[activeTab]
+                    tab.url = url
+                    val pageTitle = v?.title?.takeIf { it.isNotBlank() && it != "about:blank" }
+                    tab.title = (pageTitle ?: android.net.Uri.parse(url).host ?: url).take(18)
+                    address.setText(url)
+                    refreshTabs()
                 }
                 v?.evaluateJavascript(
                     "(function(){if(window.__udProbe)return 'probe-on';" +
@@ -431,6 +479,18 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
                     android.util.Log.i("Phase6", "VSCODE folder $deep")
                     v?.loadUrl(deep)
                 }
+            }
+        }
+        setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            if (!codeServer) {
+                status.text = "downloading..."
+                Thread({
+                    val result = BrowserDownloads.save(
+                        context, url, userAgent, contentDisposition, mimeType
+                    )
+                    post { status.text = result }
+                    android.util.Log.i("Phase6", "BROWSER download $result")
+                }, "ud-download").start()
             }
         }
     }
@@ -501,8 +561,12 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     /** True when the current page carries the injected shim (camera frames may be pushed). */
     fun camShimActive(): Boolean = udPage == "camtest" || shimServed
 
-    private var history = ArrayList<String>()
-    private var pos = -1
+    private var history: ArrayList<String>
+        get() = tabs[activeTab].history
+        set(value) { tabs[activeTab].history = value }
+    private var pos: Int
+        get() = tabs[activeTab].pos
+        set(value) { tabs[activeTab].pos = value }
 
     /** Phase 11: the in-APK page currently shown ("camtest", "tone"), or null. */
     var udPage: String? = null
@@ -567,6 +631,8 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         // code-server page itself; showing a blue Chrome toolbar under the shell title bar
         // (the 04:37 AFTER capture) is exactly the chrome the audit wants gone.
         if (!codeServer) {
+            addView(tabStrip, LayoutParams(LayoutParams.MATCH_PARENT, 32))
+            addView(shellDivider(context), LayoutParams(LayoutParams.MATCH_PARENT, 1))
             val bar = LinearLayout(context).apply {
                 orientation = HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
@@ -586,23 +652,9 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
         // Phase 11 D-e: document-start shim pages reach us through this on every page.
         web.addJavascriptInterface(udBridge, "UdBridge")
         if (!codeServer) {
-            // A dark local start page: a fresh Browser used to be a full white window.
+            // A dark Google-style start page: a fresh Browser used to be a full white window.
             web.setBackgroundColor(Theme.SURFACE)
-            web.loadDataWithBaseURL(
-                null,
-                "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>" +
-                    "<style>html,body{margin:0;height:100%;background:#0b0f17;color:#e8eef7;" +
-                    "font-family:system-ui,sans-serif}body{display:flex;align-items:center;" +
-                    "justify-content:center;text-align:center}.box{max-width:520px;padding:24px}" +
-                    "h1{font-size:34px;font-weight:600;margin:0 0 10px}" +
-                    "p{color:#93a4bb;font-size:17px;line-height:1.45;margin:0}</style></head>" +
-                    "<body><div class='box'><h1>Browser</h1>" +
-                    "<p>Type a web address above and press <b>Go</b> or Enter.</p></div></body></html>",
-                "text/html",
-                "utf-8",
-                null,
-            )
-            status.text = ""
+            loadStartPage()
         }
         if (!codeServer) addView(status)
         // Enter from the PC keyboard must navigate, not insert a newline into the address.
@@ -617,6 +669,163 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
             status.text = "Starting VS Code..."
             post { ensureCodeServer(defaultCodeFolder()) }
         }
+    }
+
+    /** Rebuild the tab strip after a tab is added, closed, switched or finishes loading. */
+    private fun refreshTabs() {
+        if (codeServer) return
+        tabStrip.removeAllViews()
+        for ((i, tab) in tabs.withIndex()) {
+            val item = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(10, 3, 3, 3)
+                setBackgroundColor(if (i == activeTab) 0xFF2A3550.toInt() else 0xFF1A2233.toInt())
+                isClickable = true
+                setOnClickListener { switchTab(i) }
+            }
+            item.addView(TextView(context).apply {
+                text = tab.title
+                setTextColor(if (i == activeTab) Color.WHITE else 0xFFA9B7CC.toInt())
+                textSize = 13f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
+            item.addView(TextView(context).apply {
+                text = "×"
+                setTextColor(0xFFA9B7CC.toInt())
+                textSize = 18f
+                gravity = android.view.Gravity.CENTER
+                isClickable = true
+                setOnClickListener { closeTab(i) }
+            }, LayoutParams(24, LayoutParams.MATCH_PARENT))
+            tabStrip.addView(item, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).apply { marginEnd = 4 })
+        }
+        tabStrip.addView(TextView(context).apply {
+            text = "+"
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            gravity = android.view.Gravity.CENTER
+            isClickable = true
+            setOnClickListener { newTab() }
+        }, LayoutParams(32, LayoutParams.MATCH_PARENT))
+    }
+
+    fun newTab(url: String? = null) {
+        tabs.add(Tab())
+        activeTab = tabs.size - 1
+        refreshTabs()
+        if (url.isNullOrBlank()) {
+            loadStartPage()
+        } else {
+            address.setText(url)
+            go()
+        }
+        android.util.Log.i("Phase6", "BROWSER tab new count=${tabs.size}")
+    }
+
+    fun closeTab(index: Int = activeTab) {
+        if (index !in tabs.indices) return
+        if (tabs.size == 1) {
+            tabs[0] = Tab()
+            activeTab = 0
+            loadStartPage()
+        } else {
+            tabs.removeAt(index)
+            if (activeTab >= tabs.size) activeTab = tabs.size - 1
+            else if (activeTab > index) activeTab--
+            refreshTabs()
+            showActiveTab()
+        }
+        android.util.Log.i("Phase6", "BROWSER tab close count=${tabs.size} active=$activeTab")
+    }
+
+    fun switchTab(index: Int) {
+        if (index !in tabs.indices) return
+        activeTab = index
+        refreshTabs()
+        showActiveTab()
+        android.util.Log.i("Phase6", "BROWSER tab switch active=$activeTab")
+    }
+
+    private fun showActiveTab() {
+        val tab = tabs[activeTab]
+        address.setText(tab.url)
+        if (tab.url.isBlank()) {
+            loadStartPage()
+        } else {
+            pendingTab = activeTab
+            pendingStartPage = false
+            web.loadUrl(tab.url)
+        }
+    }
+
+    private fun nextTab(step: Int) {
+        if (tabs.size < 2) return
+        switchTab((activeTab + step + tabs.size) % tabs.size)
+    }
+
+    /** Google-style local start page; the address bar and this box both search Google. */
+    private fun loadStartPage() {
+        val tab = tabs[activeTab]
+        tab.url = ""
+        tab.title = "New tab"
+        pendingTab = activeTab
+        pendingStartPage = true
+        address.setText("")
+        status.text = ""
+        web.setBackgroundColor(Theme.SURFACE)
+        web.loadDataWithBaseURL(
+            "https://www.google.com/",
+            "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>" +
+                "<style>html,body{margin:0;height:100%;background:#0b0f17;color:#e8eef7;" +
+                "font-family:Arial,sans-serif}body{display:flex;align-items:center;justify-content:center}" +
+                ".box{width:min(620px,86vw);text-align:center}.brand{font-size:20px;font-weight:600;" +
+                "margin:0 0 18px;color:#c7d3e4}form{display:flex;gap:8px}input{flex:1;height:46px;border-radius:24px;" +
+                "border:1px solid #33405a;background:#151b27;color:#e8eef7;padding:0 20px;font-size:18px;" +
+                "outline:none}button{height:46px;border:0;border-radius:24px;background:#3D5AA8;color:#fff;" +
+                "font-size:17px;padding:0 22px;cursor:pointer}p{color:#93a4bb;font-size:14px;margin:16px 0 0}" +
+                "</style></head><body><div class='box'>" +
+                "<p class='brand'>Search with Google</p>" +
+                "<form action='https://www.google.com/search' method='get'>" +
+                "<input name='q' autofocus placeholder='Search Google or type a URL'>" +
+                "<button type='submit'>Search</button></form>" +
+                "<p>Type an address in the bar above, or search Google here.</p></div></body></html>",
+            "text/html",
+            "utf-8",
+            null,
+        )
+        refreshTabs()
+    }
+
+    /** Ctrl+T/W/L/Tab, F5 and Ctrl +/-/0 from the PC keyboard. */
+    fun handleShortcut(down: Boolean, keyCode: Int, meta: Int): Boolean {
+        if (codeServer || !down) return false
+        val ctrl = (meta and (KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON or
+            KeyEvent.META_CTRL_RIGHT_ON)) != 0
+        val shift = (meta and KeyEvent.META_SHIFT_ON) != 0
+        when {
+            keyCode == KeyEvent.KEYCODE_F5 -> web.reload()
+            ctrl && keyCode == KeyEvent.KEYCODE_T -> newTab()
+            ctrl && keyCode == KeyEvent.KEYCODE_W -> closeTab()
+            ctrl && keyCode == KeyEvent.KEYCODE_L -> {
+                address.requestFocus()
+                address.selectAll()
+            }
+            ctrl && keyCode == KeyEvent.KEYCODE_TAB -> nextTab(if (shift) -1 else 1)
+            ctrl && (keyCode == KeyEvent.KEYCODE_PLUS || keyCode == KeyEvent.KEYCODE_EQUALS) -> zoom(10)
+            ctrl && keyCode == KeyEvent.KEYCODE_MINUS -> zoom(-10)
+            ctrl && keyCode == KeyEvent.KEYCODE_0 -> zoom(0)
+            else -> return false
+        }
+        android.util.Log.i("Phase6", "BROWSER shortcut code=$keyCode meta=$meta")
+        return true
+    }
+
+    private fun zoom(delta: Int) {
+        val settings = web.settings
+        settings.textZoom = if (delta == 0) 100 else (settings.textZoom + delta).coerceIn(50, 200)
+        status.text = "zoom ${settings.textZoom}%"
     }
 
     /** The Phase-3 workspace code-server serves; the window opens this when nothing is given. */
@@ -656,11 +865,16 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
             status.text = loadUdPage(typed.removePrefix("ud:"))
             return
         }
-        val url = BrowserUrl.normalize(typed)
+        val url = BrowserUrl.resolve(typed)
+        pendingTab = activeTab
+        pendingStartPage = false
         status.text = "loading $url"
         if (pos >= 0 && pos < history.size - 1) history = ArrayList(history.subList(0, pos + 1))
         history.add(url); pos = history.size - 1
+        tabs[activeTab].url = url
+        tabs[activeTab].title = (android.net.Uri.parse(url).host ?: url).take(18)
         address.setText(url)
+        refreshTabs()
         web.loadUrl(url)
         android.util.Log.i("Phase6", "BROWSER go $url")
     }
@@ -714,11 +928,27 @@ class BrowserView(context: Context, private val codeServer: Boolean = false) :
     override fun contentText(): String = pageText()
 
     fun back() {
-        if (pos > 0) { pos--; web.loadUrl(history[pos]) } else if (web.canGoBack()) web.goBack()
+        if (pos > 0) {
+            pos--
+            tabs[activeTab].url = history[pos]
+            address.setText(history[pos])
+            refreshTabs()
+            pendingTab = activeTab
+            pendingStartPage = false
+            web.loadUrl(history[pos])
+        } else if (web.canGoBack()) web.goBack()
     }
 
     fun forward() {
-        if (pos < history.size - 1) { pos++; web.loadUrl(history[pos]) } else if (web.canGoForward()) web.goForward()
+        if (pos < history.size - 1) {
+            pos++
+            tabs[activeTab].url = history[pos]
+            address.setText(history[pos])
+            refreshTabs()
+            pendingTab = activeTab
+            pendingStartPage = false
+            web.loadUrl(history[pos])
+        } else if (web.canGoForward()) web.goForward()
     }
 
     /**
@@ -800,6 +1030,74 @@ object BrowserUrl {
             t.contains("://") -> t
             t.startsWith("about:") || t.startsWith("data:") -> t
             else -> "https://$t"
+        }
+    }
+
+    /** A URL-looking entry loads directly; anything else is a Google search. */
+    fun resolve(typed: String): String {
+        val t = typed.trim()
+        if (t.isEmpty()) return ""
+        if (t.startsWith("ud:")) return t
+        val host = Regex("^([A-Za-z0-9-]+\\.)+[A-Za-z]{2,}(:\\d+)?([/?#].*)?$")
+        val ip = Regex("^\\d{1,3}(\\.\\d{1,3}){3}(:\\d+)?([/?#].*)?$")
+        val looksLikeUrl = t.contains("://") || t.startsWith("about:") ||
+            t.startsWith("data:") || t.startsWith("localhost") || t.startsWith("127.") ||
+            host.matches(t) || ip.matches(t)
+        return if (looksLikeUrl) normalize(t)
+        else "https://www.google.com/search?q=" + URLEncoder.encode(t, "UTF-8")
+    }
+}
+
+/** Saves browser downloads into the shell's own Files folder (files/desktop/Downloads). */
+object BrowserDownloads {
+    fun fileName(disposition: String?, url: String): String {
+        val quoted = Regex("filename\\*=UTF-8''([^;]+)", RegexOption.IGNORE_CASE)
+            .find(disposition ?: "")?.groupValues?.getOrNull(1)
+        val plain = Regex("filename=\"?([^\";]+)\"?", RegexOption.IGNORE_CASE)
+            .find(disposition ?: "")?.groupValues?.getOrNull(1)
+        val raw = quoted ?: plain ?: url.substringBefore('?').substringAfterLast('/')
+        val decoded = try {
+            URLDecoder.decode(raw, "UTF-8")
+        } catch (_: Throwable) {
+            raw
+        }
+        val safe = decoded.replace(Regex("[^A-Za-z0-9._ -]"), "_").trim()
+        return safe.ifBlank { "download.bin" }.take(120)
+    }
+
+    /** Blocking; call from a worker thread. Returns a short message for the status line. */
+    fun save(
+        context: Context,
+        url: String,
+        userAgent: String?,
+        disposition: String?,
+        mimeType: String?,
+    ): String {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            return "download not supported: ${url.take(40)}"
+        }
+        return try {
+            val dir = File(context.filesDir, "desktop/Downloads").apply { mkdirs() }
+            var file = File(dir, fileName(disposition, url))
+            var n = 1
+            while (file.exists()) {
+                file = File(dir, "${file.nameWithoutExtension}-${n++}.${file.extension}")
+            }
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                instanceFollowRedirects = true
+                if (!userAgent.isNullOrBlank()) setRequestProperty("User-Agent", userAgent)
+                mimeType?.let { setRequestProperty("Accept", it) }
+            }
+            val code = conn.responseCode
+            if (code !in 200..299) return "download failed HTTP $code"
+            conn.inputStream.use { input ->
+                file.outputStream().use { output -> input.copyTo(output) }
+            }
+            "saved ${file.name} to Files/Downloads"
+        } catch (t: Throwable) {
+            "download failed: ${t.javaClass.simpleName}"
         }
     }
 }

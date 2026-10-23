@@ -24,4 +24,28 @@ class Phase6BrowserUrlTest {
         assertEquals("", BrowserUrl.normalize(""))
         assertEquals("", BrowserUrl.normalize("   "))
     }
+
+    @Test
+    fun plainWordsBecomeAGoogleSearch() {
+        assertEquals(
+            "https://www.google.com/search?q=unified+desktop",
+            BrowserUrl.resolve("unified desktop")
+        )
+        assertEquals("https://www.google.com/search?q=cats", BrowserUrl.resolve("cats"))
+    }
+
+    @Test
+    fun hostsAndSchemesStillLoadDirectly() {
+        assertEquals("https://example.com/a", BrowserUrl.resolve("example.com/a"))
+        assertEquals("http://127.0.0.1:44093/", BrowserUrl.resolve("http://127.0.0.1:44093/"))
+        assertEquals("about:blank", BrowserUrl.resolve("about:blank"))
+        assertEquals("ud:camtest", BrowserUrl.resolve("ud:camtest"))
+    }
+
+    @Test
+    fun downloadNameUsesTheServerNameOrTheUrl() {
+        assertEquals("report.pdf", BrowserDownloads.fileName("attachment; filename=\"report.pdf\"", "https://x/y"))
+        assertEquals("fallback.txt", BrowserDownloads.fileName(null, "https://x/fallback.txt?q=1"))
+        assertEquals("download.bin", BrowserDownloads.fileName(null, "https://x/"))
+    }
 }
