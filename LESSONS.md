@@ -336,3 +336,16 @@ these facts.** Re-verify anything critical: Android changes.
   clicks or a page whose A/V UI is stable; never sign in.
 - **Laptop RAM:** Gradle/Kotlin daemons held ~2.4 GB and the emulator ~1.9 GB. Run
   `gradlew --stop` when no build is due in ~10 minutes (B-041).
+## Phase 13 (2026-10-23): polish
+
+- **Never capture the phone's screen unless our app is in front.** On 2026-10-23 the agent
+  saved four full-screen pictures of the owner's home screen and notification shade while
+  proving a background notification; the manager deleted them. Check
+  `dumpsys window | grep mCurrentFocus` names `dev.unifieddesktop.app` before any screencap;
+  prove notifications with text from `dumpsys notification --noredact` filtered to our package.
+- **A stray lock session breaks the lock test.** A receiver left running with the lock mutex
+  (`Local\udreceiver-lock-single`) makes `recovery_refuses_while_a_live_session_owns_the_mutex`
+  fail; that explains B-107's "flake". Stop every `udreceiver` before `cargo test`.
+- **Python behind the owner's proxy:** the Windows system proxy (the owner's Tor IP rotator)
+  times out on some sites; scripts that must reach the internet use a direct connection
+  (`ProxyHandler({})`), as `curl` does by default.
