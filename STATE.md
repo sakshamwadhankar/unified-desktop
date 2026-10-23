@@ -6,6 +6,66 @@ corrects it after review.
 
 ## Now
 
+- **RECOVERY AUDIT (2026-10-24 02:45, manager, pi):** every chat that broke was read and
+  reconciled — **75 sessions** (6 Claude incl. 2 tester runs, 18 pi, 51 OpenCode): **21 broken**,
+  18 noise, 33 clean, 2 running. Full ledger, crash taxonomy, contradictions and salvage list in
+  new **`docs/RECOVERY_2026-10-24.md`**. Facts proved against files/git/build outputs, not
+  summaries: HEAD still `aad9bbf`; tree **38** paths at 02:30 (24 modified + 11 untracked +
+  `undefined/`); Android gate read from the **02:29** build outputs on this exact tree —
+  **214 tests / 0 failures / 3 skipped**, lint **0 errors / 142 warnings**, 3 APKs built; PC gate
+  **re-run by me at 02:40 — 101 passed / 0 failed** + `lock_crash` 1/0, clippy `-D warnings` exit
+  0 (the "100" in older notes is stale: the tree gained the stale-frame-skip test). ELF check on
+  today's APKs: every `lib*.so` `LOAD 0x4000` **except `arm64-v8a/libbox64.so` = `0x1000`**.
+  **No phone and no emulator** (`adb devices` empty at 02:28 and 02:38). **OpenCode is dead until
+  ~05:29** (free-limit 429, `retryAfterMs` 12,483 s at 02:01:58); the coder that is running is
+  **pi `01a16a89`** (started 02:22, Phase 12 final prompt, code-only: `p12nppwarm` candidate,
+  `skip_stale_frame` in `phase5.rs`/`view.rs`, both sides built). Nothing committed. Docs
+  corrected today: `context.md` §4 (Phase 12 not closed; Phase 13 ~90 % unproven),
+  `SKIPS.md` D12/D14 rows (code written, not skipped), `BUGS.md` manager note on B-115…B-121,
+  `managercontext.md` §17 (superseded pointer + true tree count), four prompts marked superseded.
+  Next: review the coder's candidate when it reports (no phone ⇒ no number, so it cannot close a
+  gate), then Phase 13 Part 1 live proof, then the three Phase 12 numbers.
+
+- **Chat recovery (2026-10-24 02:15, agent):** the previous pi manager session crashed in the pi
+  compaction footer (`addUsageToTotals`, `usage.total`) right after writing
+  `docs/PROMPT_CODER_PHASE12_FINAL_2026-10-24.md`; its last edit was truncated and never landed.
+  Completed now: the prompt's two stale section references (acceptance row 3 -> §3, row 4 -> §4)
+  are fixed, `managercontext.md` §17.3 no longer claims the 01:58 fix, and all prompt paths were
+  checked. **No code changed and no build/gate was run this session.** `adb devices` is empty:
+  no phone, no emulator. Next: hand the Phase 12 prompt to a fresh coder when the phone attaches.
+- **Continuation (2026-10-23 22:30, agent):** gates on the uncommitted Phase 13 tree PASS: Android
+  **214 tests / 0 failures / 3 skipped**, lint **0 errors**, assemble OK; PC **100 tests / 0** +
+  lock_crash 1/0, clippy `-D warnings` clean. Fixed in the tree: the compile error from the
+  crashed lane (`say` -> `P7Log.say`), tester **T-004** (predictive-back + legacy back on Settings),
+  **T-005** (Files delete uses a ShellRoot modal, no `AlertDialog`/window token), **T-006** (Files
+  rename/new-folder prompts, name rule `FileNames`, single-click selects a folder), **T-007**
+  (2 s focus reclaim + synthetic Alt removed; focus once at window creation), **T-003** Dobby is
+  now 16 KB aligned in both ABIs (`-Wl,-z,max-page-size=16384`); a box64 16 KB candidate was built
+  in WSL and ELF-checked (`win86/vendor/libbox64-16kb.so`, LOAD 0x4000, same 22,390,072 B) but
+  **is not shipped until Wine boots on the phone**. BUGS rows **B-117..B-121** added. Next: emulator
+  live check (T-004/5/6/7 + 16 KB dialog gone on x86_64), then phone (box64 swap + Wine), then
+  B-115/B-116 live proof and docs.
+- **MANAGER AUDIT (2026-10-24 01:30):** verified against the live tree. The 22:25 Android
+  evidence is on these exact sources: **214/0/3**, lint **0 errors**; PC re-run now **100/0** +
+  `lock_crash` 1/0, clippy `-D warnings` **0**, `git diff --check` **0**. APK ELF check: every
+  x86_64 `lib*.so` LOAD `0x4000`; arm64 still only `libbox64.so` `0x1000` (16 KB candidate built,
+  **not shipped**). The Part 1 coder (`ses_e963…`) died at **00:10:33** on the free-model 429
+  limit while chasing an out-of-scope receiver exit; it produced **no** Files/rename/Back/focus/
+  16 KB evidence (`p13fix/` has receiver logs only). No phone and no emulator attached since.
+  Verdict: **Phase 12 NOT complete** (gate FAILED: Test-shell 87.0 ms, Notepad++ 12.15 s, Wi-Fi
+  typing unmeasured); **Phase 13 NOT complete** (code ~90 %, uncommitted; live proof + box64 swap
+  + final phone round + docs close-out missing); **Phase 14 not started**. Nothing committed since
+  `aad9bbf`. **Owner 01:48:** phone on the same Wi-Fi, USB being attached; Phase 12 first. Next:
+  hand `docs/PROMPT_CODER_PHASE12_FINAL_2026-10-24.md`; Phase 13 Part 1 evidence
+  (`docs/PROMPT_CODER_CONTINUE_2026-10-24.md`) still outstanding. Commit only after the evidence
+  is verified. `adb devices` was still empty at 01:58.
+- **Handover docs (2026-10-23 19:37, agent):** `context.md` (project snapshot) and
+  `managercontext.md` (manager playbook/handover) are written and verified against the live
+  tree, recovering the previous pi session that crashed after writing them. **No code changed,
+  no build run this session.** The tree still carries the uncommitted B-115/B-116 +
+  B-109/B-110/B-112/B-113 + D12/D14 work (17 files, +837/-98, **not compiled/tested**); last
+  commit `aad9bbf`. Next: gates on that tree, live proof of B-115/B-116, then the tester
+  blockers T-003 (16 KB), T-005, T-006, T-007, T-004. Details: `context.md` §5-6.
 - **Phase 12 round 1 (2026-10-22 16:59-21:42): NOT PASSED (manager verdict 21:58).** Phone results:
   connect 0.94 s PASS; VS Code opens 13.48 s PASS (B-106); window drag 42 fps PASS; old-PC 2-core
   proxy ~36 fps, 0 dropped PASS (B-104 software decode fixed); governor's real 1080p -> 540p drop
@@ -52,10 +112,11 @@ corrects it after review.
   Cleanup verified: final no-hold APK installed, app force-stopped (0 processes, 0 services),
   receiver stopped, no adb forwards, stay_on=0, brightness=699, Wi-Fi OFF, tethering OFF,
   no rndis, battery 37 %, thermal 3, Gradle daemon stopped.
-- **Last updated:** 2026-10-22 21:40, agent (Phase 12 close-out).
-- **Next action:** manager decides B-103/B-105/B-107 fixes and the B2/B3 follow-up (cooled
-  phone; canvas->encoder stage for typing; app cold-start/prewarm for Notepad++), then commits.
-  Nothing here was committed.
+- **Last updated:** 2026-10-24 02:45, manager (recovery audit).
+- **Next action:** the pi coder `01a16a89` reports or stops on its "no phone" rule; review its
+  `p12nppwarm` + `skip_stale_frame` candidates (keep/revert, no gate claim without a phone);
+  then `docs/PROMPT_CODER_CONTINUE_2026-10-24.md` Part 1 live proof, then the three Phase 12
+  numbers. Commit only after the proofs. Record: `docs/RECOVERY_2026-10-24.md`.
 - **Phase 11 (2026-10-22 16:40): PASS with known limits.** Every PLAN gate part has
   phone proof (adb dev path; the day's Wi-Fi blocked phone<->laptop): phone sound plays on the PC
   (1000/1000 packets, 128 ms delay, B-101 fixed); copy/paste both ways (WebView/VS Code;
